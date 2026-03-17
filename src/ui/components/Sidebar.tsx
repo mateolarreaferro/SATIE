@@ -9,6 +9,7 @@ export interface PanelVisibility {
   space: boolean;
   voices: boolean;
   ai: boolean;
+  export: boolean;
 }
 
 interface SidebarProps {
@@ -25,6 +26,9 @@ interface SidebarProps {
   onSave?: () => void;
   canSave?: boolean;
   isSaved?: boolean;
+  isPublic?: boolean;
+  onTogglePublic?: () => void;
+  sketchId?: string;
 }
 
 export function Sidebar({
@@ -41,6 +45,9 @@ export function Sidebar({
   onSave,
   canSave,
   isSaved,
+  isPublic,
+  onTogglePublic,
+  sketchId,
 }: SidebarProps) {
   const { user, signInWithGitHub, signOut } = useAuth();
   const navigate = useNavigate();
@@ -239,9 +246,70 @@ export function Sidebar({
         </button>
       )}
 
+      {/* Public toggle */}
+      {canSave && onTogglePublic && (
+        <button
+          className="sidebar-btn"
+          onClick={() => { sfx.toggle(); onTogglePublic(); }}
+          onMouseEnter={sfx.hover}
+          title={isPublic ? 'Make private' : 'Make public (shareable)'}
+          style={{
+            width: 28,
+            height: 20,
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            opacity: isPublic ? 0.6 : 0.2,
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'opacity 0.15s',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke={isPublic ? '#1a3a2a' : '#1a3a2a'} strokeWidth="1.2">
+            <circle cx="7" cy="7" r="5.5"/>
+            <path d="M1.5 7 L12.5 7" strokeLinecap="round"/>
+            <ellipse cx="7" cy="7" rx="2.5" ry="5.5"/>
+          </svg>
+        </button>
+      )}
+
+      {/* Share link (only when public) */}
+      {isPublic && sketchId && (
+        <button
+          className="sidebar-btn"
+          onClick={() => {
+            navigator.clipboard.writeText(`${window.location.origin}/s/${sketchId}`);
+            sfx.save();
+          }}
+          onMouseEnter={sfx.hover}
+          title="Copy share link"
+          style={{
+            width: 28,
+            height: 20,
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            opacity: 0.35,
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'opacity 0.15s',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
+            <path d="M5.5 8.5 L8.5 5.5" strokeLinecap="round"/>
+            <path d="M6 9 C4.5 10.5 2.5 10.5 2 10 C1.5 9.5 1.5 7.5 3 6 L4.5 4.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M8 5 C9.5 3.5 11.5 3.5 12 4 C12.5 4.5 12.5 6.5 11 8 L9.5 9.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      )}
+
       {/* Panel toggles */}
       <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-        {(['score', 'samples', 'space', 'voices', 'ai'] as const).map((key) => {
+        {(['score', 'samples', 'space', 'voices', 'ai', 'export'] as const).map((key) => {
           const icon = {
             score: (
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
@@ -276,6 +344,13 @@ export function Sidebar({
                 <line x1="5" y1="9.5" x2="5" y2="11.5" strokeLinecap="round"/>
                 <line x1="9" y1="9.5" x2="9" y2="11.5" strokeLinecap="round"/>
                 <path d="M5 11.5 Q7 13 9 11.5" strokeLinecap="round"/>
+              </svg>
+            ),
+            export: (
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+                <path d="M7 1.5 L7 9" strokeLinecap="round"/>
+                <path d="M4 6.5 L7 9.5 L10 6.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M2 11.5 L12 11.5" strokeLinecap="round"/>
               </svg>
             ),
           }[key];

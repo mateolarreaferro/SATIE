@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { getUserSketches, createSketch, deleteSketch, updateSketch } from '../../lib/sketches';
 import { loadSettings, saveKey as saveSettingsKey } from '../../lib/userSettings';
@@ -312,7 +312,18 @@ export function Dashboard() {
       <div style={styles.container}>
         {/* Header */}
         <header style={styles.header}>
-          <div style={styles.logo}>satie</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div style={styles.logo}>satie</div>
+            <Link to="/explore" style={{
+              fontSize: '12px',
+              color: '#0a0a0a',
+              opacity: 0.35,
+              textDecoration: 'none',
+              fontWeight: 500,
+            }}>
+              explore
+            </Link>
+          </div>
 
           <div style={styles.headerRight}>
             {user ? (

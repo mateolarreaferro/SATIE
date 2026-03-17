@@ -19,6 +19,7 @@ import { WanderType } from '../../engine/core/Statement';
 import { registerTrajectoryFromLUT, getTrajectory } from '../../engine/spatial/Trajectories';
 import { cacheTrajectory } from '../../lib/trajectoryCache';
 import { generateTrajectoryFromPrompt, executeTrajectoryCode, postProcessTrajectory, type TrajectoryGenParams } from '../../engine/spatial/TrajectoryGen';
+import { ExportPanel } from '../components/ExportPanel';
 
 const DEFAULT_SCRIPT = `# satie\n`;
 const AUTOSAVE_DELAY = 2000;
@@ -210,6 +211,7 @@ export function Editor() {
   const [script, setScript] = useState(DEFAULT_SCRIPT);
   const [sketchTitle, setSketchTitle] = useState('Untitled');
   const [currentSketchId, setCurrentSketchId] = useState<string | undefined>(sketchId);
+  const [isPublic, setIsPublic] = useState(false);
   const [sampleEntries, setSampleEntries] = useState<SampleEntry[]>([]);
   const [generatingTrajectory, setGeneratingTrajectory] = useState<string | null>(null);
   const [spaceBgColor, setSpaceBgColor] = useState('#f4f3ee');
@@ -219,6 +221,7 @@ export function Editor() {
     space: true,
     voices: true,
     ai: true,
+    export: false,
   });
   const [aiTarget, setAiTarget] = useState<AITarget>('script');
 
@@ -234,6 +237,7 @@ export function Editor() {
         setScript(sketch.script);
         setSketchTitle(sketch.title);
         setCurrentSketchId(sketch.id);
+        setIsPublic(sketch.is_public);
 
         // Load samples from Supabase Storage (with IndexedDB cache)
         try {
@@ -410,12 +414,20 @@ export function Editor() {
     }
   }, [uiState.statements, handleGenerateTrajectory]);
 
+  const handleTogglePublic = useCallback(async () => {
+    const newValue = !isPublic;
+    setIsPublic(newValue);
+    if (currentSketchId) {
+      updateSketch(currentSketchId, { is_public: newValue }).catch(console.error);
+    }
+  }, [isPublic, currentSketchId]);
+
   const handleSave = useCallback(async () => {
     if (!user) return;
     let sketchIdForSamples = currentSketchId;
 
     if (currentSketchId) {
-      await updateSketch(currentSketchId, { script, title: sketchTitle });
+      await updateSketch(currentSketchId, { script, title: sketchTitle, is_public: isPublic });
     } else {
       const sketch = await createSketch(user.id, sketchTitle, script);
       setCurrentSketchId(sketch.id);
@@ -431,7 +443,7 @@ export function Editor() {
         console.error('[Editor] Failed to upload samples:', e);
       }
     }
-  }, [user, currentSketchId, script, sketchTitle]);
+  }, [user, currentSketchId, script, sketchTitle, isPublic]);
 
   return (
     <div style={{
@@ -456,6 +468,9 @@ export function Editor() {
         onSave={user ? handleSave : undefined}
         canSave={!!user}
         isSaved={!!currentSketchId}
+        isPublic={isPublic}
+        onTogglePublic={handleTogglePublic}
+        sketchId={currentSketchId}
       />
 
       <div style={{
@@ -600,6 +615,26 @@ export function Editor() {
               loadedSamples={sampleEntries.map(s => s.name)}
               target={aiTarget}
               onTargetChange={setAiTarget}
+            />
+          </Panel>
+        )}
+
+        {panels.export && (
+          <Panel
+            panelId="export"
+            title="Export"
+            defaultX={512}
+            defaultY={432}
+            defaultWidth={340}
+            defaultHeight={280}
+            minWidth={280}
+            minHeight={200}
+          >
+            <ExportPanel
+              script={script}
+              sampleBuffers={sampleBuffers}
+              isPlaying={uiState.isPlaying}
+              currentTime={uiState.currentTime}
             />
           </Panel>
         )}
