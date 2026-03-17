@@ -71,3 +71,33 @@ export async function getPublicSketches(): Promise<Sketch[]> {
   if (error) throw error;
   return data ?? [];
 }
+
+export async function getPublicSketch(id: string): Promise<Sketch | null> {
+  const { data, error } = await supabase
+    .from('sketches')
+    .select('*')
+    .eq('id', id)
+    .eq('is_public', true)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return data;
+}
+
+export async function forkSketch(userId: string, sketch: Sketch): Promise<Sketch> {
+  const { data, error } = await supabase
+    .from('sketches')
+    .insert({
+      user_id: userId,
+      title: `Fork of ${sketch.title}`,
+      script: sketch.script,
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
