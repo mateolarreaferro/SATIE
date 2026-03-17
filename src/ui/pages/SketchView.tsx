@@ -2,17 +2,22 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { getPublicSketch, forkSketch } from '../../lib/sketches';
+import { likeSketch, unlikeSketch, hasUserLiked } from '../../lib/likes';
+import { getProfileByUsername, getProfile } from '../../lib/profiles';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { SpatialViewport } from '../components/SpatialViewport';
-import type { Sketch } from '../../lib/supabase';
+import type { Sketch, Profile } from '../../lib/supabase';
 
 export function SketchView() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [sketch, setSketch] = useState<Sketch | null>(null);
+  const [author, setAuthor] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
 
   const {
     uiState,
@@ -27,17 +32,24 @@ export function SketchView() {
   useEffect(() => {
     if (!id) return;
     getPublicSketch(id)
-      .then((s) => {
+      .then(async (s) => {
         if (s) {
           setSketch(s);
+          setLikeCount(s.like_count ?? 0);
           document.title = `${s.title} — Satie`;
+          // Load author profile
+          getProfile(s.user_id).then(setAuthor).catch(() => {});
+          // Check if user liked
+          if (user) {
+            hasUserLiked(user.id, s.id).then(setLiked).catch(() => {});
+          }
         } else {
           setNotFound(true);
         }
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, user]);
 
   const handlePlay = useCallback(() => {
     if (!sketch) return;
@@ -48,6 +60,23 @@ export function SketchView() {
       play();
     }
   }, [sketch, uiState.isPlaying, loadScript, play, stop]);
+
+  const handleLike = useCallback(async () => {
+    if (!user || !sketch) return;
+    try {
+      if (liked) {
+        await unlikeSketch(user.id, sketch.id);
+        setLiked(false);
+        setLikeCount((c) => Math.max(0, c - 1));
+      } else {
+        await likeSketch(user.id, sketch.id);
+        setLiked(true);
+        setLikeCount((c) => c + 1);
+      }
+    } catch (e) {
+      console.error('Like failed:', e);
+    }
+  }, [user, sketch, liked]);
 
   const handleFork = useCallback(async () => {
     if (!user || !sketch) return;
@@ -95,8 +124,23 @@ export function SketchView() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {user && (
+            <button
+              onClick={handleLike}
+              style={{
+                ...styles.actionBtn,
+                color: liked ? '#8b0000' : '#0a0a0a',
+                borderColor: liked ? '#8b0000' : '#0a0a0a',
+              }}
+            >
+              {liked ? 'Liked' : 'Like'}{likeCount > 0 ? ` (${likeCount})` : ''}
+            </button>
+          )}
+          {!user && likeCount > 0 && (
+            <span style={{ fontSize: '11px', opacity: 0.35 }}>{likeCount} likes</span>
+          )}
+          {user && (
             <button onClick={handleFork} style={styles.actionBtn}>
-              Fork
+              Fork{(sketch.fork_count ?? 0) > 0 ? ` (${sketch.fork_count})` : ''}
             </button>
           )}
           {user && sketch.user_id === user.id && (
@@ -127,11 +171,26 @@ export function SketchView() {
           <h1 style={{ fontSize: '18px', fontWeight: 600, margin: '0 0 4px' }}>
             {sketch.title}
           </h1>
-          <div style={{ fontSize: '11px', opacity: 0.3, marginBottom: '20px' }}>
+          <div style={{ fontSize: '11px', opacity: 0.3, marginBottom: '4px' }}>
+            {author ? (
+              <Link
+                to={`/u/${author.username}`}
+                style={{ color: '#0a0a0a', textDecoration: 'none', opacity: 0.6 }}
+              >
+                @{author.username}
+              </Link>
+            ) : null}
+            {author ? ' · ' : ''}
             {new Date(sketch.updated_at).toLocaleDateString('en-US', {
               month: 'long', day: 'numeric', year: 'numeric',
             })}
           </div>
+          {sketch.forked_from && (
+            <div style={{ fontSize: '10px', opacity: 0.25, marginBottom: '4px', fontStyle: 'italic' }}>
+              forked from <Link to={`/s/${sketch.forked_from}`} style={{ color: '#0a0a0a' }}>another sketch</Link>
+            </div>
+          )}
+          <div style={{ height: '12px' }} />
 
           <div style={{
             fontSize: '10px',

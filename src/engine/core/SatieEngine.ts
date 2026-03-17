@@ -132,6 +132,9 @@ export class SatieEngine {
   get isPlaying(): boolean { return this._isPlaying; }
   get currentTime(): number { return this.clock.currentTime; }
 
+  /** Get all decoded audio buffers (for offline export). */
+  getAudioBuffers(): ReadonlyMap<string, AudioBuffer> { return this.audioBuffers; }
+
   /** Sync the AudioListener to the camera/observer position. */
   setListenerPosition(x: number, y: number, z: number): void {
     const l = this.ctx.listener;

@@ -5,6 +5,7 @@ import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import type { TrackState } from '../../engine';
+import { useHeadTracking } from '../hooks/useHeadTracking';
 
 const ViewportFocusContext = createContext<{ focused: boolean }>({ focused: false });
 const CameraResetContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
@@ -578,6 +579,7 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
   const [gridVisible, setGridVisible] = useState(true);
   const listenerPosRef = useRef(new THREE.Vector3(0, 0, 0));
   const cameraResetRef = useRef<(() => void) | null>(null);
+  const headTracking = useHeadTracking(onListenerRotate);
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -713,6 +715,31 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
             <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
           </svg>
         </button>
+        {headTracking.available && (
+          <button
+            onClick={headTracking.toggle}
+            title={headTracking.enabled ? 'Disable head tracking' : 'Enable head tracking (device orientation)'}
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 4,
+              background: headTracking.enabled ? uiColor : 'none',
+              border: `1.5px solid ${uiColor}40`,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              opacity: headTracking.enabled ? 1 : 0.7,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={headTracking.enabled ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2C8 2 6 5 6 8c0 2 1 3.5 1 5v1h10v-1c0-1.5 1-3 1-5 0-3-2-6-6-6z" />
+              <path d="M9 18h6" />
+              <path d="M10 22h4" />
+            </svg>
+          </button>
+        )}
         {onBgColorChange && (
           <div>
             <div

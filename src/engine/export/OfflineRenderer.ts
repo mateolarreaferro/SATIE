@@ -8,7 +8,7 @@
  *   - ambisonic-foa: 4ch First-Order Ambisonics (AmbiX: W, Y, Z, X)
  */
 
-import { parse } from '../core/SatieParser';
+import { parse, pathFor } from '../core/SatieParser';
 import { Statement, WanderType, isTrajectoryWanderType } from '../core/Statement';
 import { buildDSPChain, destroyDSPChain } from '../dsp/DSPChain';
 import { getTrajectory } from '../spatial/Trajectories';
@@ -18,7 +18,10 @@ export type RenderMode = 'stereo' | 'binaural' | 'ambisonic-foa';
 
 export interface RenderOptions {
   script: string;
+  /** Raw ArrayBuffer data (will be decoded into the offline context) */
   sampleBuffers: Map<string, ArrayBuffer>;
+  /** Pre-decoded AudioBuffers from the live engine (used as-is if sample rates match, re-encoded otherwise) */
+  decodedAudioBuffers?: ReadonlyMap<string, AudioBuffer>;
   duration: number;
   sampleRate?: number;
   mode: RenderMode;
@@ -36,7 +39,7 @@ export async function renderOffline(
   options: RenderOptions,
   onProgress?: (p: RenderProgress) => void,
 ): Promise<AudioBuffer> {
-  const { script, sampleBuffers, duration, mode } = options;
+  const { script, sampleBuffers, decodedAudioBuffers, duration, mode } = options;
   const sampleRate = options.sampleRate ?? 48000;
 
   onProgress?.({ phase: 'parsing', progress: 0 });
@@ -56,14 +59,43 @@ export async function renderOffline(
 
   onProgress?.({ phase: 'decoding', progress: 0.1 });
 
-  // Decode all referenced audio buffers
+  // Build the decoded buffer map from multiple sources:
+  // 1. Pre-decoded AudioBuffers from the live engine (most complete — includes gen audio)
+  // 2. Raw ArrayBuffers decoded into the offline context
   const decodedBuffers = new Map<string, AudioBuffer>();
-  const bufferEntries = Array.from(sampleBuffers.entries());
 
+  // First, copy pre-decoded buffers from the live engine
+  if (decodedAudioBuffers) {
+    for (const [name, buf] of decodedAudioBuffers) {
+      // AudioBuffers can be shared across contexts — the buffer data is just Float32Arrays
+      // We need to re-create them in the offline context's sample rate if they differ
+      if (buf.sampleRate === sampleRate) {
+        decodedBuffers.set(name, buf);
+      } else {
+        // Resample by creating a new buffer
+        const newBuf = offlineCtx.createBuffer(buf.numberOfChannels,
+          Math.ceil(buf.duration * sampleRate), sampleRate);
+        for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+          // Simple nearest-neighbor copy (good enough — proper resampling would use OfflineAudioContext)
+          const src = buf.getChannelData(ch);
+          const dst = newBuf.getChannelData(ch);
+          const ratio = buf.sampleRate / sampleRate;
+          for (let i = 0; i < dst.length; i++) {
+            const srcIdx = Math.min(Math.floor(i * ratio), src.length - 1);
+            dst[i] = src[srcIdx];
+          }
+        }
+        decodedBuffers.set(name, newBuf);
+      }
+    }
+  }
+
+  // Then decode raw ArrayBuffers (overrides any pre-decoded with same name)
+  const bufferEntries = Array.from(sampleBuffers.entries());
   for (let i = 0; i < bufferEntries.length; i++) {
     const [name, arrayBuffer] = bufferEntries[i];
+    if (decodedBuffers.has(name)) continue; // already have from engine
     try {
-      // decodeAudioData consumes the buffer, so we need to copy it
       const copy = arrayBuffer.slice(0);
       const decoded = await offlineCtx.decodeAudioData(copy);
       decodedBuffers.set(name, decoded);
@@ -75,13 +107,20 @@ export async function renderOffline(
 
   onProgress?.({ phase: 'rendering', progress: 0.3 });
 
+  // Log buffer state for debugging
+  console.log(`[OfflineRenderer] ${statements.length} statements, ${decodedBuffers.size} decoded buffers`);
+  console.log('[OfflineRenderer] Buffer keys:', Array.from(decodedBuffers.keys()));
+  console.log('[OfflineRenderer] Statement clips:', statements.map(s => `"${s.clip}" → pathFor="${pathFor(s.clip)}"`));
+
   // Create master output
+  let sourcesScheduled: number;
   if (mode === 'ambisonic-foa') {
-    renderAmbisonicFOA(offlineCtx, statements, decodedBuffers, duration);
+    sourcesScheduled = renderAmbisonicFOA(offlineCtx, statements, decodedBuffers, duration);
   } else {
-    renderStereoOrBinaural(offlineCtx, statements, decodedBuffers, duration, mode);
+    sourcesScheduled = renderStereoOrBinaural(offlineCtx, statements, decodedBuffers, duration, mode);
   }
 
+  console.log(`[OfflineRenderer] ${sourcesScheduled} sources scheduled for ${duration}s render`);
   onProgress?.({ phase: 'rendering', progress: 0.5 });
 
   // Render
@@ -100,16 +139,17 @@ function renderStereoOrBinaural(
   buffers: Map<string, AudioBuffer>,
   duration: number,
   mode: RenderMode,
-): void {
+): number {
   const masterGain = ctx.createGain();
   masterGain.connect(ctx.destination);
+  let sourcesScheduled = 0;
 
   for (const stmt of statements) {
     if (stmt.mute) continue;
 
-    const audioBuffer = buffers.get(stmt.clip);
+    const audioBuffer = resolveBuffer(buffers, stmt.clip);
     if (!audioBuffer) {
-      console.warn(`[OfflineRenderer] Missing buffer for "${stmt.clip}"`);
+      console.warn(`[OfflineRenderer] Missing buffer for "${stmt.clip}" (pathFor="${pathFor(stmt.clip)}")`);
       continue;
     }
 
@@ -181,8 +221,12 @@ function renderStereoOrBinaural(
       } else if (stmt.kind === 'loop') {
         source.stop(t + voiceDuration);
       }
+
+      sourcesScheduled++;
     }
   }
+
+  return sourcesScheduled;
 }
 
 // ── Ambisonic FOA rendering ─────────────────────────────────
@@ -192,15 +236,16 @@ function renderAmbisonicFOA(
   statements: Statement[],
   buffers: Map<string, AudioBuffer>,
   duration: number,
-): void {
+): number {
   // 4-channel merger: W(0), Y(1), Z(2), X(3)
   const merger = ctx.createChannelMerger(4);
   merger.connect(ctx.destination);
+  let sourcesScheduled = 0;
 
   for (const stmt of statements) {
     if (stmt.mute) continue;
 
-    const audioBuffer = buffers.get(stmt.clip);
+    const audioBuffer = resolveBuffer(buffers, stmt.clip);
     if (!audioBuffer) continue;
 
     const startTime = stmt.start.sample();
@@ -275,11 +320,24 @@ function renderAmbisonicFOA(
       const voiceDuration = computeVoiceDuration(stmt, audioBuffer.duration, duration - t);
       source.start(t);
       source.stop(t + voiceDuration);
+
+      sourcesScheduled++;
     }
   }
+
+  return sourcesScheduled;
 }
 
 // ── Helpers ─────────────────────────────────────────────────
+
+/**
+ * Resolve an audio buffer by clip name, matching the engine's lookup logic:
+ * try pathFor(clip) first, then raw clip name.
+ */
+function resolveBuffer(buffers: Map<string, AudioBuffer>, clip: string): AudioBuffer | undefined {
+  const resolved = pathFor(clip);
+  return buffers.get(resolved) ?? buffers.get(clip);
+}
 
 function computeStartTimes(
   stmt: Statement,

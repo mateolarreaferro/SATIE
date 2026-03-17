@@ -1,16 +1,18 @@
 import { useState, useCallback, useRef } from 'react';
 import { renderOffline, encodeWAV, downloadBlob, type RenderMode, type RenderProgress } from '../../engine/export';
+import type { SatieEngine } from '../../engine';
 
 interface ExportPanelProps {
   script: string;
   sampleBuffers: React.RefObject<Map<string, ArrayBuffer>>;
+  engineRef: React.RefObject<SatieEngine | null>;
   isPlaying: boolean;
   currentTime: number;
 }
 
 type ExportFormat = 'stereo' | 'binaural' | 'ambisonic-foa' | 'video';
 
-export function ExportPanel({ script, sampleBuffers, isPlaying, currentTime }: ExportPanelProps) {
+export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, currentTime }: ExportPanelProps) {
   const [format, setFormat] = useState<ExportFormat>('stereo');
   const [duration, setDuration] = useState(30);
   const [sampleRate, setSampleRate] = useState(48000);
@@ -30,10 +32,14 @@ export function ExportPanel({ script, sampleBuffers, isPlaying, currentTime }: E
 
     try {
       const mode: RenderMode = format;
+      // Pull decoded buffers from the live engine (includes gen audio)
+      const engineBuffers = engineRef.current?.getAudioBuffers();
+
       const result = await renderOffline(
         {
           script,
           sampleBuffers: sampleBuffers.current ?? new Map(),
+          decodedAudioBuffers: engineBuffers,
           duration,
           sampleRate,
           mode,

@@ -17,6 +17,33 @@ export interface Sketch {
   title: string;
   script: string;
   is_public: boolean;
+  forked_from: string | null;
+  like_count: number;
+  fork_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface Profile {
+  id: string;
+  username: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  bio: string | null;
+  created_at: string;
+}
+
+export interface SketchVersion {
+  id: string;
+  sketch_id: string;
+  script: string;
+  title: string;
+  version_number: number;
+  created_at: string;
+}
+
+export interface SketchLike {
+  user_id: string;
+  sketch_id: string;
+  created_at: string;
 }

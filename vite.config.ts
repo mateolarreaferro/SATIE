@@ -11,4 +11,15 @@ export default defineConfig({
       '@api': path.resolve(__dirname, 'src/api'),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-three': ['three', '@react-three/fiber', '@react-three/drei', '@react-three/postprocessing'],
+          'vendor-monaco': ['monaco-editor'],
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
+    },
+  },
 });

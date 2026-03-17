@@ -59,11 +59,15 @@ function SketchCard({ sketch, onClick }: { sketch: Sketch; onClick: () => void }
       </pre>
 
       <div style={{
+        display: 'flex',
+        gap: '8px',
         fontSize: '10px',
         opacity: 0.3,
         color: '#0a0a0a',
       }}>
-        {formatDate(sketch.updated_at)}
+        <span>{formatDate(sketch.updated_at)}</span>
+        {(sketch.like_count ?? 0) > 0 && <span>{sketch.like_count} likes</span>}
+        {(sketch.fork_count ?? 0) > 0 && <span>{sketch.fork_count} forks</span>}
       </div>
     </div>
   );

@@ -94,10 +94,15 @@ export async function forkSketch(userId: string, sketch: Sketch): Promise<Sketch
       user_id: userId,
       title: `Fork of ${sketch.title}`,
       script: sketch.script,
+      forked_from: sketch.id,
     })
     .select()
     .single();
 
   if (error) throw error;
+
+  // Increment fork_count on the source sketch (non-blocking)
+  Promise.resolve(supabase.rpc('increment_fork_count', { sketch_id: sketch.id })).catch(() => {});
+
   return data;
 }

@@ -19,7 +19,12 @@ import { WanderType } from '../../engine/core/Statement';
 import { registerTrajectoryFromLUT, getTrajectory } from '../../engine/spatial/Trajectories';
 import { cacheTrajectory } from '../../lib/trajectoryCache';
 import { generateTrajectoryFromPrompt, executeTrajectoryCode, postProcessTrajectory, type TrajectoryGenParams } from '../../engine/spatial/TrajectoryGen';
+import { captureCanvasThumbnail, uploadThumbnail } from '../../lib/thumbnailCapture';
+import { supabase } from '../../lib/supabase';
+import { VersionsPanel } from '../components/VersionsPanel';
+import { saveVersion } from '../../lib/versions';
 import { ExportPanel } from '../components/ExportPanel';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 
 const DEFAULT_SCRIPT = `# satie\n`;
 const AUTOSAVE_DELAY = 2000;
@@ -193,6 +198,7 @@ export function Editor() {
   const { sketchId } = useParams<{ sketchId?: string }>();
   const { user } = useAuth();
   const {
+    engine: engineRef,
     uiState,
     tracksRef,
     loadScript,
@@ -222,6 +228,7 @@ export function Editor() {
     voices: true,
     ai: true,
     export: false,
+    versions: false,
   });
   const [aiTarget, setAiTarget] = useState<AITarget>('script');
 
@@ -414,6 +421,12 @@ export function Editor() {
     }
   }, [uiState.statements, handleGenerateTrajectory]);
 
+  const handleRestoreVersion = useCallback((restoredScript: string, restoredTitle: string) => {
+    setScript(restoredScript);
+    setSketchTitle(restoredTitle);
+    loadScript(restoredScript);
+  }, [loadScript]);
+
   const handleTogglePublic = useCallback(async () => {
     const newValue = !isPublic;
     setIsPublic(newValue);
@@ -442,6 +455,20 @@ export function Editor() {
       } catch (e) {
         console.error('[Editor] Failed to upload samples:', e);
       }
+    }
+
+    // Save version snapshot (non-blocking)
+    if (sketchIdForSamples) {
+      saveVersion(sketchIdForSamples, sketchTitle, script).catch(() => {});
+    }
+
+    // Capture and upload thumbnail (non-blocking)
+    if (sketchIdForSamples) {
+      captureCanvasThumbnail().then(async (blob) => {
+        if (blob) {
+          await uploadThumbnail(supabase, user.id, sketchIdForSamples!, blob);
+        }
+      }).catch(() => {});
     }
   }, [user, currentSketchId, script, sketchTitle, isPublic]);
 
@@ -549,13 +576,15 @@ export function Editor() {
             minWidth={240}
             minHeight={160}
           >
-            <AssetPanel
-              samples={sampleEntries}
-              onLoadBuffer={handleLoadBuffer}
-              onDeleteSample={handleDeleteSample}
-              onGenerateTrajectory={handleGenerateTrajectory}
-              generatingTrajectory={generatingTrajectory}
-            />
+            <ErrorBoundary name="Assets">
+              <AssetPanel
+                samples={sampleEntries}
+                onLoadBuffer={handleLoadBuffer}
+                onDeleteSample={handleDeleteSample}
+                onGenerateTrajectory={handleGenerateTrajectory}
+                generatingTrajectory={generatingTrajectory}
+              />
+            </ErrorBoundary>
           </Panel>
         )}
 
@@ -570,7 +599,9 @@ export function Editor() {
             minWidth={280}
             minHeight={200}
           >
-            <SpatialViewport tracksRef={tracksRef} bgColor={spaceBgColor} onBgColorChange={setSpaceBgColor} onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
+            <ErrorBoundary name="Space">
+              <SpatialViewport tracksRef={tracksRef} bgColor={spaceBgColor} onBgColorChange={setSpaceBgColor} onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
+            </ErrorBoundary>
           </Panel>
         )}
 
@@ -585,13 +616,15 @@ export function Editor() {
             minWidth={160}
             minHeight={72}
           >
-            <VoicesPanel
-              statements={uiState.statements}
-              mutedIndices={uiState.mutedIndices}
-              soloedIndices={uiState.soloedIndices}
-              onToggleMute={toggleMute}
-              onToggleSolo={toggleSolo}
-            />
+            <ErrorBoundary name="Voices">
+              <VoicesPanel
+                statements={uiState.statements}
+                mutedIndices={uiState.mutedIndices}
+                soloedIndices={uiState.soloedIndices}
+                onToggleMute={toggleMute}
+                onToggleSolo={toggleSolo}
+              />
+            </ErrorBoundary>
           </Panel>
         )}
 
@@ -607,15 +640,17 @@ export function Editor() {
             minHeight={160}
             borderColor="#1a3a2a"
           >
-            <AIPanel
-              onGenerate={handleAIGenerate}
-              onGenerateSample={handleAISampleGenerate}
-              onGenerateTrajectory={handleGenerateTrajectory}
-              currentScript={script}
-              loadedSamples={sampleEntries.map(s => s.name)}
-              target={aiTarget}
-              onTargetChange={setAiTarget}
-            />
+            <ErrorBoundary name="AI">
+              <AIPanel
+                onGenerate={handleAIGenerate}
+                onGenerateSample={handleAISampleGenerate}
+                onGenerateTrajectory={handleGenerateTrajectory}
+                currentScript={script}
+                loadedSamples={sampleEntries.map(s => s.name)}
+                target={aiTarget}
+                onTargetChange={setAiTarget}
+              />
+            </ErrorBoundary>
           </Panel>
         )}
 
@@ -630,12 +665,35 @@ export function Editor() {
             minWidth={280}
             minHeight={200}
           >
-            <ExportPanel
-              script={script}
-              sampleBuffers={sampleBuffers}
-              isPlaying={uiState.isPlaying}
-              currentTime={uiState.currentTime}
-            />
+            <ErrorBoundary name="Export">
+              <ExportPanel
+                script={script}
+                sampleBuffers={sampleBuffers}
+                engineRef={engineRef}
+                isPlaying={uiState.isPlaying}
+                currentTime={uiState.currentTime}
+              />
+            </ErrorBoundary>
+          </Panel>
+        )}
+
+        {panels.versions && (
+          <Panel
+            panelId="versions"
+            title="Versions"
+            defaultX={768}
+            defaultY={16}
+            defaultWidth={280}
+            defaultHeight={300}
+            minWidth={200}
+            minHeight={140}
+          >
+            <ErrorBoundary name="Versions">
+              <VersionsPanel
+                sketchId={currentSketchId}
+                onRestore={handleRestoreVersion}
+              />
+            </ErrorBoundary>
           </Panel>
         )}
 
