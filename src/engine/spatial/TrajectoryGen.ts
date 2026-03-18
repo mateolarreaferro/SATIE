@@ -1,7 +1,16 @@
 /**
- * Trajectory generation via Claude API.
+ * Trajectory generation via AI providers (Claude, OpenAI, Gemini).
  * Produces JavaScript code that generates a Float32Array LUT for spatial trajectories.
  */
+
+/** Interface matching the provider shape — avoids importing React-side lib in engine code. */
+export interface TrajectoryAIProvider {
+  call(options: {
+    systemPrompt: string;
+    messages: { role: 'user' | 'assistant'; content: string }[];
+    maxTokens?: number;
+  }): Promise<string>;
+}
 
 const TRAJECTORY_GEN_SYSTEM_PROMPT = `You are a spatial trajectory designer for a 3D audio spatialization engine.
 
@@ -50,8 +59,6 @@ Example for a simple orbit:
 Example for a bird that perches:
 {"name":"bird_flight","code":"const out = new Float32Array(SIZE * 3);\\nlet x=0.5,y=0.7,z=0.5,vx=0,vy=0,vz=0;\\nlet state='fly',timer=0;\\nlet s=SEED||42;\\nfunction rand(){s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;}\\nfor(let i=0;i<SIZE;i++){\\ntimer--;\\nif(timer<=0){state=rand()>0.7?'perch':'fly';timer=Math.floor(rand()*800+200);}\\nif(state==='fly'){vx+=(rand()-0.5)*0.002;vy+=(rand()-0.5)*0.001;vz+=(rand()-0.5)*0.002;vx*=0.99;vy*=0.99;vz*=0.99;x+=vx;y+=vy;z+=vz;}else{vx*=0.95;vy*=0.95;vz*=0.95;x+=vx;y+=vy;z+=vz;}\\nx=Math.max(0,Math.min(1,x));y=Math.max(0,Math.min(1,y));z=Math.max(0,Math.min(1,z));\\nout[i*3]=x;out[i*3+1]=y;out[i*3+2]=z;}\\nreturn out;"}`;
 
-const ORCHESTRATOR_MODEL = 'claude-sonnet-4-20250514';
-
 export interface TrajectorySpec {
   name: string;
   code: string;
@@ -67,7 +74,7 @@ export interface TrajectoryGenParams {
 }
 
 export async function generateTrajectoryFromPrompt(
-  apiKey: string,
+  provider: TrajectoryAIProvider,
   userPrompt: string,
   params?: TrajectoryGenParams,
 ): Promise<TrajectorySpec> {
@@ -86,25 +93,12 @@ export async function generateTrajectoryFromPrompt(
     }
   }
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: ORCHESTRATOR_MODEL,
-      max_tokens: 2048,
-      system: TRAJECTORY_GEN_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: enriched }],
-    }),
+  const raw = await provider.call({
+    systemPrompt: TRAJECTORY_GEN_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: enriched }],
+    maxTokens: 2048,
   });
 
-  if (!response.ok) throw new Error(`API ${response.status}`);
-  const data = await response.json();
-  const raw = data.content?.[0]?.text ?? '';
   const cleaned = raw.trim().replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
   const parsed = JSON.parse(cleaned);
 

@@ -99,6 +99,7 @@ export class SatieEngine {
   private clock: SatieDSPClock;
   private scheduler: SatieScheduler;
   private masterGain: GainNode;
+  private limiter: DynamicsCompressorNode;
 
   private tracks: Map<string, TrackState> = new Map();
   /** Shared array updated in-place. Three.js reads this directly via ref. */
@@ -125,7 +126,16 @@ export class SatieEngine {
     this.clock = new SatieDSPClock(this.ctx);
     this.scheduler = new SatieScheduler(this.clock);
     this.masterGain = this.ctx.createGain();
-    this.masterGain.connect(this.ctx.destination);
+
+    // Master limiter — prevents clipping when many voices overlap
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -3;   // start compressing at -3 dB
+    this.limiter.knee.value = 6;         // soft knee for transparent limiting
+    this.limiter.ratio.value = 20;       // near-brick-wall limiting
+    this.limiter.attack.value = 0.001;   // fast attack to catch transients
+    this.limiter.release.value = 0.05;   // quick release for transparency
+    this.masterGain.connect(this.limiter);
+    this.limiter.connect(this.ctx.destination);
   }
 
   get audioContext(): AudioContext { return this.ctx; }

@@ -189,9 +189,11 @@ function renderStereoOrBinaural(
       panner.positionY.setValueAtTime(pos.y, 0);
       panner.positionZ.setValueAtTime(pos.z, 0);
 
-      // Schedule trajectory position changes if applicable
-      if (isTrajectoryWanderType(stmt.wanderType) || stmt.wanderType === WanderType.Walk || stmt.wanderType === WanderType.Fly) {
+      // Schedule position changes if applicable
+      if (isTrajectoryWanderType(stmt.wanderType)) {
         scheduleTrajectoryPositions(panner, stmt, t, duration);
+      } else if (stmt.wanderType === WanderType.Walk || stmt.wanderType === WanderType.Fly) {
+        scheduleWanderPositions(panner, stmt, t, duration);
       }
 
       // DSP chain
@@ -311,9 +313,11 @@ function renderAmbisonicFOA(
       zGain.connect(merger, 0, 2);
       xGain.connect(merger, 0, 3);
 
-      // Schedule trajectory-based gain automation for moving sources
-      if (isTrajectoryWanderType(stmt.wanderType) || stmt.wanderType === WanderType.Walk || stmt.wanderType === WanderType.Fly) {
+      // Schedule position-based gain automation for moving sources
+      if (isTrajectoryWanderType(stmt.wanderType)) {
         scheduleAmbisonicTrajectory(ctx, wGain, yGain, zGain, xGain, stmt, t, duration);
+      } else if (stmt.wanderType === WanderType.Walk || stmt.wanderType === WanderType.Fly) {
+        scheduleAmbisonicWander(ctx, wGain, yGain, zGain, xGain, stmt, t, duration);
       }
 
       // Schedule
@@ -471,6 +475,45 @@ function scheduleTrajectoryPositions(
 }
 
 /**
+ * Schedule panner position changes for walk/fly wander (sinusoidal movement).
+ * Mirrors the live engine's calculateWanderPositionInPlace logic.
+ */
+function scheduleWanderPositions(
+  panner: PannerNode,
+  stmt: Statement,
+  startTime: number,
+  totalDuration: number,
+): void {
+  const wanderHz = stmt.wanderHz.sample();
+  const wanderSpeed = wanderHz * 0.01 * 2 * Math.PI;
+  const seed = Math.random() * 1000;
+  const px1 = seed * 1.0, px2 = seed * 2.3;
+  const py1 = seed * 3.7, py2 = seed * 0.5;
+  const pz1 = seed * 1.3, pz2 = seed * 4.2;
+
+  const fps = 30;
+  const step = 1 / fps;
+  const isWalk = stmt.wanderType === WanderType.Walk;
+
+  for (let t = startTime; t < totalDuration; t += step) {
+    const elapsed = t - startTime;
+    const wt = elapsed * wanderSpeed;
+
+    const nx = (Math.sin(wt + px1) + Math.sin(wt * 1.3 + px2) + Math.sin(wt * 0.7 + px1 * 0.3)) / 6 + 0.5;
+    const ny = (Math.sin(wt * 0.8 + py1) + Math.sin(wt * 1.1 + py2) + Math.sin(wt * 0.6 + py1 * 0.4)) / 6 + 0.5;
+    const nz = (Math.sin(wt * 1.2 + pz1) + Math.sin(wt * 0.7 + pz2) + Math.sin(wt * 0.9 + pz1 * 0.6)) / 6 + 0.5;
+
+    const x = stmt.areaMin.x + (stmt.areaMax.x - stmt.areaMin.x) * nx;
+    const y = isWalk ? 0 : stmt.areaMin.y + (stmt.areaMax.y - stmt.areaMin.y) * ny;
+    const z = stmt.areaMin.z + (stmt.areaMax.z - stmt.areaMin.z) * nz;
+
+    panner.positionX.setValueAtTime(x, t);
+    panner.positionY.setValueAtTime(y, t);
+    panner.positionZ.setValueAtTime(z, t);
+  }
+}
+
+/**
  * Schedule ambisonic gain changes along a trajectory.
  * Updates W, Y, Z, X gain values at 30fps.
  */
@@ -508,6 +551,54 @@ function scheduleAmbisonicTrajectory(
     yGain.gain.setValueAtTime(gains.y * atten, t);
     zGain.gain.setValueAtTime(gains.z * atten, t);
     xGain.gain.setValueAtTime(gains.x * atten, t);
+  }
+}
+
+/**
+ * Schedule ambisonic gain changes for walk/fly wander (sinusoidal movement).
+ * Mirrors the live engine's calculateWanderPositionInPlace logic.
+ */
+function scheduleAmbisonicWander(
+  ctx: OfflineAudioContext,
+  wGain: GainNode,
+  yGain: GainNode,
+  zGain: GainNode,
+  xGain: GainNode,
+  stmt: Statement,
+  startTime: number,
+  totalDuration: number,
+): void {
+  const wanderHz = stmt.wanderHz.sample();
+  const wanderSpeed = wanderHz * 0.01 * 2 * Math.PI;
+  const seed = Math.random() * 1000;
+  const px1 = seed * 1.0, px2 = seed * 2.3;
+  const py1 = seed * 3.7, py2 = seed * 0.5;
+  const pz1 = seed * 1.3, pz2 = seed * 4.2;
+
+  const fps = 30;
+  const step = 1 / fps;
+  const isWalk = stmt.wanderType === WanderType.Walk;
+
+  for (let time = startTime; time < totalDuration; time += step) {
+    const elapsed = time - startTime;
+    const t = elapsed * wanderSpeed;
+
+    let nx = (Math.sin(t + px1) + Math.sin(t * 1.3 + px2) + Math.sin(t * 0.7 + px1 * 0.3)) / 6 + 0.5;
+    let ny = (Math.sin(t * 0.8 + py1) + Math.sin(t * 1.1 + py2) + Math.sin(t * 0.6 + py1 * 0.4)) / 6 + 0.5;
+    let nz = (Math.sin(t * 1.2 + pz1) + Math.sin(t * 0.7 + pz2) + Math.sin(t * 0.9 + pz1 * 0.6)) / 6 + 0.5;
+
+    const x = stmt.areaMin.x + (stmt.areaMax.x - stmt.areaMin.x) * nx;
+    const y = isWalk ? 0 : stmt.areaMin.y + (stmt.areaMax.y - stmt.areaMin.y) * ny;
+    const z = stmt.areaMin.z + (stmt.areaMax.z - stmt.areaMin.z) * nz;
+
+    const gains = computeFOAGains(x, y, z);
+    const dist = Math.sqrt(x * x + y * y + z * z);
+    const atten = distanceAttenuation(dist);
+
+    wGain.gain.setValueAtTime(gains.w * atten, time);
+    yGain.gain.setValueAtTime(gains.y * atten, time);
+    zGain.gain.setValueAtTime(gains.z * atten, time);
+    xGain.gain.setValueAtTime(gains.x * atten, time);
   }
 }
 

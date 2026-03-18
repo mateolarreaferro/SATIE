@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { getPublicSketch, forkSketch } from '../../lib/sketches';
 import { likeSketch, unlikeSketch, hasUserLiked } from '../../lib/likes';
 import { getProfileByUsername, getProfile } from '../../lib/profiles';
+import { loadSketchSamples } from '../../lib/sampleStorage';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { SpatialViewport } from '../components/SpatialViewport';
 import type { Sketch, Profile } from '../../lib/supabase';
@@ -22,12 +23,15 @@ export function SketchView() {
   const {
     uiState,
     tracksRef,
+    engine: engineRef,
     loadScript,
     play,
     stop,
     setListenerPosition,
     setListenerOrientation,
   } = useSatieEngine();
+
+  const samplesLoaded = useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -43,13 +47,20 @@ export function SketchView() {
           if (user) {
             hasUserLiked(user.id, s.id).then(setLiked).catch(() => {});
           }
+          // Load samples for this sketch so audio can play
+          if (!samplesLoaded.current && engineRef.current) {
+            samplesLoaded.current = true;
+            loadSketchSamples(s.id, (name, data) =>
+              engineRef.current!.loadAudioBuffer(name, data),
+            ).catch(e => console.warn('[SketchView] Failed to load samples:', e));
+          }
         } else {
           setNotFound(true);
         }
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
-  }, [id, user]);
+  }, [id, user, engineRef]);
 
   const handlePlay = useCallback(() => {
     if (!sketch) return;
@@ -156,7 +167,7 @@ export function SketchView() {
 
       {/* Main content */}
       <div style={styles.main}>
-        {/* Viewport */}
+        {/* Viewport — full width */}
         <div style={styles.viewport}>
           <SpatialViewport
             tracksRef={tracksRef}
@@ -166,64 +177,52 @@ export function SketchView() {
           />
         </div>
 
-        {/* Info + Script */}
-        <div style={styles.info}>
-          <h1 style={{ fontSize: '18px', fontWeight: 600, margin: '0 0 4px' }}>
-            {sketch.title}
-          </h1>
-          <div style={{ fontSize: '11px', opacity: 0.3, marginBottom: '4px' }}>
-            {author ? (
-              <Link
-                to={`/u/${author.username}`}
-                style={{ color: '#0a0a0a', textDecoration: 'none', opacity: 0.6 }}
-              >
-                @{author.username}
-              </Link>
-            ) : null}
-            {author ? ' · ' : ''}
-            {new Date(sketch.updated_at).toLocaleDateString('en-US', {
-              month: 'long', day: 'numeric', year: 'numeric',
-            })}
-          </div>
-          {sketch.forked_from && (
-            <div style={{ fontSize: '10px', opacity: 0.25, marginBottom: '4px', fontStyle: 'italic' }}>
-              forked from <Link to={`/s/${sketch.forked_from}`} style={{ color: '#0a0a0a' }}>another sketch</Link>
+        {/* Below viewport: info left, script right */}
+        <div style={styles.belowViewport}>
+          {/* Left column: title + meta */}
+          <div style={styles.meta}>
+            <h1 style={{ fontSize: '22px', fontWeight: 600, margin: '0 0 6px', letterSpacing: '-0.01em' }}>
+              {sketch.title}
+            </h1>
+            <div style={{ fontSize: '12px', opacity: 0.35, marginBottom: '4px' }}>
+              {author ? (
+                <Link
+                  to={`/u/${author.username}`}
+                  style={{ color: '#0a0a0a', textDecoration: 'none', opacity: 0.7 }}
+                >
+                  @{author.username}
+                </Link>
+              ) : null}
+              {author ? ' · ' : ''}
+              {new Date(sketch.updated_at).toLocaleDateString('en-US', {
+                month: 'long', day: 'numeric', year: 'numeric',
+              })}
             </div>
-          )}
-          <div style={{ height: '12px' }} />
+            {sketch.forked_from && (
+              <div style={{ fontSize: '10px', opacity: 0.25, fontStyle: 'italic' }}>
+                forked from <Link to={`/s/${sketch.forked_from}`} style={{ color: '#0a0a0a' }}>another sketch</Link>
+              </div>
+            )}
 
-          <div style={{
-            fontSize: '10px',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            opacity: 0.3,
-            marginBottom: '8px',
-          }}>
-            Script
+            {/* Embed code */}
+            <div style={{ marginTop: '24px' }}>
+              <div style={styles.sectionLabel}>Embed</div>
+              <input
+                readOnly
+                value={`<iframe src="${window.location.origin}/embed/${sketch.id}" width="600" height="400" frameborder="0"></iframe>`}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+                style={styles.embedInput}
+              />
+            </div>
           </div>
-          <pre style={styles.script}>
-            {sketch.script}
-          </pre>
 
-          {/* Embed code */}
-          <div style={{
-            fontSize: '10px',
-            fontWeight: 600,
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            opacity: 0.3,
-            marginTop: '20px',
-            marginBottom: '8px',
-          }}>
-            Embed
+          {/* Right column: script */}
+          <div style={styles.scriptCol}>
+            <div style={styles.sectionLabel}>Script</div>
+            <pre style={styles.script}>
+              {sketch.script}
+            </pre>
           </div>
-          <input
-            readOnly
-            value={`<iframe src="${window.location.origin}/embed/${sketch.id}" width="600" height="400" frameborder="0"></iframe>`}
-            onClick={(e) => (e.target as HTMLInputElement).select()}
-            style={styles.embedInput}
-          />
         </div>
       </div>
     </div>
@@ -283,46 +282,63 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.5,
   },
   main: {
-    maxWidth: 1100,
+    maxWidth: 1000,
     margin: '0 auto',
-    padding: '32px',
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '32px',
+    padding: '28px 32px',
   },
   viewport: {
-    aspectRatio: '4/3',
+    width: '100%',
+    aspectRatio: '21/9',
     borderRadius: 16,
     overflow: 'hidden',
     border: '1.5px solid #d0cdc4',
     background: '#f4f3ee',
+    marginBottom: '24px',
   },
-  info: {
+  belowViewport: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1.2fr',
+    gap: '32px',
+    alignItems: 'start',
+  },
+  meta: {
+    paddingTop: '2px',
+  },
+  scriptCol: {
     overflow: 'hidden',
+  },
+  sectionLabel: {
+    fontSize: '9px',
+    fontWeight: 600,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.08em',
+    opacity: 0.25,
+    marginBottom: '8px',
   },
   script: {
     fontSize: '11px',
     fontFamily: "'SF Mono', 'Consolas', monospace",
     background: '#faf9f6',
-    border: '1px solid #d0cdc4',
+    border: '1px solid #e0ddd4',
     borderRadius: 10,
     padding: '16px',
     overflow: 'auto',
-    maxHeight: 360,
-    whiteSpace: 'pre-wrap',
+    maxHeight: 400,
+    whiteSpace: 'pre-wrap' as const,
     margin: 0,
-    color: '#0a0a0a',
+    color: '#1a1a1a',
+    lineHeight: 1.5,
   },
   embedInput: {
     width: '100%',
     padding: '8px 10px',
-    border: '1px solid #d0cdc4',
+    border: '1px solid #e0ddd4',
     borderRadius: 6,
     fontSize: '10px',
     fontFamily: "'SF Mono', monospace",
     background: '#faf9f6',
     color: '#0a0a0a',
     outline: 'none',
-    boxSizing: 'border-box',
+    boxSizing: 'border-box' as const,
   },
 };

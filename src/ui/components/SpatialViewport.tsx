@@ -9,6 +9,8 @@ import { useHeadTracking } from '../hooks/useHeadTracking';
 
 const ViewportFocusContext = createContext<{ focused: boolean }>({ focused: false });
 const CameraResetContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
+const CameraZoomContext = createContext<React.MutableRefObject<((dir: number) => void) | null>>({ current: null });
+const CameraFitContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
 
 interface ListenerSync {
   onMove?: (x: number, y: number, z: number) => void;
@@ -340,6 +342,46 @@ function AudioSourcePool({ tracksRef }: { tracksRef: React.RefObject<TrackState[
   );
 }
 
+// ── Axis gizmo ───────────────────────────────────────────
+
+function AxisGizmo() {
+  const { camera } = useThree();
+  const groupRef = useRef<THREE.Group>(null);
+
+  // Create Line objects (THREE.Line, not JSX <line>)
+  const lines = useMemo(() => {
+    const axisLen = 0.4;
+    const makeAxis = (dir: THREE.Vector3, color: string) => {
+      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), dir.clone().multiplyScalar(axisLen)]);
+      const mat = new THREE.LineBasicMaterial({ color });
+      return new THREE.Line(geo, mat);
+    };
+    return [
+      makeAxis(new THREE.Vector3(1, 0, 0), '#e74c3c'), // X red
+      makeAxis(new THREE.Vector3(0, 1, 0), '#2ecc71'), // Y green
+      makeAxis(new THREE.Vector3(0, 0, 1), '#3498db'), // Z blue
+    ];
+  }, []);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    // Position in bottom-left corner of screen (NDC → world)
+    const pos = new THREE.Vector3(-0.85, -0.8, 0.5).unproject(camera);
+    const dir = pos.sub(camera.position).normalize();
+    groupRef.current.position.copy(camera.position).addScaledVector(dir, 5);
+    // Match camera rotation so axes show world orientation
+    groupRef.current.quaternion.copy(camera.quaternion).invert();
+  });
+
+  return (
+    <group ref={groupRef}>
+      {lines.map((line, i) => (
+        <primitive key={i} object={line} />
+      ))}
+    </group>
+  );
+}
+
 // ── Scene furniture ──────────────────────────────────────────
 
 function NoseTriangle({ color }: { color: string }) {
@@ -386,6 +428,8 @@ function FlyControls() {
   focusedRef.current = focused;
   const flySpeed = 5;
   const resetRef = useContext(CameraResetContext);
+  const zoomRef = useContext(CameraZoomContext);
+  const fitRef = useContext(CameraFitContext);
 
   useEffect(() => {
     resetRef.current = () => {
@@ -397,6 +441,58 @@ function FlyControls() {
     };
     return () => { resetRef.current = null; };
   }, [camera, resetRef]);
+
+  useEffect(() => {
+    zoomRef.current = (dir: number) => {
+      // Dolly camera toward/away from orbit target
+      const target = controlsRef.current?.target ?? new THREE.Vector3();
+      const offset = camera.position.clone().sub(target);
+      const factor = dir > 0 ? 0.75 : 1.33;
+      offset.multiplyScalar(factor);
+      camera.position.copy(target).add(offset);
+      controlsRef.current?.update();
+    };
+    return () => { zoomRef.current = null; };
+  }, [camera, zoomRef]);
+
+  useEffect(() => {
+    fitRef.current = () => {
+      // Compute AABB of all voice positions
+      const sync = listenerSync;
+      // Access scene children to find voice positions
+      const scene = gl.domElement.parentElement;
+      if (!controlsRef.current) return;
+      // We'll read positions from the tracksRef via closure — but we don't have it here.
+      // Instead, scan all meshes in the scene
+      const box = new THREE.Box3();
+      let hasPoints = false;
+      camera.parent?.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.geometry) {
+          const pos = obj.position;
+          if (pos.x !== 0 || pos.y !== 0 || pos.z !== 0) {
+            box.expandByPoint(pos);
+            hasPoints = true;
+          }
+        }
+      });
+      if (!hasPoints) {
+        // Default: frame the origin area
+        box.expandByPoint(new THREE.Vector3(-5, 0, -5));
+        box.expandByPoint(new THREE.Vector3(5, 3, 5));
+      }
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+      const bSize = new THREE.Vector3();
+      box.getSize(bSize);
+      const maxDim = Math.max(bSize.x, bSize.y, bSize.z, 2);
+      const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
+      const dist = maxDim / (2 * Math.tan(fov / 2)) * 1.5;
+      camera.position.set(center.x + dist * 0.5, center.y + dist * 0.5, center.z + dist);
+      controlsRef.current.target.copy(center);
+      controlsRef.current.update();
+    };
+    return () => { fitRef.current = null; };
+  }, [camera, fitRef, gl, listenerSync]);
 
   const _forward = useMemo(() => new THREE.Vector3(), []);
   const _right = useMemo(() => new THREE.Vector3(), []);
@@ -559,6 +655,7 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
       <Listener color={listenerColor} />
       <AudioSourcePool tracksRef={tracksRef} />
       <FlyControls />
+      <AxisGizmo />
       <EffectComposer>
         <Bloom
           luminanceThreshold={0.4}
@@ -579,6 +676,8 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
   const [gridVisible, setGridVisible] = useState(true);
   const listenerPosRef = useRef(new THREE.Vector3(0, 0, 0));
   const cameraResetRef = useRef<(() => void) | null>(null);
+  const cameraZoomRef = useRef<((dir: number) => void) | null>(null);
+  const cameraFitRef = useRef<(() => void) | null>(null);
   const headTracking = useHeadTracking(onListenerRotate);
 
   useEffect(() => {
@@ -625,7 +724,7 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
     >
       <Canvas
         camera={{ position: [4, 6, 8], fov: 55 }}
-        style={{ width: '100%', height: '100%' }}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         gl={{ alpha: true, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.setClearColor(bgColor, 1);
@@ -633,11 +732,16 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
       >
         <BgColorUpdater color={bgColor} />
         <CameraResetContext.Provider value={cameraResetRef}>
-          <ViewportFocusContext.Provider value={focusValue}>
-            <SceneInner tracksRef={tracksRef} bgColor={bgColor} listenerSync={listenerSync} showGrid={gridVisible} />
-          </ViewportFocusContext.Provider>
+          <CameraZoomContext.Provider value={cameraZoomRef}>
+            <CameraFitContext.Provider value={cameraFitRef}>
+              <ViewportFocusContext.Provider value={focusValue}>
+                <SceneInner tracksRef={tracksRef} bgColor={bgColor} listenerSync={listenerSync} showGrid={gridVisible} />
+              </ViewportFocusContext.Provider>
+            </CameraFitContext.Provider>
+          </CameraZoomContext.Provider>
         </CameraResetContext.Provider>
       </Canvas>
+      {/* Bottom-right controls */}
       <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 10, display: 'flex', gap: 6, alignItems: 'flex-end' }}>
         <button
           onClick={() => setGridVisible(v => !v)}

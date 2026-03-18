@@ -22,9 +22,12 @@ import { generateTrajectoryFromPrompt, executeTrajectoryCode, postProcessTraject
 import { captureCanvasThumbnail, uploadThumbnail } from '../../lib/thumbnailCapture';
 import { supabase } from '../../lib/supabase';
 import { VersionsPanel } from '../components/VersionsPanel';
+import { DocsPanel } from '../components/DocsPanel';
+import { createProvider } from '../../lib/aiProvider';
 import { saveVersion } from '../../lib/versions';
 import { ExportPanel } from '../components/ExportPanel';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { updateFeedback, editDistanceRatio } from '../../lib/feedbackStore';
 
 const DEFAULT_SCRIPT = `# satie\n`;
 const AUTOSAVE_DELAY = 2000;
@@ -220,17 +223,31 @@ export function Editor() {
   const [isPublic, setIsPublic] = useState(false);
   const [sampleEntries, setSampleEntries] = useState<SampleEntry[]>([]);
   const [generatingTrajectory, setGeneratingTrajectory] = useState<string | null>(null);
-  const [spaceBgColor, setSpaceBgColor] = useState('#f4f3ee');
+  const [spaceBgColor, setSpaceBgColor] = useState(() => {
+    // Per-sketch color, keyed by sketch ID; fall back to default
+    if (sketchId) {
+      return localStorage.getItem(`satie-bg-${sketchId}`) || '#f4f3ee';
+    }
+    return '#f4f3ee';
+  });
+  const handleBgColorChange = useCallback((color: string) => {
+    setSpaceBgColor(color);
+    if (currentSketchId) {
+      localStorage.setItem(`satie-bg-${currentSketchId}`, color);
+    }
+  }, [currentSketchId]);
   const [panels, setPanels] = useState<PanelVisibility>({
     score: true,
     samples: true,
     space: true,
     voices: true,
     ai: true,
+    docs: false,
     export: false,
     versions: false,
   });
   const [aiTarget, setAiTarget] = useState<AITarget>('script');
+  const [workspaceZoom, setWorkspaceZoom] = useState(1);
 
   const autosaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   /** Raw ArrayBuffers for samples loaded this session — used for uploading on save. */
@@ -245,6 +262,10 @@ export function Editor() {
         setSketchTitle(sketch.title);
         setCurrentSketchId(sketch.id);
         setIsPublic(sketch.is_public);
+
+        // Restore per-sketch viewport background color
+        const savedBg = localStorage.getItem(`satie-bg-${sketch.id}`);
+        if (savedBg) setSpaceBgColor(savedBg);
 
         // Load samples from Supabase Storage (with IndexedDB cache)
         try {
@@ -276,6 +297,19 @@ export function Editor() {
     return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
   }, [script, sketchTitle, user, currentSketchId]);
 
+  // Apply `background` property from script to viewport
+  useEffect(() => {
+    for (const stmt of uiState.statements) {
+      if (stmt.background) {
+        setSpaceBgColor(stmt.background);
+        if (currentSketchId) {
+          localStorage.setItem(`satie-bg-${currentSketchId}`, stmt.background);
+        }
+        break; // first one wins
+      }
+    }
+  }, [uiState.statements, currentSketchId]);
+
   const togglePanel = useCallback((key: keyof PanelVisibility) => {
     setPanels(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -304,12 +338,34 @@ export function Editor() {
     });
   }, [loadAudioFile]);
 
+  // RLHF: track the last AI generation so we can measure user edits
+  const lastGenRef = useRef<{ feedbackId: string; baseline: string } | null>(null);
+
+  /** Flush implicit edit feedback for the previous generation before starting a new one. */
+  const flushEditFeedback = useCallback(() => {
+    if (!lastGenRef.current) return;
+    const { feedbackId, baseline } = lastGenRef.current;
+    const dist = editDistanceRatio(baseline, script);
+    if (dist > 0) {
+      updateFeedback(feedbackId, { userEditedOutput: script, editDistance: dist });
+    }
+    lastGenRef.current = null;
+  }, [script]);
+
+  const handleFeedbackCreated = useCallback((feedbackId: string, baseline: string) => {
+    // Flush any previous generation's edit distance first
+    flushEditFeedback();
+    lastGenRef.current = { feedbackId, baseline };
+  }, [flushEditFeedback]);
+
   const handleAIGenerate = useCallback((code: string) => {
+    // Flush edit feedback for the previous generation before overwriting
+    flushEditFeedback();
     setScript(code);
     // Auto-run: load the new script and play immediately
     loadScript(code);
     if (!uiState.isPlaying) play();
-  }, [loadScript, uiState.isPlaying, play]);
+  }, [loadScript, uiState.isPlaying, play, flushEditFeedback]);
 
   const handleAISampleGenerate = useCallback(async (name: string, prompt: string) => {
     try {
@@ -402,8 +458,8 @@ export function Editor() {
         const name = stmt.customTrajectoryName;
         if (!generatedTrajRef.current.has(name) && !getTrajectory(name)) {
           generatedTrajRef.current.add(name);
-          const apiKey = localStorage.getItem('satie-anthropic-key') ?? '';
-          if (apiKey) {
+          try {
+            const trajProvider = createProvider();
             const genParams: TrajectoryGenParams = {
               duration: stmt.genTrajectoryDuration,
               resolution: stmt.genTrajectoryResolution,
@@ -412,10 +468,10 @@ export function Editor() {
               ground: stmt.genTrajectoryGround,
               variation: stmt.genTrajectoryVariation,
             };
-            generateTrajectoryFromPrompt(apiKey, stmt.genTrajectoryPrompt, genParams)
+            generateTrajectoryFromPrompt(trajProvider, stmt.genTrajectoryPrompt, genParams)
               .then(spec => handleGenerateTrajectory(name, spec.code, genParams))
               .catch(e => console.error('[Editor] Auto trajectory gen failed:', e));
-          }
+          } catch { /* no provider configured */ }
         }
       }
     }
@@ -472,6 +528,24 @@ export function Editor() {
     }
   }, [user, currentSketchId, script, sketchTitle, isPublic]);
 
+  const zoomBtnStyle: React.CSSProperties = {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    background: '#faf9f6',
+    border: '1px solid #d0cdc4',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    color: '#1a3a2a',
+    fontSize: '13px',
+    fontFamily: "'SF Mono', monospace",
+    lineHeight: 1,
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+  };
+
   return (
     <div style={{
       width: '100vw',
@@ -505,6 +579,47 @@ export function Editor() {
         position: 'relative',
         overflow: 'hidden',
       }}>
+        {/* Workspace zoom controls */}
+        <div style={{
+          position: 'absolute',
+          bottom: 12,
+          right: 12,
+          zIndex: 200,
+          display: 'flex',
+          gap: 4,
+          alignItems: 'center',
+        }}>
+          <button
+            onClick={() => setWorkspaceZoom(z => Math.max(0.25, z - 0.1))}
+            title="Zoom out workspace"
+            style={zoomBtnStyle}
+          >-</button>
+          <button
+            onClick={() => setWorkspaceZoom(1)}
+            title="Reset zoom"
+            style={{
+              ...zoomBtnStyle,
+              fontSize: '8px',
+              width: 'auto',
+              padding: '0 6px',
+              fontFamily: "'SF Mono', monospace",
+            }}
+          >{Math.round(workspaceZoom * 100)}%</button>
+          <button
+            onClick={() => setWorkspaceZoom(z => Math.min(2, z + 0.1))}
+            title="Zoom in workspace"
+            style={zoomBtnStyle}
+          >+</button>
+        </div>
+
+        {/* Scaled workspace container */}
+        <div style={{
+          width: `${100 / workspaceZoom}%`,
+          height: `${100 / workspaceZoom}%`,
+          transform: `scale(${workspaceZoom})`,
+          transformOrigin: 'top left',
+          position: 'relative',
+        }}>
         {/* Patch cord — rendered first so it sits behind all panels */}
         {panels.ai && <PatchCord target={aiTarget} />}
 
@@ -600,7 +715,7 @@ export function Editor() {
             minHeight={200}
           >
             <ErrorBoundary name="Space">
-              <SpatialViewport tracksRef={tracksRef} bgColor={spaceBgColor} onBgColorChange={setSpaceBgColor} onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
+              <SpatialViewport tracksRef={tracksRef} bgColor={spaceBgColor} onBgColorChange={handleBgColorChange} onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
             </ErrorBoundary>
           </Panel>
         )}
@@ -649,6 +764,7 @@ export function Editor() {
                 loadedSamples={sampleEntries.map(s => s.name)}
                 target={aiTarget}
                 onTargetChange={setAiTarget}
+                onFeedbackCreated={handleFeedbackCreated}
               />
             </ErrorBoundary>
           </Panel>
@@ -677,6 +793,21 @@ export function Editor() {
           </Panel>
         )}
 
+        {panels.docs && (
+          <Panel
+            panelId="docs"
+            title="Reference"
+            defaultX={768}
+            defaultY={16}
+            defaultWidth={380}
+            defaultHeight={460}
+            minWidth={280}
+            minHeight={200}
+          >
+            <DocsPanel />
+          </Panel>
+        )}
+
         {panels.versions && (
           <Panel
             panelId="versions"
@@ -697,6 +828,7 @@ export function Editor() {
           </Panel>
         )}
 
+        </div>{/* end scaled workspace */}
       </div>
     </div>
   );

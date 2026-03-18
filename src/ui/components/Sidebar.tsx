@@ -11,6 +11,7 @@ export interface PanelVisibility {
   ai: boolean;
   export: boolean;
   versions: boolean;
+  docs: boolean;
 }
 
 interface SidebarProps {
@@ -310,7 +311,7 @@ export function Sidebar({
 
       {/* Panel toggles */}
       <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-        {(['score', 'samples', 'space', 'voices', 'ai', 'export', 'versions'] as const).map((key) => {
+        {(['score', 'samples', 'space', 'voices', 'ai', 'docs', 'export', 'versions'] as const).map((key) => {
           const icon = {
             score: (
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
@@ -345,6 +346,12 @@ export function Sidebar({
                 <line x1="5" y1="9.5" x2="5" y2="11.5" strokeLinecap="round"/>
                 <line x1="9" y1="9.5" x2="9" y2="11.5" strokeLinecap="round"/>
                 <path d="M5 11.5 Q7 13 9 11.5" strokeLinecap="round"/>
+              </svg>
+            ),
+            docs: (
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+                <path d="M7 2 C5 2 2 2.5 2 3.5 L2 11 C2 11 4 10.5 7 11 C10 10.5 12 11 12 11 L12 3.5 C12 2.5 9 2 7 2 Z" strokeLinejoin="round"/>
+                <path d="M7 2 L7 11"/>
               </svg>
             ),
             export: (

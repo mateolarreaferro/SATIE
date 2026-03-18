@@ -172,6 +172,7 @@ function parseSingle(block: string): Statement {
       case 'visual': parseVisual(s, v); break;
       case 'move': parseMove(s, v); break;
       case 'color': parseColor(s, v); break;
+      case 'background': case 'bg': parseBackground(s, v); break;
       case 'alpha': {
         if (hasInterpolation(v)) s.colorAlphaInterpolation = InterpolationData.parse(v);
         else { const a = parseFloat(v); if (!isNaN(a)) s.staticAlpha = Math.max(0, Math.min(1, a)); }
@@ -658,6 +659,47 @@ function parseColor(s: Statement, v: string): void {
   };
   if (namedColors[v.toLowerCase()]) {
     s.staticColor = namedColors[v.toLowerCase()];
+  }
+}
+
+/** Parse `background` property — accepts all the same formats as `color` (hex, RGB, named). */
+function parseBackground(s: Statement, v: string): void {
+  v = v.trim();
+  if (!v) return;
+
+  // Hex: #F54927
+  if (v.startsWith('#') && v.length === 7) {
+    s.background = v;
+    return;
+  }
+
+  // RGB: 255,100,50
+  const rgbMatch = v.match(/^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$/);
+  if (rgbMatch) {
+    const r = Math.max(0, Math.min(255, Math.round(parseFloat(rgbMatch[1]))));
+    const g = Math.max(0, Math.min(255, Math.round(parseFloat(rgbMatch[2]))));
+    const b = Math.max(0, Math.min(255, Math.round(parseFloat(rgbMatch[3]))));
+    s.background = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    return;
+  }
+
+  // Single grayscale value: 128
+  const grayMatch = v.match(/^(\d+)$/);
+  if (grayMatch) {
+    const c = Math.max(0, Math.min(255, Math.round(parseFloat(grayMatch[1]))));
+    const hex = c.toString(16).padStart(2, '0');
+    s.background = `#${hex}${hex}${hex}`;
+    return;
+  }
+
+  // Named colors
+  const namedColors: Record<string, string> = {
+    white: '#ffffff', black: '#000000', red: '#ff0000', green: '#00ff00',
+    blue: '#0000ff', yellow: '#ffff00', cyan: '#00ffff', magenta: '#ff00ff',
+    gray: '#808080', grey: '#808080',
+  };
+  if (namedColors[v.toLowerCase()]) {
+    s.background = namedColors[v.toLowerCase()];
   }
 }
 

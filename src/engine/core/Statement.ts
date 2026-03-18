@@ -137,6 +137,9 @@ export class Statement {
 
   visual: string[] = [];
 
+  /** Viewport background color (hex). Set via `background` property. Applies globally. */
+  background: string | null = null;
+
   // Interpolation data for dynamic properties
   volumeInterpolation: InterpolationData | null = null;
   pitchInterpolation: InterpolationData | null = null;

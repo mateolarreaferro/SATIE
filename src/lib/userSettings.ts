@@ -8,11 +8,13 @@ export interface UserSettings {
   anthropic_key: string;
   elevenlabs_key: string;
   openai_key: string;
+  gemini_key: string;
 }
 
 const LS_ANTHROPIC = 'satie-anthropic-key';
 const LS_ELEVENLABS = 'satie-elevenlabs-key';
 const LS_OPENAI = 'satie-openai-key';
+const LS_GEMINI = 'satie-gemini-key';
 
 /** Load settings: tries Supabase first (logged in), falls back to localStorage. */
 export async function loadSettings(userId: string | null): Promise<UserSettings> {
@@ -20,6 +22,7 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
     anthropic_key: localStorage.getItem(LS_ANTHROPIC) ?? '',
     elevenlabs_key: localStorage.getItem(LS_ELEVENLABS) ?? '',
     openai_key: localStorage.getItem(LS_OPENAI) ?? '',
+    gemini_key: localStorage.getItem(LS_GEMINI) ?? '',
   };
 
   if (!userId) return local;
@@ -27,7 +30,7 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
   try {
     const { data, error } = await supabase
       .from('user_settings')
-      .select('anthropic_key, elevenlabs_key, openai_key')
+      .select('anthropic_key, elevenlabs_key, openai_key, gemini_key')
       .eq('user_id', userId)
       .single();
 
@@ -39,10 +42,12 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
         anthropic_key: data.anthropic_key ?? '',
         elevenlabs_key: data.elevenlabs_key ?? '',
         openai_key: data.openai_key ?? '',
+        gemini_key: data.gemini_key ?? '',
       };
       localStorage.setItem(LS_ANTHROPIC, settings.anthropic_key);
       localStorage.setItem(LS_ELEVENLABS, settings.elevenlabs_key);
       localStorage.setItem(LS_OPENAI, settings.openai_key);
+      localStorage.setItem(LS_GEMINI, settings.gemini_key);
       return settings;
     }
 
@@ -64,7 +69,7 @@ export async function saveKey(
   value: string,
 ): Promise<void> {
   // Always save locally (cache + guest fallback)
-  const lsKey = field === 'anthropic_key' ? LS_ANTHROPIC : field === 'openai_key' ? LS_OPENAI : LS_ELEVENLABS;
+  const lsKey = field === 'anthropic_key' ? LS_ANTHROPIC : field === 'openai_key' ? LS_OPENAI : field === 'gemini_key' ? LS_GEMINI : LS_ELEVENLABS;
   localStorage.setItem(lsKey, value);
 
   if (!userId) return;
@@ -89,6 +94,7 @@ export async function saveSettings(
   localStorage.setItem(LS_ANTHROPIC, settings.anthropic_key);
   localStorage.setItem(LS_ELEVENLABS, settings.elevenlabs_key);
   localStorage.setItem(LS_OPENAI, settings.openai_key);
+  localStorage.setItem(LS_GEMINI, settings.gemini_key);
 
   try {
     await supabase
@@ -99,6 +105,7 @@ export async function saveSettings(
           anthropic_key: settings.anthropic_key,
           elevenlabs_key: settings.elevenlabs_key,
           openai_key: settings.openai_key,
+          gemini_key: settings.gemini_key,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' },

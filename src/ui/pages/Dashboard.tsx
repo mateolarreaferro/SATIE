@@ -11,6 +11,7 @@ interface ApiKeys {
   anthropic_key: string;
   elevenlabs_key: string;
   openai_key: string;
+  gemini_key: string;
 }
 
 // Draggable sketch card
@@ -226,15 +227,15 @@ export function Dashboard() {
   const [sketches, setSketches] = useState<Sketch[]>([]);
   const [loadingSketches, setLoadingSketches] = useState(false);
   const [showSplash, setShowSplash] = useState(() => {
-    if (sessionStorage.getItem('satie-splash-seen')) return false;
+    if (localStorage.getItem('satie-onboarding-done')) return false;
     return true;
   });
   const [showSettings, setShowSettings] = useState(false);
-  const [keys, setKeys] = useState<ApiKeys>({ anthropic_key: '', elevenlabs_key: '', openai_key: '' });
+  const [keys, setKeys] = useState<ApiKeys>({ anthropic_key: '', elevenlabs_key: '', openai_key: '', gemini_key: '' });
 
   const handleSplashComplete = useCallback(() => {
     setShowSplash(false);
-    sessionStorage.setItem('satie-splash-seen', '1');
+    localStorage.setItem('satie-onboarding-done', '1');
   }, []);
 
   // Load API keys
@@ -392,6 +393,16 @@ export function Dashboard() {
                 />
               </div>
               <div style={styles.settingsSection}>
+                <div style={styles.settingsLabel}>Google Gemini API Key</div>
+                <input
+                  type="password"
+                  placeholder="AIza..."
+                  value={keys.gemini_key}
+                  onChange={(e) => handleSaveKey('gemini_key', e.target.value)}
+                  style={styles.settingsInput}
+                />
+              </div>
+              <div style={styles.settingsSection}>
                 <div style={styles.settingsLabel}>ElevenLabs API Key</div>
                 <input
                   type="password"
@@ -541,12 +552,14 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: '1px solid #d0cdc4',
     background: '#f4f3ee',
     flexShrink: 0,
+    overflowX: 'auto' as const,
   },
   settingsInner: {
     display: 'flex',
     alignItems: 'center',
     gap: '24px',
     padding: '14px 32px',
+    minWidth: 'max-content' as const,
   },
   settingsSection: {
     display: 'flex',

@@ -1,6 +1,23 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { tryParse } from '../../engine/core/SatieParser';
 import { generateTrajectoryFromPrompt } from '../../engine/spatial/TrajectoryGen';
+import {
+  createProvider,
+  createFastProvider,
+  getPreferredProvider,
+  setPreferredProvider,
+  getAvailableProviders,
+  type AIProviderType,
+  type AIProvider,
+} from '../../lib/aiProvider';
+import {
+  saveFeedback,
+  updateFeedback,
+  getTopExamples,
+  getAntiPatterns,
+  createFeedbackEntry,
+  type StoredFeedback,
+} from '../../lib/feedbackStore';
 
 export type AITarget = 'script' | 'sample' | 'trajectory';
 
@@ -12,6 +29,8 @@ interface AIPanelProps {
   loadedSamples?: string[];
   target: AITarget;
   onTargetChange: (target: AITarget) => void;
+  /** Called when a new generation is saved to feedback store (for implicit edit tracking) */
+  onFeedbackCreated?: (feedbackId: string, baseline: string) => void;
 }
 
 interface HistoryEntry {
@@ -19,6 +38,7 @@ interface HistoryEntry {
   result: string;
   timestamp: number;
   target: AITarget;
+  feedbackId: string | null;
 }
 
 // ── ASR: Microphone → Whisper transcription ────────────────
@@ -200,40 +220,44 @@ function extractSoundKeywords(prompt: string): string[] {
   return keywords;
 }
 
-// ── Anthropic API call helper ──────────────────────────────
+// ── AI call helper (provider-agnostic) ─────────────────────
 
-async function callAnthropic(
-  apiKey: string,
-  model: string,
+async function callAI(
+  provider: AIProvider,
   systemPrompt: string,
   messages: { role: string; content: string }[],
   maxTokens: number = 2048,
   temperature: number = 0.7,
 ): Promise<string> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages,
-    }),
+  return provider.call({
+    systemPrompt,
+    messages: messages as { role: 'user' | 'assistant'; content: string }[],
+    maxTokens,
+    temperature,
   });
+}
 
-  if (!response.ok) throw new Error(`API ${response.status}`);
-  const data = await response.json();
-  return data.content?.[0]?.text ?? '';
+/** Legacy wrapper — still used by older call sites during migration */
+async function callAnthropic(
+  apiKey: string,
+  _model: string,
+  systemPrompt: string,
+  messages: { role: string; content: string }[],
+  maxTokens: number = 2048,
+  temperature: number = 0.7,
+): Promise<string> {
+  const provider = createProvider();
+  return callAI(provider, systemPrompt, messages, maxTokens, temperature);
 }
 
 // ── System prompt (ported from Unity SatieAgentOrchestrator) ──
 
-function buildSystemPrompt(loadedSamples: string[], libraryResult: LibraryCheckResult): string {
+function buildSystemPrompt(
+  loadedSamples: string[],
+  libraryResult: LibraryCheckResult,
+  topExamples: StoredFeedback[] = [],
+  antiPatterns: StoredFeedback[] = [],
+): string {
   let audioLibrary: string;
   if (loadedSamples.length > 0) {
     audioLibrary = `AVAILABLE AUDIO FILES (use EXACT names):\n${loadedSamples.map(s => `  - ${s}`).join('\n')}\n\nIMPORTANT: Use audio files from the above list when available. For sounds NOT in the library, use the gen keyword to generate them. Do NOT make up file paths.`;
@@ -444,6 +468,14 @@ COMMENTS:
 - Block: comment ... endcomment
 
 ${audioLibrary}
+${topExamples.length > 0 ? `
+PROVEN EXAMPLES (highly rated by the user — follow these patterns):
+${topExamples.map((ex, i) => `${i + 1}. User asked: "${ex.prompt}"
+${(ex.userEditedOutput ?? ex.output).slice(0, 500)}`).join('\n\n')}` : ''}
+${antiPatterns.length > 0 ? `
+AVOID THESE PATTERNS (negatively rated — do NOT produce similar code):
+${antiPatterns.map((ex, i) => `${i + 1}. User asked: "${ex.prompt}" but this was rejected:
+${ex.output.slice(0, 300)}`).join('\n\n')}` : ''}
 
 Generate valid Satie code following these exact syntax rules.`;
 }
@@ -571,7 +603,6 @@ CRITICAL SYNTAX RULES (NO COLONS, NO QUOTES, NO EQUALS):
 - NO explanations, NO markdown, NO text before/after code`;
 
 async function verifyAndRepair(
-  apiKey: string,
   code: string,
   maxAttempts: number = 2,
 ): Promise<{ success: boolean; code: string; error: string | null }> {
@@ -589,9 +620,9 @@ async function verifyAndRepair(
     }
 
     try {
-      const repaired = await callAnthropic(
-        apiKey,
-        'claude-haiku-4-5-20251001',
+      const fastProvider = createFastProvider();
+      const repaired = await callAI(
+        fastProvider,
         REPAIR_SYSTEM_PROMPT,
         [{
           role: 'user',
@@ -611,17 +642,19 @@ async function verifyAndRepair(
 
 // ── Main orchestration pipeline ────────────────────────────
 
-const ORCHESTRATOR_MODEL = 'claude-sonnet-4-20250514';
-
 async function generateCode(
-  apiKey: string,
   userPrompt: string,
   currentScript: string | undefined,
   loadedSamples: string[],
   conversationHistory: { role: string; content: string }[],
 ): Promise<{ code: string; error: string | null }> {
+  const provider = createProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
-  const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult);
+  const [topEx, antiEx] = await Promise.all([
+    getTopExamples('script', 3),
+    getAntiPatterns('script', 2),
+  ]);
+  const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult, topEx, antiEx);
   const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
 
   const apiMessages = [
@@ -629,9 +662,8 @@ async function generateCode(
     { role: 'user', content: enrichedPrompt },
   ];
 
-  const rawResponse = await callAnthropic(
-    apiKey,
-    ORCHESTRATOR_MODEL,
+  const rawResponse = await callAI(
+    provider,
     systemPrompt,
     apiMessages,
     2048,
@@ -639,7 +671,7 @@ async function generateCode(
   );
 
   const cleanedCode = cleanGeneratedCode(rawResponse);
-  const verified = await verifyAndRepair(apiKey, cleanedCode);
+  const verified = await verifyAndRepair(cleanedCode);
 
   return {
     code: verified.code,
@@ -650,12 +682,11 @@ async function generateCode(
 // ── Sample generation pipeline ─────────────────────────────
 
 async function generateSampleSpec(
-  apiKey: string,
   userPrompt: string,
 ): Promise<{ name: string; prompt: string }> {
-  const rawResponse = await callAnthropic(
-    apiKey,
-    ORCHESTRATOR_MODEL,
+  const provider = createProvider();
+  const rawResponse = await callAI(
+    provider,
     SAMPLE_GEN_SYSTEM_PROMPT,
     [{ role: 'user', content: userPrompt }],
     256,
@@ -687,6 +718,7 @@ export function AIPanel({
   loadedSamples = [],
   target,
   onTargetChange,
+  onFeedbackCreated,
 }: AIPanelProps) {
   const [prompts, setPrompts] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
@@ -698,6 +730,9 @@ export function AIPanel({
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = current/new
 
+  // RLHF: track ratings for the currently viewed history entry
+  const [feedbackRatings, setFeedbackRatings] = useState<Map<string, number>>(new Map());
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -706,12 +741,21 @@ export function AIPanel({
 
   const restoreHistory = useCallback((index: number) => {
     if (index < 0 || index >= history.length) return;
+
+    // Mark the entry we're navigating AWAY from as undone
+    if (historyIndex >= 0 && historyIndex !== index) {
+      const prevEntry = history[historyIndex];
+      if (prevEntry.feedbackId) {
+        updateFeedback(prevEntry.feedbackId, { wasUndone: true });
+      }
+    }
+
     const entry = history[index];
     setHistoryIndex(index);
     if (entry.target === 'script' && /\b(loop|oneshot)\b/.test(entry.result)) {
       onGenerate(entry.result);
     }
-  }, [history, onGenerate]);
+  }, [history, historyIndex, onGenerate]);
 
   const sendPrompt = useCallback(async (prompt: string) => {
     if (!prompt.trim()) return;
@@ -721,9 +765,11 @@ export function AIPanel({
     setStatus(null);
     setIsLoading(true);
 
-    const apiKey = localStorage.getItem('satie-anthropic-key') ?? '';
-    if (!apiKey) {
-      setStatus('Set your Anthropic key in dashboard settings first.');
+    try {
+      // Validate that a provider is available
+      createProvider();
+    } catch {
+      setStatus('No AI provider configured. Add an API key in dashboard settings.');
       setIsLoading(false);
       return;
     }
@@ -731,18 +777,23 @@ export function AIPanel({
     try {
       if (target === 'trajectory') {
         // Trajectory generation mode
-        const spec = await generateTrajectoryFromPrompt(apiKey, prompt);
+        const provider = createProvider();
+        const spec = await generateTrajectoryFromPrompt(provider, prompt);
         setStatus(`generating trajectory "${spec.name}"...`);
 
         if (onGenerateTrajectory) {
           onGenerateTrajectory(spec.name, spec.code);
         }
 
+        const fb = createFeedbackEntry(prompt, `trajectory: ${spec.name}`, 'trajectory');
+        saveFeedback(fb);
+
         const entry: HistoryEntry = {
           prompt,
           result: `trajectory: ${spec.name}`,
           timestamp: Date.now(),
           target: 'trajectory',
+          feedbackId: fb.id,
         };
         setHistory(prev => {
           const truncated = historyIndex >= 0 ? prev.slice(0, historyIndex + 1) : prev;
@@ -751,16 +802,20 @@ export function AIPanel({
         setHistoryIndex(-1);
       } else if (target === 'sample') {
         // Sample generation mode
-        const spec = await generateSampleSpec(apiKey, prompt);
+        const spec = await generateSampleSpec(prompt);
         setStatus(`generating "${spec.name}"...`);
 
         onGenerateSample(spec.name, spec.prompt);
+
+        const fb = createFeedbackEntry(prompt, `sample: ${spec.name} (${spec.prompt})`, 'sample');
+        saveFeedback(fb);
 
         const entry: HistoryEntry = {
           prompt,
           result: `sample: ${spec.name} (${spec.prompt})`,
           timestamp: Date.now(),
           target: 'sample',
+          feedbackId: fb.id,
         };
         setHistory(prev => {
           const truncated = historyIndex >= 0 ? prev.slice(0, historyIndex + 1) : prev;
@@ -772,7 +827,6 @@ export function AIPanel({
         // Always pass currentScript as the source of truth — no stale conversation history.
         // Each request is self-contained: the enriched prompt includes the full current script.
         const result = await generateCode(
-          apiKey,
           prompt,
           currentScript,
           loadedSamples,
@@ -787,11 +841,17 @@ export function AIPanel({
           setStatus(`warning: ${result.error}`);
         }
 
+        // Save feedback entry for RLHF
+        const fb = createFeedbackEntry(prompt, result.code, 'script');
+        saveFeedback(fb);
+        onFeedbackCreated?.(fb.id, result.code);
+
         const entry: HistoryEntry = {
           prompt,
           result: result.code,
           timestamp: Date.now(),
           target: 'script',
+          feedbackId: fb.id,
         };
         setHistory(prev => {
           const truncated = historyIndex >= 0 ? prev.slice(0, historyIndex + 1) : prev;
@@ -827,6 +887,19 @@ export function AIPanel({
       send();
     }
   }, [send]);
+
+  // RLHF rating handler
+  const handleRate = useCallback((rating: 1 | -1) => {
+    const idx = historyIndex >= 0 ? historyIndex : history.length - 1;
+    if (idx < 0 || idx >= history.length) return;
+    const entry = history[idx];
+    if (!entry.feedbackId) return;
+
+    const currentRating = feedbackRatings.get(entry.feedbackId) ?? 0;
+    const newRating = currentRating === rating ? 0 : rating; // toggle off if same
+    setFeedbackRatings(prev => new Map(prev).set(entry.feedbackId!, newRating));
+    updateFeedback(entry.feedbackId, { rating: newRating });
+  }, [history, historyIndex, feedbackRatings]);
 
   const targetBtnStyle = (active: boolean): React.CSSProperties => ({
     padding: '2px 8px',
@@ -875,14 +948,32 @@ export function AIPanel({
         >
           Trajectory
         </button>
-        <span style={{
-          fontSize: '8px',
-          opacity: 0.2,
-          marginLeft: 'auto',
-          fontFamily: "'SF Mono', monospace",
-        }}>
-          {target === 'script' ? 'Score' : target === 'sample' ? 'Samples' : 'Spatial'}
-        </span>
+        <select
+          value={getPreferredProvider()}
+          onChange={(e) => {
+            setPreferredProvider(e.target.value as AIProviderType);
+            // Force re-render
+            setStatus(null);
+          }}
+          title="AI Provider"
+          style={{
+            fontSize: '8px',
+            opacity: 0.4,
+            marginLeft: 'auto',
+            fontFamily: "'SF Mono', monospace",
+            background: 'transparent',
+            border: '1px solid #d0cdc4',
+            borderRadius: 4,
+            padding: '1px 4px',
+            color: '#1a3a2a',
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          <option value="anthropic">Claude</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Gemini</option>
+        </select>
       </div>
 
       {/* Prompt log — only shows user prompts, no code output */}
@@ -1005,6 +1096,56 @@ export function AIPanel({
             >
               &gt;
             </button>
+
+            {/* RLHF: Thumbs up / down */}
+            {(() => {
+              const idx = historyIndex >= 0 ? historyIndex : history.length - 1;
+              const fid = idx >= 0 && idx < history.length ? history[idx].feedbackId : null;
+              const currentRating = fid ? (feedbackRatings.get(fid) ?? 0) : 0;
+              if (!fid) return null;
+              return (
+                <div style={{ display: 'flex', gap: '2px', marginLeft: '8px' }}>
+                  <button
+                    onClick={() => handleRate(1)}
+                    title="Good generation"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      padding: '0 2px',
+                      opacity: currentRating === 1 ? 1 : 0.25,
+                      color: '#1a3a2a',
+                      transition: 'opacity 0.15s',
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill={currentRating === 1 ? '#1a3a2a' : 'none'} stroke="#1a3a2a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+                      <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => handleRate(-1)}
+                    title="Bad generation"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      padding: '0 2px',
+                      opacity: currentRating === -1 ? 1 : 0.25,
+                      color: '#8b0000',
+                      transition: 'opacity 0.15s',
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill={currentRating === -1 ? '#8b0000' : 'none'} stroke="#8b0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                      <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                    </svg>
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
