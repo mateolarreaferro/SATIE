@@ -19,6 +19,7 @@ export function SketchView() {
   const [notFound, setNotFound] = useState(false);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
+  const [bgColor, setBgColor] = useState('#f4f3ee');
 
   const {
     uiState,
@@ -41,6 +42,9 @@ export function SketchView() {
           setSketch(s);
           setLikeCount(s.like_count ?? 0);
           document.title = `${s.title} — Satie`;
+          // Extract viewport bg color from script metadata
+          const bgMatch = s.script.match(/^# @bg (#[0-9a-fA-F]{6})/m);
+          if (bgMatch) setBgColor(bgMatch[1]);
           // Load author profile
           getProfile(s.user_id).then(setAuthor).catch(() => {});
           // Check if user liked
@@ -171,7 +175,7 @@ export function SketchView() {
         <div style={styles.viewport}>
           <SpatialViewport
             tracksRef={tracksRef}
-            bgColor="#f4f3ee"
+            bgColor={bgColor}
             onListenerMove={setListenerPosition}
             onListenerRotate={setListenerOrientation}
           />

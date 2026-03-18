@@ -19,6 +19,7 @@ import { WanderType } from '../../engine/core/Statement';
 import { registerTrajectoryFromLUT, getTrajectory } from '../../engine/spatial/Trajectories';
 import { cacheTrajectory } from '../../lib/trajectoryCache';
 import { generateTrajectoryFromPrompt, executeTrajectoryCode, postProcessTrajectory, type TrajectoryGenParams } from '../../engine/spatial/TrajectoryGen';
+import { encodeWAV } from '../../engine/export/WAVEncoder';
 import { captureCanvasThumbnail, uploadThumbnail } from '../../lib/thumbnailCapture';
 import { supabase } from '../../lib/supabase';
 import { VersionsPanel } from '../components/VersionsPanel';
@@ -263,9 +264,14 @@ export function Editor() {
         setCurrentSketchId(sketch.id);
         setIsPublic(sketch.is_public);
 
-        // Restore per-sketch viewport background color
-        const savedBg = localStorage.getItem(`satie-bg-${sketch.id}`);
-        if (savedBg) setSpaceBgColor(savedBg);
+        // Restore viewport background color: first try @bg comment in script, then localStorage
+        const bgMatch = sketch.script.match(/^# @bg (#[0-9a-fA-F]{6})/m);
+        if (bgMatch) {
+          setSpaceBgColor(bgMatch[1]);
+        } else {
+          const savedBg = localStorage.getItem(`satie-bg-${sketch.id}`);
+          if (savedBg) setSpaceBgColor(savedBg);
+        }
 
         // Load samples from Supabase Storage (with IndexedDB cache)
         try {
@@ -495,16 +501,38 @@ export function Editor() {
     if (!user) return;
     let sketchIdForSamples = currentSketchId;
 
+    // Embed viewport bg color as a metadata comment in the script
+    const DEFAULT_BG = '#f4f3ee';
+    let scriptToSave = script;
+    // Remove any existing @bg comment
+    scriptToSave = scriptToSave.replace(/^# @bg #[0-9a-fA-F]{6}\n?/m, '');
+    // Prepend if non-default
+    if (spaceBgColor !== DEFAULT_BG) {
+      scriptToSave = `# @bg ${spaceBgColor}\n${scriptToSave}`;
+    }
+
     if (currentSketchId) {
-      await updateSketch(currentSketchId, { script, title: sketchTitle, is_public: isPublic });
+      await updateSketch(currentSketchId, { script: scriptToSave, title: sketchTitle, is_public: isPublic });
     } else {
-      const sketch = await createSketch(user.id, sketchTitle, script);
+      const sketch = await createSketch(user.id, sketchTitle, scriptToSave);
       setCurrentSketchId(sketch.id);
       sketchIdForSamples = sketch.id;
       window.history.replaceState(null, '', `/editor/${sketch.id}`);
     }
 
-    // Upload any locally-loaded samples to Supabase Storage
+    // Capture any engine audio buffers (including gen audio) that aren't in sampleBuffers yet
+    if (engineRef.current) {
+      const engineBuffers = engineRef.current.getAudioBuffers();
+      for (const [name, audioBuf] of engineBuffers) {
+        if (!sampleBuffers.current.has(name)) {
+          // Convert AudioBuffer → WAV ArrayBuffer so it can be uploaded
+          const wavBlob = encodeWAV(audioBuf, 16);
+          sampleBuffers.current.set(name, await wavBlob.arrayBuffer());
+        }
+      }
+    }
+
+    // Upload all samples (imported + generated) to Supabase Storage
     if (sketchIdForSamples && sampleBuffers.current.size > 0) {
       try {
         await uploadSketchSamples(user.id, sketchIdForSamples, sampleBuffers.current);
