@@ -105,35 +105,43 @@ every 2to6
 Each copy gets its own random value within the range.`,
   },
   {
-    title: 'Interpolation',
-    id: 'interpolation',
-    content: `# Interpolation
+    title: 'Modulation',
+    id: 'modulation',
+    content: `# Modulation
 
-Animate any numeric property over time:
+Animate any numeric property over time. Two modes: **fade** (continuous) and **jump** (discrete).
 
-**goto** — one-way transition:
+**fade** — smooth transitions:
 \`\`\`
-volume goto(0 1 3)        # 0 → 1 over 3 seconds
-volume goto(0 1 3 inquad) # with easing
-\`\`\`
-
-**gobetween** — ping-pong oscillation:
-\`\`\`
-volume gobetween(0.2 0.8 2)       # oscillate forever
-volume gobetween(0.2 0.8 2 3)     # 3 cycles
-volume gobetween(0.2 0.8 2 outsine) # with easing
+volume fade 0 1 every 2                - 0 → 1 over 2 seconds
+volume fade 0.1 0.5 1 2 every 2       - through 4 values, 2s each
+volume fade 0 1 every 1 loop bounce    - oscillate 0↔1 forever
+pitch fade 0.8 1 1.2 every 5 loop restart  - cycle through values
 \`\`\`
 
-**interpolate** — same as goto (alias):
+**jump** — discrete steps:
 \`\`\`
-pitch interpolate(0.5 2 10 incubic)
+volume jump 0.1 0.5 1 every 2         - change value every 2s
+volume jump 0 1 every 5to10 loop restart  - random interval
 \`\`\`
 
-**Easing curves:**
-\`linear\`, \`insine\`, \`outsine\`, \`inoutsine\`,
-\`inquad\`, \`outquad\`, \`inoutquad\`,
-\`incubic\`, \`outcubic\`, \`inoutcubic\`,
-\`inexpo\`, \`outexpo\`, \`inoutexpo\``,
+**Lists** — define reusable value lists with \`let\`:
+\`\`\`
+let vols 0.1 0.3 0.7 1
+volume fade vols every 3 loop bounce
+\`\`\`
+
+**Color modulation:**
+\`\`\`
+let myColors red blue white
+color fade myColors every 5 loop bounce
+color fade #ff0000 #0000ff #ffffff every 3
+\`\`\`
+
+**Loop modes:**
+- \`loop bounce\` — reverse direction at ends: A→B→C→B→A→...
+- \`loop restart\` — jump back to start: A→B→C→A→B→C→...
+- (no loop) — play once and hold last value`,
   },
   {
     title: 'Movement',
@@ -144,17 +152,17 @@ Position voices in 3D space:
 
 **walk** — ground plane (Y=0):
 \`\`\`
-move walk -5 -5 5 5          # x1 z1 x2 z2
+move walk -5 -5 5 5          - x1 z1 x2 z2
 \`\`\`
 
 **fly** — full 3D volume:
 \`\`\`
-move fly -5 0 -5 5 5 5       # x1 y1 z1 x2 y2 z2
+move fly -5 0 -5 5 5 5       - x1 y1 z1 x2 y2 z2
 \`\`\`
 
 **fixed** — stationary position:
 \`\`\`
-move fixed 3 1 -2             # x y z
+move fixed 3 1 -2             - x y z
 \`\`\`
 
 **Trajectories** — predefined curves:
@@ -191,17 +199,17 @@ delay 0.3 0.25 0.5 pingpong
 
 **Filter:**
 \`\`\`
-filter mode cutoff resonance [wet]
-filter lowpass 800 2 0.8
+filter lowpass cutoff 800 resonance 2
+filter highpass cutoff 200
 \`\`\`
-Modes: \`lowpass\`, \`highpass\`, \`bandpass\`, \`notch\`, \`peak\`
+Types: \`lowpass\`, \`highpass\`, \`bandpass\`, \`notch\`, \`peak\`
 
 **Distortion:**
 \`\`\`
-distortion mode drive [wet]
-distortion softclip 4 0.6
+distortion softclip drive 4
+distortion tanh
 \`\`\`
-Modes: \`softclip\`, \`hardclip\`, \`tanh\`, \`cubic\`, \`asymmetric\`
+Types: \`softclip\`, \`hardclip\`, \`tanh\`, \`cubic\`, \`asymmetric\`
 
 **EQ (3-band):**
 \`\`\`
@@ -254,9 +262,14 @@ Variables are expanded textually before parsing.`,
     id: 'comments',
     content: `# Comments
 
+**Line comment:**
+\`\`\`
+- this is a comment
+\`\`\`
+
 **Inline comment:**
 \`\`\`
-loop rain.wav  # this is a comment
+loop rain.wav  - this is a comment
 \`\`\`
 
 **Block comment:**

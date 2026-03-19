@@ -33,7 +33,7 @@ const PROPERTY_DOCS: PropDoc[] = [
   { label: 'noise', detail: '0–1', documentation: 'Trajectory noise amplitude. Adds organic jitter to movement paths.' },
   { label: 'color', detail: '#hex | name | r g b', documentation: 'Voice color in the viewport.\n- Hex: `#ff3300`\n- Named: `red`, `blue`, `cyan`\n- RGB: `0.8 0.2 0.1`\n- Supports interpolation per channel.' },
   { label: 'alpha', detail: '0–1', documentation: 'Voice opacity in the viewport. Supports interpolation.' },
-  { label: 'visual', detail: 'sphere|cube|trail|none', documentation: 'Visual representation in the 3D viewport. Combine with `+`: `trail+sphere`.' },
+  { label: 'visual', detail: 'sphere|cube|trail|none [size N]', documentation: 'Visual representation in the 3D viewport. Combine types: `visual trail sphere`.\nOptional `size` multiplier (0.01–10, default 1): `visual cube size 2`' },
   { label: 'background', detail: '#hex | name | grayscale', documentation: 'Set the viewport background color.\n- Hex: `background #1a1a2e`\n- Named: `background black`\n- Grayscale: `background 40`\n- RGB: `background 26,26,46`', insertText: 'background ' },
   { label: 'overlap', detail: 'flag', documentation: 'Allow overlapping retriggers (oneshot only).' },
   { label: 'persistent', detail: 'flag', documentation: 'Keep the voice alive even when it stops playing.' },
@@ -43,8 +43,8 @@ const PROPERTY_DOCS: PropDoc[] = [
   { label: 'loopable', detail: 'flag', documentation: 'Mark generated audio as loopable (crossfade-friendly).' },
   { label: 'reverb', detail: 'wet size damping', documentation: 'Convolution reverb.\n- `wet` 0–1 (dry/wet mix)\n- `size` 0–1 (room size)\n- `damping` 0–1 (high-frequency absorption)\nExample: `reverb 0.4 0.7 0.5`' },
   { label: 'delay', detail: 'wet time feedback [pingpong]', documentation: 'Delay effect.\n- `wet` 0–1\n- `time` seconds\n- `feedback` 0–1\n- `pingpong` (optional flag)\nExample: `delay 0.3 0.25 0.5 pingpong`' },
-  { label: 'filter', detail: 'mode cutoff resonance [wet]', documentation: 'Audio filter.\nModes: `lowpass`, `highpass`, `bandpass`, `notch`, `peak`\nExample: `filter lowpass 800 2 0.8`' },
-  { label: 'distortion', detail: 'mode drive [wet]', documentation: 'Distortion effect.\nModes: `softclip`, `hardclip`, `tanh`, `cubic`, `asymmetric`\nExample: `distortion softclip 4 0.6`' },
+  { label: 'filter', detail: 'type cutoff resonance [wet]', documentation: 'Audio filter.\nTypes: `lowpass`, `highpass`, `bandpass`, `notch`, `peak`\nExample: `filter lowpass cutoff 800 resonance 2`' },
+  { label: 'distortion', detail: 'type drive [wet]', documentation: 'Distortion effect.\nTypes: `softclip`, `hardclip`, `tanh`, `cubic`, `asymmetric`\nExample: `distortion softclip drive 4`' },
   { label: 'eq', detail: 'low mid high', documentation: '3-band EQ (dB).\n- `low` (320 Hz shelf)\n- `mid` (1 kHz peak)\n- `high` (3.2 kHz shelf)\nExample: `eq 3 -2 1`' },
 ];
 
@@ -55,16 +55,13 @@ const KEYWORD_DOCS: PropDoc[] = [
   { label: 'group', detail: 'block', documentation: 'Group voices with shared properties.\nProperties set in the group are inherited by all children.', insertText: 'group\n  ' },
   { label: 'endgroup', detail: 'block', documentation: 'End a group block.' },
   { label: 'gen', detail: 'AI generation', documentation: 'Generate audio with AI (ElevenLabs).\nSyntax: `loop gen "a gentle rain sound"`', insertText: 'gen "' },
+  { label: 'fade', detail: 'continuous modulation', documentation: 'Smoothly transition between values.\nSyntax: `fade 0 1 every 2`\nWith loop: `fade 0.2 0.8 every 3 loop bounce`', insertText: 'fade ' },
+  { label: 'jump', detail: 'discrete modulation', documentation: 'Step between values.\nSyntax: `jump 0.1 0.5 1 every 2`\nWith loop: `jump 1 2 3 every 5 loop restart`', insertText: 'jump ' },
   { label: 'comment', detail: 'block comment', documentation: 'Start a block comment. Everything until `endcomment` is ignored.' },
   { label: 'endcomment', detail: 'block comment', documentation: 'End a block comment.' },
 ];
 
-const EASING_NAMES = [
-  'linear', 'insine', 'outsine', 'inoutsine',
-  'inquad', 'outquad', 'inoutquad',
-  'incubic', 'outcubic', 'inoutcubic',
-  'inexpo', 'outexpo', 'inoutexpo',
-];
+const LOOP_MODES = ['bounce', 'restart'];
 
 const MOVEMENT_TYPES = ['walk', 'fly', 'fixed', 'spiral', 'orbit', 'lorenz'];
 const VISUAL_TYPES = ['sphere', 'cube', 'trail', 'none'];
@@ -84,25 +81,26 @@ function registerSatieLanguage(monaco: any) {
   monaco.languages.setMonarchTokensProvider(SATIE_LANG_ID, {
     tokenizer: {
       root: [
-        [/#.*$/, 'comment'],
+        [/^-.*$/, 'comment'],
+        [/\s+-\s+(?!\d).*$/, 'comment'],
         [/\b(comment)\b/, { token: 'comment', next: '@blockComment' }],
         [/\b(loop|oneshot)\b/, 'keyword'],
         [/\b(let)\b/, 'keyword.let'],
         [/\b(group|endgroup)\b/, 'keyword.control'],
         [/\b(gen)\b/, 'keyword.gen'],
         [/\b(every)\b/, 'keyword.every'],
-        [/\b(goto|gobetween|interpolate)\s*\(/, 'function'],
+        [/\b(fade|jump)\b/, 'function'],
         [/\b(walk|fly|fixed)\b/, 'type.move'],
-        [/\b(volume|pitch|start|end|duration|fade_in|fade_out|move|color|alpha|visual|overlap|persistent|mute|solo|randomstart|random_start|prompt|influence|loopable|background|bg)\b/, 'variable'],
+        [/\b(volume|pitch|start|end|duration|fade_in|fade_out|move|color|alpha|visual|overlap|persistent|mute|solo|randomstart|random_start|prompt|influence|loopable|background|bg|size)\b/, 'variable'],
         [/\b(reverb|delay|filter|distortion|eq)\b/, 'variable.dsp'],
-        [/\b(wet|drywet|size|roomsize|damping|damp|time|feedback|pingpong|mode|cutoff|freq|resonance|drive|low|mid|high|speed)\b/, 'variable.param'],
+        [/\b(wet|drywet|roomsize|damping|damp|time|feedback|pingpong|cutoff|freq|resonance|drive|low|mid|high|speed)\b/, 'variable.param'],
         [/\b(lowpass|highpass|bandpass|notch|peak|softclip|hardclip|tanh|cubic|asymmetric)\b/, 'type.mode'],
-        [/\b(linear|insine|outsine|inoutsine|inquad|outquad|inoutquad|incubic|outcubic|inoutcubic|inexpo|outexpo|inoutexpo)\b/, 'string.easing'],
+        [/\b(bounce|restart)\b/, 'type.mode'],
         [/-?\d+\.?\d*to-?\d+\.?\d*/, 'number.range'],
         [/-?\d+\.?\d*/, 'number'],
         [/#[0-9A-Fa-f]{6}/, 'string.color'],
         [/\b(red|green|blue|white|black|yellow|cyan|magenta|gray|grey)\b/, 'string.color'],
-        [/\b(and|in|as|for|ever)\b/, 'keyword.operator'],
+        [/\b(and|loop)\b/, 'keyword.operator'],
         [/audio\/\S+/, 'string.path'],
       ],
       blockComment: [
@@ -221,10 +219,10 @@ function registerSatieLanguage(monaco: any) {
         }
       }
 
-      // Easing names (inside interpolation parens)
-      if (/\b(goto|gobetween|interpolate)\s*\(/.test(textBefore)) {
-        for (const e of EASING_NAMES) {
-          suggestions.push({ label: e, kind: CK.Function, detail: 'easing curve', insertText: e, range });
+      // Loop modes (after 'loop' keyword in fade/jump)
+      if (/\bloop\s+\S*$/.test(textBefore)) {
+        for (const m of LOOP_MODES) {
+          suggestions.push({ label: m, kind: CK.Enum, detail: 'loop mode', insertText: m, range });
         }
       }
 
@@ -259,8 +257,8 @@ function registerSatieLanguage(monaco: any) {
         };
       }
 
-      // Easing names
-      if (EASING_NAMES.includes(token)) {
+      // Loop modes
+      if (LOOP_MODES.includes(token)) {
         return {
           range: {
             startLineNumber: position.lineNumber,
@@ -269,8 +267,8 @@ function registerSatieLanguage(monaco: any) {
             endColumn: word.endColumn,
           },
           contents: [
-            { value: `**${token}** — easing curve` },
-            { value: 'Used inside `goto()`, `gobetween()`, or `interpolate()` to shape value transitions over time.' },
+            { value: `**${token}** — loop mode` },
+            { value: token === 'bounce' ? 'Oscillate back and forth through values.' : 'Loop back to the first value after reaching the last.' },
           ],
         };
       }

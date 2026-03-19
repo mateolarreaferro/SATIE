@@ -265,7 +265,7 @@ export function Editor() {
         setIsPublic(sketch.is_public);
 
         // Restore viewport background color: first try @bg comment in script, then localStorage
-        const bgMatch = sketch.script.match(/^# @bg (#[0-9a-fA-F]{6})/m);
+        const bgMatch = sketch.script.match(/^- @bg (#[0-9a-fA-F]{6})/m);
         if (bgMatch) {
           setSpaceBgColor(bgMatch[1]);
         } else {
@@ -505,10 +505,12 @@ export function Editor() {
     const DEFAULT_BG = '#f4f3ee';
     let scriptToSave = script;
     // Remove any existing @bg comment
+    scriptToSave = scriptToSave.replace(/^- @bg #[0-9a-fA-F]{6}\n?/m, '');
+    // Also remove legacy # @bg format
     scriptToSave = scriptToSave.replace(/^# @bg #[0-9a-fA-F]{6}\n?/m, '');
     // Prepend if non-default
     if (spaceBgColor !== DEFAULT_BG) {
-      scriptToSave = `# @bg ${spaceBgColor}\n${scriptToSave}`;
+      scriptToSave = `- @bg ${spaceBgColor}\n${scriptToSave}`;
     }
 
     if (currentSketchId) {

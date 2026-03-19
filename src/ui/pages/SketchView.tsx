@@ -43,7 +43,7 @@ export function SketchView() {
           setLikeCount(s.like_count ?? 0);
           document.title = `${s.title} — Satie`;
           // Extract viewport bg color from script metadata
-          const bgMatch = s.script.match(/^# @bg (#[0-9a-fA-F]{6})/m);
+          const bgMatch = s.script.match(/^- @bg (#[0-9a-fA-F]{6})/m) ?? s.script.match(/^# @bg (#[0-9a-fA-F]{6})/m);
           if (bgMatch) setBgColor(bgMatch[1]);
           // Load author profile
           getProfile(s.user_id).then(setAuthor).catch(() => {});

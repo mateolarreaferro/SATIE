@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parse, tryParse, sanitizeForClipName, pathFor } from '../SatieParser';
 import { WanderType } from '../Statement';
-import { InterpolationType } from '../InterpolationData';
+import { ModulationType, LoopMode } from '../InterpolationData';
 
 describe('SatieParser', () => {
   // ─── Helper: parse a single-statement script ───
@@ -146,29 +146,31 @@ describe('SatieParser', () => {
   });
 
   // ──────────────────────────────────────────────
-  // Interpolation in properties
+  // Modulation in properties (fade/jump)
   // ──────────────────────────────────────────────
-  describe('interpolation in properties', () => {
-    it('volume goto', () => {
-      const s = parseOne('loop rain\n  volume goto(0and1 in 5)');
+  describe('modulation in properties', () => {
+    it('volume fade', () => {
+      const s = parseOne('loop rain\n  volume fade 0 1 every 5');
       expect(s.volumeInterpolation).not.toBeNull();
-      expect(s.volumeInterpolation!.interpolationType).toBe(InterpolationType.Goto);
-      expect(s.volumeInterpolation!.minRange.min).toBe(0);
-      expect(s.volumeInterpolation!.maxRange.min).toBe(1);
-      expect(s.volumeInterpolation!.durationRange.min).toBe(5);
+      expect(s.volumeInterpolation!.modulationType).toBe(ModulationType.Fade);
+      expect(s.volumeInterpolation!.values).toEqual([0, 1]);
+      expect(s.volumeInterpolation!.every.min).toBe(5);
     });
 
-    it('volume gobetween with easing', () => {
-      const s = parseOne('loop rain\n  volume gobetween(0and1 as incubic in 10)');
+    it('volume fade with loop bounce', () => {
+      const s = parseOne('loop rain\n  volume fade 0 0.5 1 every 2 loop bounce');
       expect(s.volumeInterpolation).not.toBeNull();
-      expect(s.volumeInterpolation!.interpolationType).toBe(InterpolationType.GoBetween);
-      expect(s.volumeInterpolation!.easeName).toBe('incubic');
+      expect(s.volumeInterpolation!.modulationType).toBe(ModulationType.Fade);
+      expect(s.volumeInterpolation!.values).toEqual([0, 0.5, 1]);
+      expect(s.volumeInterpolation!.loopMode).toBe(LoopMode.Bounce);
     });
 
-    it('pitch interpolate', () => {
-      const s = parseOne('loop rain\n  pitch interpolate(0.5and2 as insine in 20)');
+    it('pitch jump', () => {
+      const s = parseOne('loop rain\n  pitch jump 0.8 1 1.2 every 3 loop restart');
       expect(s.pitchInterpolation).not.toBeNull();
-      expect(s.pitchInterpolation!.interpolationType).toBe(InterpolationType.Interpolate);
+      expect(s.pitchInterpolation!.modulationType).toBe(ModulationType.Jump);
+      expect(s.pitchInterpolation!.values).toEqual([0.8, 1, 1.2]);
+      expect(s.pitchInterpolation!.loopMode).toBe(LoopMode.Restart);
     });
   });
 
@@ -255,10 +257,11 @@ describe('SatieParser', () => {
       expect(s.staticColor).toBe('#ff0080');
     });
 
-    it('color channel interpolation: red gobetween', () => {
-      const s = parseOne('loop rain\n  color red gobetween(0and255 in 5) green 128 blue 0');
+    it('color channel modulation: red fade', () => {
+      const s = parseOne('loop rain\n  color red fade 0 255 every 5 green 128 blue 0');
       expect(s.colorRedInterpolation).not.toBeNull();
-      // Static values (green 128, blue 0) go to colorRange, not interpolation
+      expect(s.colorRedInterpolation!.modulationType).toBe(ModulationType.Fade);
+      // Static values (green 128, blue 0) go to colorRange, not modulation
       expect(s.colorGreenRange).not.toBeNull();
       expect(s.colorGreenRange!.min).toBeCloseTo(128 / 255);
       expect(s.colorBlueRange).not.toBeNull();
@@ -326,10 +329,11 @@ describe('SatieParser', () => {
       expect(s.eqParams!.highGain.min).toBe(1);
     });
 
-    it('DSP with interpolation: reverb wet gobetween(0and1 in 5)', () => {
-      const s = parseOne('loop rain\n  reverb wet gobetween(0and1 in 5)');
+    it('DSP with modulation: reverb wet fade', () => {
+      const s = parseOne('loop rain\n  reverb wet fade 0 1 every 5 loop bounce');
       expect(s.reverbParams!.dryWetInterpolation).not.toBeNull();
-      expect(s.reverbParams!.dryWetInterpolation!.interpolationType).toBe(InterpolationType.GoBetween);
+      expect(s.reverbParams!.dryWetInterpolation!.modulationType).toBe(ModulationType.Fade);
+      expect(s.reverbParams!.dryWetInterpolation!.loopMode).toBe(LoopMode.Bounce);
     });
   });
 
@@ -447,8 +451,8 @@ describe('SatieParser', () => {
   // Comments
   // ──────────────────────────────────────────────
   describe('comments', () => {
-    it('line comments with #', () => {
-      const stmts = parse('# this is a comment\nloop rain\n');
+    it('line comments with -', () => {
+      const stmts = parse('- this is a comment\nloop rain\n');
       expect(stmts.length).toBe(1);
       expect(stmts[0].clip).toBe('rain');
     });
@@ -465,7 +469,7 @@ describe('SatieParser', () => {
     });
 
     it('inline comment on statement', () => {
-      const s = parseOne('loop rain # ambient sound');
+      const s = parseOne('loop rain - ambient sound');
       expect(s.clip).toBe('rain');
     });
   });
@@ -872,11 +876,11 @@ describe('SatieParser', () => {
       expect(stmts[0].volume.max).toBe(0.8);
     });
 
-    it('interpolation variable', () => {
-      const stmts = parse('myInterp goto(0and1 in 10)\nloop bird\n    volume myInterp\n');
+    it('modulation variable', () => {
+      const stmts = parse('myMod fade 0 1 every 10\nloop bird\n    volume myMod\n');
       expect(stmts.length).toBe(1);
       expect(stmts[0].volumeInterpolation).not.toBeNull();
-      expect(stmts[0].volumeInterpolation!.interpolationType).toBe(InterpolationType.Goto);
+      expect(stmts[0].volumeInterpolation!.modulationType).toBe(ModulationType.Fade);
     });
 
     it('variable in every clause', () => {
@@ -928,7 +932,7 @@ describe('SatieParser', () => {
     });
 
     it('variable with comment on definition line', () => {
-      const stmts = parse('myVol 0.5 # quiet\nloop bird\n    volume myVol\n');
+      const stmts = parse('myVol 0.5 - quiet\nloop bird\n    volume myVol\n');
       expect(stmts[0].volume.min).toBe(0.5);
     });
 
@@ -959,7 +963,7 @@ group nature
     move fly x -8to8 y 2to5 z -8to8
 
   loop wind
-    volume gobetween(0.1and0.5 as insine in 10 for ever)
+    volume fade 0.1 0.5 every 10 loop bounce
     filter mode lowpass cutoff 2000
 
 endgroup

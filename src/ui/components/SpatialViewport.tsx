@@ -71,8 +71,9 @@ function useAudioSourceFrame(
 
     if (meshRef.current) {
       meshRef.current.position.set(track.position.x, track.position.y, track.position.z);
-      const scale = 0.12 + track.volume * 0.2;
-      meshRef.current.scale.setScalar(scale);
+      const baseScale = 0.12 + track.volume * 0.2;
+      const sizeMultiplier = track.statement.visualSize ?? 1;
+      meshRef.current.scale.setScalar(baseScale * sizeMultiplier);
     }
 
     if (matRef.current) {
@@ -668,6 +669,29 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
   );
 });
 
+/** Inner component to listen for container resize and trigger R3F canvas resize */
+function CanvasResizer({ containerRef }: { containerRef: React.RefObject<HTMLDivElement | null> }) {
+  const { gl, camera } = useThree();
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const { clientWidth, clientHeight } = el;
+      if (clientWidth > 0 && clientHeight > 0) {
+        gl.setSize(clientWidth, clientHeight);
+        if ('aspect' in camera) {
+          (camera as THREE.PerspectiveCamera).aspect = clientWidth / clientHeight;
+          (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [gl, camera, containerRef]);
+  return null;
+}
+
 export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColor = '#f4f3ee', onBgColorChange, onListenerMove, onListenerRotate }: SpatialViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState(false);
@@ -731,6 +755,7 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
         }}
       >
         <BgColorUpdater color={bgColor} />
+        <CanvasResizer containerRef={containerRef} />
         <CameraResetContext.Provider value={cameraResetRef}>
           <CameraZoomContext.Provider value={cameraZoomRef}>
             <CameraFitContext.Provider value={cameraFitRef}>

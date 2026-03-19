@@ -4,8 +4,7 @@ export { parse, tryParse, pathFor, sanitizeForClipName, SatieSyntaxError } from 
 export { Statement, WanderType } from './core/Statement';
 export type { Vec3, ReverbParams, DelayParams, FilterParams, DistortionParams, EQParams } from './core/Statement';
 export { RangeOrValue } from './core/RangeOrValue';
-export { InterpolationData, InterpolationType } from './core/InterpolationData';
-export { getEaseFunction } from './core/EaseFunctions';
+export { InterpolationData, ModulationType, LoopMode } from './core/InterpolationData';
 export { SatieDSPClock } from './core/SatieDSPClock';
 export { SatieScheduler } from './core/SatieScheduler';
 export type { SatieAudioEvent } from './core/SatieScheduler';

@@ -3,7 +3,7 @@
  * Parses .satie scripts into Statement objects.
  */
 import { RangeOrValue } from './RangeOrValue';
-import { InterpolationData, InterpolationType } from './InterpolationData';
+import { InterpolationData, ModulationType, LoopMode } from './InterpolationData';
 import {
   Statement,
   GenDefinition,
@@ -40,13 +40,13 @@ export class SatieSyntaxError extends Error {
 }
 
 // Regex patterns (compiled once)
-const GenRx = /^(?<prefix>(?:\d+\s*\*\s*)?)(?<kind>loop|oneshot)\s+gen\s+(?<prompt>.+?)(?=\s+every\s+|\s*#|$)/i;
+const GenRx = /^(?<prefix>(?:\d+\s*\*\s*)?)(?<kind>loop|oneshot)\s+gen\s+(?<prompt>.+?)(?=\s+every\s+|$)/i;
 
-const StmtRx = /^(?:(?<count>\d+)\s*\*\s*)?(?<kind>loop|oneshot)\s+(?<clip>[^\s#]+)\s*(?:every\s+(?:(?<e1>-?\d+\.?\d*)to(?<e2>-?\d+\.?\d*)|(?<e>-?\d+\.?\d*)))?\s*(?:#.*)?\r?\n(?<block>(?:[ \t]+.*\r?\n?)*)/im;
+const StmtRx = /^(?:(?<count>\d+)\s*\*\s*)?(?<kind>loop|oneshot)\s+(?<clip>\S+)\s*(?:every\s+(?:(?<e1>-?\d+\.?\d*)to(?<e2>-?\d+\.?\d*)|(?<e>-?\d+\.?\d*)))?\s*\r?\n(?<block>(?:[ \t]+.*\r?\n?)*)/im;
 
 const StmtStartRx = /^(?:\d+\s*\*\s*)?(?:loop|oneshot)\b/i;
 
-const PropRx = /^[ \t]*(?<key>\w+)(?:[ \t]+(?<val>[^\r\n#]+))?/gm;
+const PropRx = /^[ \t]*(?<key>\w+)(?:[ \t]+(?<val>[^\r\n]+))?/gm;
 
 interface GroupCtx {
   props: Map<string, string>;
@@ -75,8 +75,24 @@ function stripBlockComments(text: string): string {
   return result.join('\n');
 }
 
-function hasInterpolation(v: string): boolean {
-  return v.includes('interpolate') || v.includes('goto') || v.includes('gobetween');
+/**
+ * Strip dash comments from a line:
+ * - Full line comments: line starts with '-' (after whitespace)
+ * - Inline comments: ' - ' (space-dash-space) where text after dash doesn't start with a digit
+ *   (to avoid matching negative numbers like 'x -5to5')
+ */
+function stripDashComment(line: string): string | null {
+  const trimmed = line.trimStart();
+  // Full line comment
+  if (trimmed.startsWith('-')) return null;
+  // Inline comment: find ' - ' pattern where next non-space char is not a digit or dot
+  const inlineMatch = line.match(/^(.*?)\s+-\s+(?!\d)/);
+  if (inlineMatch) return inlineMatch[1];
+  return line;
+}
+
+function hasModulation(v: string): boolean {
+  return /\bfade\b/.test(v) || /\bjump\b/.test(v);
 }
 
 function parseRange(str: string): [number, number] {
@@ -144,16 +160,14 @@ function parseSingle(block: string): Statement {
     const k = propMatch.groups!.key.toLowerCase();
     const isFlag = STANDALONE_FLAGS.has(k);
     let v = (!isFlag && propMatch.groups!.val) ? propMatch.groups!.val.trim() : '';
-    // Strip trailing inline comments, but preserve # in hex colors
-    v = v.replace(/\s+#(?![0-9A-Fa-f]{6}\b).*$/, '');
 
     switch (k) {
       case 'volume':
-        if (hasInterpolation(v)) s.volumeInterpolation = InterpolationData.parse(v);
+        if (hasModulation(v)) s.volumeInterpolation = InterpolationData.parse(v);
         else s.volume = RangeOrValue.parse(v);
         break;
       case 'pitch':
-        if (hasInterpolation(v)) s.pitchInterpolation = InterpolationData.parse(v);
+        if (hasModulation(v)) s.pitchInterpolation = InterpolationData.parse(v);
         else s.pitch = RangeOrValue.parse(v);
         break;
       case 'starts_at': // Legacy alias
@@ -174,7 +188,7 @@ function parseSingle(block: string): Statement {
       case 'color': parseColor(s, v); break;
       case 'background': case 'bg': parseBackground(s, v); break;
       case 'alpha': {
-        if (hasInterpolation(v)) s.colorAlphaInterpolation = InterpolationData.parse(v);
+        if (hasModulation(v)) s.colorAlphaInterpolation = InterpolationData.parse(v);
         else { const a = parseFloat(v); if (!isNaN(a)) s.staticAlpha = Math.max(0, Math.min(1, a)); }
         break;
       }
@@ -214,6 +228,15 @@ function parseVisual(s: Statement, v: string): void {
   for (let i = 0; i < tokens.length; i++) {
     const lower = tokens[i].toLowerCase();
     if (!lower) continue;
+    // Handle `size <number>` — visual size multiplier
+    if (lower === 'size' && i + 1 < tokens.length) {
+      const sizeVal = parseFloat(tokens[i + 1]);
+      if (!isNaN(sizeVal)) {
+        s.visualSize = Math.max(0.01, Math.min(10, sizeVal));
+        i++; // skip next token
+        continue;
+      }
+    }
     // Handle `object "PrefabName"` → push `object:PrefabName`
     if (lower === 'object' && i + 1 < tokens.length) {
       const name = tokens[i + 1].replace(/"/g, '');
@@ -575,11 +598,52 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   return { r, g, b };
 }
 
+const NAMED_COLORS: Record<string, string> = {
+  white: '#ffffff', black: '#000000', red: '#ff0000', green: '#00ff00',
+  blue: '#0000ff', yellow: '#ffff00', cyan: '#00ffff', magenta: '#ff00ff',
+  gray: '#808080', grey: '#808080',
+};
+
+/** Parse a single color token (named color or hex) into [r,g,b] 0-255. Returns null if not a color. */
+function parseColorToken(token: string): [number, number, number] | null {
+  const lower = token.toLowerCase();
+  const hex = NAMED_COLORS[lower];
+  if (hex) {
+    return [parseInt(hex.substring(1, 3), 16), parseInt(hex.substring(3, 5), 16), parseInt(hex.substring(5, 7), 16)];
+  }
+  if (token.startsWith('#') && token.length === 7) {
+    return [parseInt(token.substring(1, 3), 16), parseInt(token.substring(3, 5), 16), parseInt(token.substring(5, 7), 16)];
+  }
+  return null;
+}
+
 function parseColor(s: Statement, v: string): void {
   v = v.trim();
   if (!v) return;
 
-  // Named channel syntax: red 255 green gobetween(...) alpha 0.5
+  // Color modulation: fade/jump <colors...> every <dur> [loop bounce|restart]
+  const modMatch = v.match(/^(fade|jump)\s+(.+?)\s+every\s+(\S+)(?:\s+loop\s+(bounce|restart))?$/i);
+  if (modMatch) {
+    const modType = modMatch[1].toLowerCase() === 'fade' ? ModulationType.Fade : ModulationType.Jump;
+    const colorTokens = modMatch[2].trim().split(/\s+/);
+    const every = RangeOrValue.parse(modMatch[3]);
+    const loop = modMatch[4] ? modMatch[4].toLowerCase() as LoopMode : LoopMode.None;
+
+    const rgbValues: [number, number, number][] = [];
+    for (const token of colorTokens) {
+      const rgb = parseColorToken(token);
+      if (rgb) rgbValues.push(rgb);
+    }
+
+    if (rgbValues.length >= 2) {
+      s.colorRedInterpolation = new InterpolationData(rgbValues.map(c => c[0] / 255), every, modType, loop);
+      s.colorGreenInterpolation = new InterpolationData(rgbValues.map(c => c[1] / 255), every, modType, loop);
+      s.colorBlueInterpolation = new InterpolationData(rgbValues.map(c => c[2] / 255), every, modType, loop);
+    }
+    return;
+  }
+
+  // Named channel syntax: red fade 0 1 every 5 green 0.5 alpha fade 0 1 every 3
   if (v.includes('red ') || v.includes('green ') || v.includes('blue ') || v.includes('alpha ')) {
     const normalized = v.replace(/ and /g, ' ');
     const parseChannel = (channel: string, otherChannels: string) => {
@@ -591,47 +655,6 @@ function parseColor(s: Statement, v: string): void {
     parseChannel('green', 'red|blue|alpha');
     parseChannel('blue', 'red|green|alpha');
     parseChannel('alpha', 'red|green|blue');
-    return;
-  }
-
-  // Hex gobetween: gobetween(#000000to#FFFFFF as ease in dur)
-  const hexGbMatch = v.match(
-    /gobetween\s*\(\s*#([0-9A-Fa-f]{6})to#([0-9A-Fa-f]{6})\s*(?:as\s+(?<ease>\w+))?\s+in\s+(?<dur>-?[\d.]+(?:to-?[\d.]+)?)\s*\)/,
-  );
-  if (hexGbMatch) {
-    const startC = hexToRgb(hexGbMatch[1]);
-    const endC = hexToRgb(hexGbMatch[2]);
-    const ease = hexGbMatch.groups?.ease ?? 'linear';
-    const dur = RangeOrValue.parse(hexGbMatch.groups!.dur);
-    for (const [channel, startVal, endVal] of [
-      ['R', startC.r, endC.r],
-      ['G', startC.g, endC.g],
-      ['B', startC.b, endC.b],
-    ] as const) {
-      const prop = `color${channel}Interpolation` as keyof Statement;
-      (s as any)[prop] = new InterpolationData(
-        RangeOrValue.single(startVal), RangeOrValue.single(endVal),
-        ease, dur, 1, true, InterpolationType.GoBetween,
-      );
-    }
-    return;
-  }
-
-  // Single-channel grayscale gobetween: gobetween(0,255 in 5)
-  const grayGbMatch = v.match(
-    /gobetween\s*\(\s*(?<min>-?[\d.]+)\s*,\s*(?<max>-?[\d.]+)\s+in\s+(?<dur>-?[\d.]+(?:to-?[\d.]+)?)\s*\)/,
-  );
-  if (grayGbMatch) {
-    const min = parseFloat(grayGbMatch.groups!.min) / 255;
-    const max = parseFloat(grayGbMatch.groups!.max) / 255;
-    const dur = RangeOrValue.parse(grayGbMatch.groups!.dur);
-    for (const channel of ['Red', 'Green', 'Blue'] as const) {
-      const prop = `color${channel}Interpolation` as keyof Statement;
-      (s as any)[prop] = new InterpolationData(
-        RangeOrValue.single(min), RangeOrValue.single(max),
-        'linear', dur, 1, true, InterpolationType.GoBetween,
-      );
-    }
     return;
   }
 
@@ -652,13 +675,8 @@ function parseColor(s: Statement, v: string): void {
   }
 
   // Named colors
-  const namedColors: Record<string, string> = {
-    white: '#ffffff', black: '#000000', red: '#ff0000', green: '#00ff00',
-    blue: '#0000ff', yellow: '#ffff00', cyan: '#00ffff', magenta: '#ff00ff',
-    gray: '#808080', grey: '#808080',
-  };
-  if (namedColors[v.toLowerCase()]) {
-    s.staticColor = namedColors[v.toLowerCase()];
+  if (NAMED_COLORS[v.toLowerCase()]) {
+    s.staticColor = NAMED_COLORS[v.toLowerCase()];
   }
 }
 
@@ -708,7 +726,7 @@ function parseColorChannel(s: Statement, channelName: string, value: string): vo
 
   // Alpha: don't normalize 0-255 → 0-1, it's already 0-1
   if (isAlpha) {
-    if (hasInterpolation(value)) {
+    if (hasModulation(value)) {
       s.colorAlphaInterpolation = InterpolationData.parse(value);
     } else {
       const v = parseFloat(value);
@@ -717,20 +735,13 @@ function parseColorChannel(s: Statement, channelName: string, value: string): vo
     return;
   }
 
-  if (hasInterpolation(value)) {
+  if (hasModulation(value)) {
     let interp = InterpolationData.parse(value);
     if (interp) {
-      // Normalize 0-255 to 0-1
-      const minCheck = interp.minRange.isRange ? Math.max(interp.minRange.min, interp.minRange.max) : interp.minRange.min;
-      const maxCheck = interp.maxRange.isRange ? Math.max(interp.maxRange.min, interp.maxRange.max) : interp.maxRange.min;
-      if (minCheck > 1 || maxCheck > 1) {
-        const normalizedMin = interp.minRange.isRange
-          ? RangeOrValue.range(interp.minRange.min / 255, interp.minRange.max / 255)
-          : RangeOrValue.single(interp.minRange.min / 255);
-        const normalizedMax = interp.maxRange.isRange
-          ? RangeOrValue.range(interp.maxRange.min / 255, interp.maxRange.max / 255)
-          : RangeOrValue.single(interp.maxRange.min / 255);
-        interp = new InterpolationData(normalizedMin, normalizedMax, interp.easeName, interp.durationRange, interp.repeatCount, interp.isForever, interp.interpolationType);
+      // Normalize 0-255 to 0-1 if values are > 1
+      const maxVal = Math.max(...interp.values);
+      if (maxVal > 1) {
+        interp = new InterpolationData(interp.values.map(v => v / 255), interp.every, interp.modulationType, interp.loopMode);
       }
       switch (channelName.toLowerCase()) {
         case 'red': s.colorRedInterpolation = interp; break;
@@ -760,7 +771,7 @@ function parseDSPParam(v: string, paramRx: RegExp): { range: RangeOrValue; inter
   const match = v.match(paramRx);
   if (!match) return null;
   const val = match[1].trim();
-  if (hasInterpolation(val)) return { range: RangeOrValue.Null, interp: InterpolationData.parse(val) };
+  if (hasModulation(val)) return { range: RangeOrValue.Null, interp: InterpolationData.parse(val) };
   return { range: RangeOrValue.parse(val), interp: null };
 }
 
@@ -797,13 +808,18 @@ function parseDelay(s: Statement, v: string): void {
 }
 
 function parseFilter(s: Statement, v: string): void {
-  const modeMatch = v.match(/\bmode\s+(lowpass|highpass|bandpass|notch|peak)/i);
-  const cutoff = parseDSPParam(v, /\b(?:cutoff|freq)\s+(.+?)(?=\s+(?:mode|resonance|q|wet|drywet)\s+|$)/i);
-  const res = parseDSPParam(v, /\b(?:resonance|q)\s+(.+?)(?=\s+(?:mode|cutoff|freq|wet|drywet)\s+|$)/i);
-  const wet = parseDSPParam(v, /\b(?:wet|drywet)\s+(.+?)(?=\s+(?:mode|cutoff|freq|resonance|q)\s+|$)/i);
+  // Support both 'filter lowpass ...' (new) and 'filter mode lowpass ...' (legacy)
+  const directModeMatch = v.match(/^(lowpass|highpass|bandpass|notch|peak)\b/i);
+  const legacyModeMatch = v.match(/\bmode\s+(lowpass|highpass|bandpass|notch|peak)/i);
+  const mode = directModeMatch ? directModeMatch[1].toLowerCase() :
+               legacyModeMatch ? legacyModeMatch[1].toLowerCase() : 'lowpass';
+
+  const cutoff = parseDSPParam(v, /\b(?:cutoff|freq)\s+(.+?)(?=\s+(?:mode|resonance|q|wet|drywet|lowpass|highpass|bandpass|notch|peak)\s+|$)/i);
+  const res = parseDSPParam(v, /\b(?:resonance|q)\s+(.+?)(?=\s+(?:mode|cutoff|freq|wet|drywet|lowpass|highpass|bandpass|notch|peak)\s+|$)/i);
+  const wet = parseDSPParam(v, /\b(?:wet|drywet)\s+(.+?)(?=\s+(?:mode|cutoff|freq|resonance|q|lowpass|highpass|bandpass|notch|peak)\s+|$)/i);
 
   s.filterParams = {
-    mode: modeMatch ? modeMatch[1].toLowerCase() : 'lowpass',
+    mode,
     cutoff: cutoff?.range ?? RangeOrValue.single(1000),
     resonance: res?.range ?? RangeOrValue.single(1),
     dryWet: wet?.range ?? RangeOrValue.single(1),
@@ -814,12 +830,17 @@ function parseFilter(s: Statement, v: string): void {
 }
 
 function parseDistortion(s: Statement, v: string): void {
-  const modeMatch = v.match(/\bmode\s+(softclip|hardclip|tanh|cubic|asymmetric)/i);
-  const drive = parseDSPParam(v, /\bdrive\s+(.+?)(?=\s+(?:mode|wet|drywet)\s+|$)/i);
-  const wet = parseDSPParam(v, /\b(?:wet|drywet)\s+(.+?)(?=\s+(?:mode|drive)\s+|$)/i);
+  // Support both 'distortion softclip ...' (new) and 'distortion mode softclip ...' (legacy)
+  const directModeMatch = v.match(/^(softclip|hardclip|tanh|cubic|asymmetric)\b/i);
+  const legacyModeMatch = v.match(/\bmode\s+(softclip|hardclip|tanh|cubic|asymmetric)/i);
+  const mode = directModeMatch ? directModeMatch[1].toLowerCase() :
+               legacyModeMatch ? legacyModeMatch[1].toLowerCase() : 'softclip';
+
+  const drive = parseDSPParam(v, /\bdrive\s+(.+?)(?=\s+(?:mode|wet|drywet|softclip|hardclip|tanh|cubic|asymmetric)\s+|$)/i);
+  const wet = parseDSPParam(v, /\b(?:wet|drywet)\s+(.+?)(?=\s+(?:mode|drive|softclip|hardclip|tanh|cubic|asymmetric)\s+|$)/i);
 
   s.distortionParams = {
-    mode: modeMatch ? modeMatch[1].toLowerCase() : 'softclip',
+    mode,
     drive: drive?.range ?? RangeOrValue.single(1),
     dryWet: wet?.range ?? RangeOrValue.single(1),
     driveInterpolation: drive?.interp ?? null,
@@ -855,13 +876,13 @@ function flushGroup(dst: Statement[], g: GroupCtx): void {
 
   if (hasVol) {
     const vRaw = g.props.get('volume')!;
-    if (hasInterpolation(vRaw)) groupVolInterp = InterpolationData.parse(vRaw);
+    if (hasModulation(vRaw)) groupVolInterp = InterpolationData.parse(vRaw);
     else gVolRange = RangeOrValue.parse(vRaw);
   }
 
   if (hasPitch) {
     const pRaw = g.props.get('pitch')!;
-    if (hasInterpolation(pRaw)) groupPitchInterp = InterpolationData.parse(pRaw);
+    if (hasModulation(pRaw)) groupPitchInterp = InterpolationData.parse(pRaw);
     else gPitchRange = RangeOrValue.parse(pRaw);
   }
 
@@ -881,8 +902,15 @@ function flushGroup(dst: Statement[], g: GroupCtx): void {
   }
 
   for (const s of g.children) {
-    if (groupVolInterp && !s.volumeInterpolation) s.volumeInterpolation = groupVolInterp;
-    if (groupPitchInterp && !s.pitchInterpolation) s.pitchInterpolation = groupPitchInterp;
+    // Group modulation: if child has its own modulation, store group as a separate multiplier
+    if (groupVolInterp) {
+      if (s.volumeInterpolation) s.groupVolumeModulation = groupVolInterp;
+      else s.volumeInterpolation = groupVolInterp;
+    }
+    if (groupPitchInterp) {
+      if (s.pitchInterpolation) s.groupPitchModulation = groupPitchInterp;
+      else s.pitchInterpolation = groupPitchInterp;
+    }
 
     if (hasColor) {
       if (groupStaticColor && !s.staticColor) s.staticColor = groupStaticColor;
@@ -919,6 +947,22 @@ function flushGroup(dst: Statement[], g: GroupCtx): void {
         case 'mute': s.mute = true; break;
         case 'solo': s.solo = true; break;
         case 'random_start': case 'randomstart': s.randomStart = true; break;
+        // DSP effect inheritance — apply group DSP if child doesn't have its own
+        case 'reverb': if (!s.reverbParams) parseReverb(s, val); break;
+        case 'delay': if (!s.delayParams) parseDelay(s, val); break;
+        case 'filter': if (!s.filterParams) parseFilter(s, val); break;
+        case 'distortion': if (!s.distortionParams) parseDistortion(s, val); break;
+        case 'eq': if (!s.eqParams) parseEQ(s, val); break;
+        // Move and visual inheritance
+        case 'move': if (s.wanderType === WanderType.None) parseMove(s, val); break;
+        case 'visual': if (s.visual.length === 0) parseVisual(s, val); break;
+        case 'alpha': {
+          if (!s.colorAlphaInterpolation && s.staticAlpha === 1) {
+            if (hasModulation(val)) s.colorAlphaInterpolation = InterpolationData.parse(val);
+            else { const a = parseFloat(val); if (!isNaN(a)) s.staticAlpha = Math.max(0, Math.min(1, a)); }
+          }
+          break;
+        }
       }
     }
 
@@ -986,7 +1030,7 @@ const RESERVED_WORDS = new Set([
   'loop', 'oneshot', 'group', 'endgroup', 'gen', 'comment', 'endcomment', 'let',
   'and', 'in', 'as', 'for', 'ever', 'at', 'to', 'fade',
   'walk', 'fly', 'fixed', 'pos', 'spiral', 'orbit', 'lorenz',
-  'goto', 'gobetween', 'interpolate',
+  'fade', 'jump', 'bounce', 'restart',
   'x', 'y', 'z',
   'wet', 'drywet', 'size', 'roomsize', 'damping', 'damp', 'time',
   'feedback', 'pingpong', 'mode', 'cutoff', 'freq', 'resonance',
@@ -1012,17 +1056,17 @@ function extractAndSubstituteVariables(lines: string[]): string[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimStart();
-    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (!trimmed || trimmed.startsWith('-')) continue;
     if (countIndent(line) > 0) continue; // variables must be top-level
 
     // Skip structural keywords
     if (/^(?:loop|oneshot|group|endgroup|gen|comment|endcomment)\b/i.test(trimmed)) continue;
 
     // `let name value` syntax
-    let varMatch = trimmed.match(/^let\s+([a-zA-Z_]\w*)\s+(.+?)(?:\s+#.*)?$/);
+    let varMatch = trimmed.match(/^let\s+([a-zA-Z_]\w*)\s+(.+?)$/);
     if (!varMatch) {
       // Bare `name value` syntax — name must not be a reserved word
-      varMatch = trimmed.match(/^([a-zA-Z_]\w*)\s+(.+?)(?:\s+#.*)?$/);
+      varMatch = trimmed.match(/^([a-zA-Z_]\w*)\s+(.+?)$/);
       if (varMatch && RESERVED_WORDS.has(varMatch[1].toLowerCase())) {
         varMatch = null;
       }
@@ -1096,13 +1140,8 @@ function expandMultiClip(lines: string[]): string[] {
       const kind = headerMatch[2];
       let rest = headerMatch[3];
 
-      // Strip inline comment
-      let comment = '';
-      const commentMatch = rest.match(/\s+#.*$/);
-      if (commentMatch) {
-        comment = commentMatch[0];
-        rest = rest.substring(0, rest.length - commentMatch[0].length);
-      }
+      // Inline comments already stripped by pre-pass
+      const comment = '';
 
       // Strip every clause (value is a single non-space token like 5 or 5to10)
       let everyClause = '';
@@ -1158,7 +1197,7 @@ function expandMultiClip(lines: string[]): string[] {
 
 // ============ GEN BLOCK EXTRACTION ============
 
-const GenBlockRx = /^gen\s+(\w+)\s*(?:#.*)?$/i;
+const GenBlockRx = /^gen\s+(\w+)\s*$/i;
 
 /**
  * Extract `gen <name>` blocks from the script lines.
@@ -1187,7 +1226,7 @@ function extractGenBlocks(lines: string[]): { genDefs: Map<string, GenDefinition
       while (i < lines.length) {
         const lineIndent = countIndent(lines[i]);
         const lineTrimmed = lines[i].trimStart();
-        if (!lineTrimmed || lineTrimmed.startsWith('#')) { i++; continue; }
+        if (!lineTrimmed || lineTrimmed.startsWith('-')) { i++; continue; }
         if (lineIndent <= blockIndent) break;
 
         const propMatch = lineTrimmed.match(/^(\w+)(?:\s+(.+))?$/);
@@ -1283,7 +1322,7 @@ function extractTrajectoryGenBlocks(
       while (i < lines.length) {
         const lineIndent = countIndent(lines[i]);
         const lineTrimmed = lines[i].trimStart();
-        if (!lineTrimmed || lineTrimmed.startsWith('#')) { blockLines.push(lines[i]); i++; continue; }
+        if (!lineTrimmed || lineTrimmed.startsWith('-')) { blockLines.push(lines[i]); i++; continue; }
         if (lineIndent <= blockIndent) break;
         blockLines.push(lines[i]);
 
@@ -1306,7 +1345,7 @@ function extractTrajectoryGenBlocks(
 
         for (const bline of blockLines) {
           const lt = bline.trimStart();
-          if (!lt || lt.startsWith('#')) continue;
+          if (!lt || lt.startsWith('-')) continue;
           const propMatch = lt.match(/^(\w+)(?:\s+(.+))?$/);
           if (!propMatch) continue;
           const key = propMatch[1].toLowerCase();
@@ -1352,8 +1391,16 @@ function extractTrajectoryGenBlocks(
 export function parse(script: string): Statement[] {
   const rawLines = script.replace(/\r\n/g, '\n').split('\n');
 
+  // Pre-pass 0: strip dash comments (line comments and inline comments)
+  const commentStripped: string[] = [];
+  for (const line of rawLines) {
+    const result = stripDashComment(line);
+    if (result !== null) commentStripped.push(result);
+    else commentStripped.push(''); // preserve line count for error reporting
+  }
+
   // Pre-pass 1: expand `and <keyword>` into indented property lines
-  const expandedLines = expandAndSeparators(rawLines);
+  const expandedLines = expandAndSeparators(commentStripped);
 
   // Pre-pass 2: extract variable definitions and substitute references
   const substitutedLines = extractAndSubstituteVariables(expandedLines);
@@ -1378,7 +1425,7 @@ export function parse(script: string): Statement[] {
     if (trimmed.toLowerCase().startsWith('comment')) { inBlockComment = true; continue; }
     if (trimmed.toLowerCase().startsWith('endcomment')) { inBlockComment = false; continue; }
     if (inBlockComment) continue;
-    if (!raw.trim() || trimmed.startsWith('#')) continue;
+    if (!raw.trim() || trimmed.startsWith('-')) continue;
 
     const indent = countIndent(raw);
     const body = trimmed;
@@ -1478,18 +1525,14 @@ export function parse(script: string): Statement[] {
 
     // Property line (inside group)
     if (grp !== null) {
-      const propRxSingle = /^[ \t]*(?<key>\w+)(?:[ \t]+(?<val>[^\r\n#]+))?/;
+      const propRxSingle = /^[ \t]*(?<key>\w+)(?:[ \t]+(?<val>[^\r\n]+))?/;
       const pm = body.match(propRxSingle);
       if (pm?.groups) {
         const k = pm.groups.key.toLowerCase();
         const STANDALONE_FLAGS = new Set(['overlap', 'persistent', 'mute', 'solo', 'randomstart', 'random_start']);
         const isFlag = STANDALONE_FLAGS.has(k);
         const rawVal = (!isFlag && pm.groups.val) ? pm.groups.val.trim() : '';
-        if (k === 'move' || k === 'visual') {
-          console.warn(`[Satie] '${k}' not allowed on a group — ignored.`);
-        } else {
-          grp.props.set(k, rawVal);
-        }
+        grp.props.set(k, rawVal);
         continue;
       }
     }

@@ -58,10 +58,10 @@ class LUTTrajectory implements Trajectory {
 const TWO_PI = 2 * Math.PI;
 
 const spiral: Trajectory = new AnalyticalTrajectory((t) => {
-  const angle = TWO_PI * t;
+  const angle = TWO_PI * t * 4; // 4 revolutions per cycle
   return {
     x: (Math.cos(angle) + 1) * 0.5,  // [0,1]
-    y: t % 1,                          // [0,1]
+    y: (Math.sin(TWO_PI * t) + 1) * 0.5,  // smooth sine oscillation
     z: (Math.sin(angle) + 1) * 0.5,  // [0,1]
   };
 });

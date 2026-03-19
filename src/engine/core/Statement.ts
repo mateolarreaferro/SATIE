@@ -136,13 +136,17 @@ export class Statement {
   noise: number = 0;  // trajectory noise amplitude 0-1
 
   visual: string[] = [];
+  visualSize: number = 1; // multiplier for visual object scale (default 1 = current size, max 10)
 
   /** Viewport background color (hex). Set via `background` property. Applies globally. */
   background: string | null = null;
 
-  // Interpolation data for dynamic properties
+  // Modulation data for dynamic properties
   volumeInterpolation: InterpolationData | null = null;
   pitchInterpolation: InterpolationData | null = null;
+  // Group-level modulation (multiplied with per-voice modulation in the engine)
+  groupVolumeModulation: InterpolationData | null = null;
+  groupPitchModulation: InterpolationData | null = null;
   moveXMinInterpolation: InterpolationData | null = null;
   moveXMaxInterpolation: InterpolationData | null = null;
   moveYMinInterpolation: InterpolationData | null = null;

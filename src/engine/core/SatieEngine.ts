@@ -13,8 +13,7 @@ import { SatieScheduler, AudioEventType, type SatieAudioEvent } from './SatieSch
 import { Statement, WanderType, Vec3, isTrajectoryWanderType } from './Statement';
 import { getTrajectory } from '../spatial/Trajectories';
 import { parse, pathFor } from './SatieParser';
-import { getEaseFunction, type EaseFunction } from './EaseFunctions';
-import { InterpolationData, InterpolationType } from './InterpolationData';
+import { InterpolationData, ModulationType, LoopMode } from './InterpolationData';
 import { buildDSPChain, destroyDSPChain, makeDistortionCurve, type DSPNodes } from '../dsp/DSPChain';
 import { generateAudio, type GenOptions } from '../audio/AudioGen';
 
@@ -52,7 +51,6 @@ export interface TrackState {
   dspChain: DSPNodes | null;
   // Pre-cached per-voice values (avoid recomputing every frame)
   _cachedDurations: Map<InterpolationData, number>;
-  _cachedEaseFns: Map<InterpolationData, EaseFunction>;
   _staticColorR: number; // pre-parsed static color channel
   _staticColorG: number;
   _staticColorB: number;
@@ -472,7 +470,6 @@ export class SatieEngine {
       wanderHz,
       // Pre-cache interpolation durations and ease functions
       _cachedDurations: new Map(),
-      _cachedEaseFns: new Map(),
       _staticColorR: scR,
       _staticColorG: scG,
       _staticColorB: scB,
@@ -487,9 +484,11 @@ export class SatieEngine {
       _trajectoryPhase: Math.random(),
     };
 
-    // Pre-cache durations for all interpolations on this voice
+    // Pre-cache durations for all modulations on this voice
     this.cacheInterpolation(track, stmt.volumeInterpolation);
     this.cacheInterpolation(track, stmt.pitchInterpolation);
+    this.cacheInterpolation(track, stmt.groupVolumeModulation);
+    this.cacheInterpolation(track, stmt.groupPitchModulation);
     this.cacheInterpolation(track, stmt.colorRedInterpolation);
     this.cacheInterpolation(track, stmt.colorGreenInterpolation);
     this.cacheInterpolation(track, stmt.colorBlueInterpolation);
@@ -553,11 +552,10 @@ export class SatieEngine {
     }
   }
 
-  /** Cache the sampled duration and resolved ease function for an interpolation. */
+  /** Cache the sampled 'every' duration for a modulation. */
   private cacheInterpolation(track: TrackState, interp: InterpolationData | null): void {
     if (!interp) return;
-    track._cachedDurations.set(interp, interp.durationRange.sample());
-    track._cachedEaseFns.set(interp, getEaseFunction(interp.easeName));
+    track._cachedDurations.set(interp, interp.every.sample());
   }
 
   // ── Audio clip triggering ──
@@ -764,18 +762,27 @@ export class SatieEngine {
       const stmt = track.statement;
       const elapsed = now - track.startedAt;
 
-      // Interpolated volume — use AudioParam automation
-      if (stmt.volumeInterpolation) {
-        const val = this.evalInterpCached(track, stmt.volumeInterpolation, elapsed);
+      // Volume modulation — multiply per-voice with group modulation
+      if (stmt.volumeInterpolation || stmt.groupVolumeModulation) {
+        let val = stmt.volumeInterpolation
+          ? this.evalInterpCached(track, stmt.volumeInterpolation, elapsed)
+          : track.volume;
+        if (stmt.groupVolumeModulation) {
+          val *= this.evalInterpCached(track, stmt.groupVolumeModulation, elapsed);
+        }
         track.volume = val;
-        // Respect mixer mute/solo state
         const audibleVal = this.isTrackAudible(track) ? val : 0;
         track.gainNode.gain.setTargetAtTime(audibleVal, ctxTime, 0.016);
       }
 
-      // Interpolated pitch
-      if (stmt.pitchInterpolation && track.sourceNode) {
-        const val = this.evalInterpCached(track, stmt.pitchInterpolation, elapsed);
+      // Pitch modulation — multiply per-voice with group modulation
+      if ((stmt.pitchInterpolation || stmt.groupPitchModulation) && track.sourceNode) {
+        let val = stmt.pitchInterpolation
+          ? this.evalInterpCached(track, stmt.pitchInterpolation, elapsed)
+          : track.pitch;
+        if (stmt.groupPitchModulation) {
+          val *= this.evalInterpCached(track, stmt.groupPitchModulation, elapsed);
+        }
         track.sourceNode.playbackRate.setTargetAtTime(val, ctxTime, 0.016);
         track.pitch = val;
       }
@@ -906,64 +913,92 @@ export class SatieEngine {
 
   // ── Interpolation (cached per-track) ──
 
-  /** Evaluate interpolation using cached duration and ease function. */
-  private evalInterpCached(track: TrackState, interp: InterpolationData, elapsed: number): number {
-    const duration = track._cachedDurations.get(interp) ?? interp.durationRange.sample();
-    if (duration <= 0) return interp.minValue;
-
-    const ease = track._cachedEaseFns.get(interp) ?? getEaseFunction(interp.easeName);
-    const range = interp.maxValue - interp.minValue;
-
-    switch (interp.interpolationType) {
-      case InterpolationType.Goto: {
-        const t = elapsed >= duration ? 1 : elapsed / duration;
-        return interp.minValue + range * ease(t);
-      }
-      case InterpolationType.GoBetween: {
-        const cycleT = (elapsed % duration) / duration;
-        const cycle = (elapsed / duration) | 0; // fast floor
-        if (!interp.isForever && cycle >= interp.repeatCount) {
-          return interp.maxValue;
-        }
-        const t = (cycle & 1) ? 1 - cycleT : cycleT;
-        return interp.minValue + range * ease(t);
-      }
-      case InterpolationType.Interpolate: {
-        const t = elapsed >= duration ? 1 : elapsed / duration;
-        return interp.minValue + range * ease(t);
-      }
-    }
-    return interp.minValue;
+  /** Evaluate modulation (fade/jump) using cached 'every' duration. */
+  private evalInterpCached(track: TrackState, mod: InterpolationData, elapsed: number): number {
+    const every = track._cachedDurations.get(mod) ?? mod.every.sample();
+    return SatieEngine.evalModulation(mod, elapsed, every);
   }
 
-  /** Public for backward compat — uses uncached path. */
-  evaluateInterpolation(interp: InterpolationData, elapsed: number): number {
-    const duration = interp.durationRange.sample();
-    if (duration <= 0) return interp.minValue;
+  /** Static evaluation for fade/jump modulation. */
+  static evalModulation(mod: InterpolationData, elapsed: number, every: number): number {
+    const n = mod.values.length;
+    if (n === 0) return 0;
+    if (n === 1) return mod.values[0];
+    if (every <= 0) return mod.values[0];
 
-    const ease = getEaseFunction(interp.easeName);
-    const range = interp.maxValue - interp.minValue;
-
-    switch (interp.interpolationType) {
-      case InterpolationType.Goto: {
-        const t = Math.min(elapsed / duration, 1);
-        return interp.minValue + range * ease(t);
-      }
-      case InterpolationType.GoBetween: {
-        const cycleT = (elapsed % duration) / duration;
-        const cycle = Math.floor(elapsed / duration);
-        if (!interp.isForever && cycle >= interp.repeatCount) {
-          return interp.maxValue;
-        }
-        const t = (cycle % 2 === 1) ? 1 - cycleT : cycleT;
-        return interp.minValue + range * ease(t);
-      }
-      case InterpolationType.Interpolate: {
-        const t = Math.min(elapsed / duration, 1);
-        return interp.minValue + range * ease(t);
-      }
+    if (mod.modulationType === ModulationType.Fade) {
+      return SatieEngine.evalFade(mod.values, elapsed, every, mod.loopMode);
+    } else {
+      return SatieEngine.evalJump(mod.values, elapsed, every, mod.loopMode);
     }
-    return interp.minValue;
+  }
+
+  private static evalFade(values: number[], elapsed: number, every: number, loop: LoopMode): number {
+    const n = values.length;
+    const segments = n - 1;
+
+    if (loop === LoopMode.None) {
+      const totalDur = segments * every;
+      if (elapsed >= totalDur) return values[n - 1];
+      const seg = Math.min((elapsed / every) | 0, segments - 1);
+      const t = (elapsed - seg * every) / every;
+      return values[seg] + (values[seg + 1] - values[seg]) * t;
+    }
+
+    if (loop === LoopMode.Restart) {
+      // Cycle through all values and wrap: 0→1→2→0→1→2→...
+      const cycleDur = n * every;
+      const cycleT = elapsed % cycleDur;
+      const seg = (cycleT / every) | 0;
+      const t = (cycleT - seg * every) / every;
+      const from = seg % n;
+      const to = (seg + 1) % n;
+      return values[from] + (values[to] - values[from]) * t;
+    }
+
+    // Bounce: 0→1→2→1→0→1→2→...
+    const bounceSeg = 2 * (n - 1);
+    const cycleDur = bounceSeg * every;
+    const cycleT = elapsed % cycleDur;
+    const seg = (cycleT / every) | 0;
+    const t = (cycleT - seg * every) / every;
+
+    let fromIdx: number, toIdx: number;
+    if (seg < n - 1) {
+      fromIdx = seg;
+      toIdx = seg + 1;
+    } else {
+      const backSeg = seg - (n - 1);
+      fromIdx = (n - 1) - backSeg;
+      toIdx = fromIdx - 1;
+    }
+    return values[fromIdx] + (values[toIdx] - values[fromIdx]) * t;
+  }
+
+  private static evalJump(values: number[], elapsed: number, every: number, loop: LoopMode): number {
+    const n = values.length;
+
+    if (loop === LoopMode.None) {
+      const idx = Math.min((elapsed / every) | 0, n - 1);
+      return values[idx];
+    }
+
+    if (loop === LoopMode.Restart) {
+      const idx = ((elapsed / every) | 0) % n;
+      return values[idx];
+    }
+
+    // Bounce: 0,1,2,1,0,1,2,1,...
+    const bounceSeg = 2 * (n - 1);
+    const seg = ((elapsed / every) | 0) % bounceSeg;
+    const idx = seg < n ? seg : bounceSeg - seg;
+    return values[idx];
+  }
+
+  /** Public evaluation — uses uncached path. */
+  evaluateInterpolation(mod: InterpolationData, elapsed: number): number {
+    const every = mod.every.sample();
+    return SatieEngine.evalModulation(mod, elapsed, every);
   }
 
   // ── Spatial wander (in-place, no allocation) ──
