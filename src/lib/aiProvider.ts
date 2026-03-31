@@ -86,6 +86,13 @@ export class ProxiedProvider implements AIProvider {
     }
 
     const data = await response.json();
+    // Log which provider actually served the request + any fallback warnings
+    if (data.provider && data.provider !== this.type) {
+      console.log(`[Satie] Request routed to ${data.provider} (${this.type} was unavailable)`);
+    }
+    if (data.warnings?.length) {
+      console.warn('[Satie] Provider warnings:', data.warnings);
+    }
     return data.text ?? '';
   }
 
@@ -307,4 +314,24 @@ export function hasUserApiKey(): boolean {
     localStorage.getItem('satie-openai-key') ||
     localStorage.getItem('satie-gemini-key')
   );
+}
+
+/** Cache for server-side available providers */
+let _serverProviders: AIProviderType[] | null = null;
+
+/**
+ * Fetch which AI providers are configured on the server (for proxy users).
+ * Cached after first call.
+ */
+export async function getServerProviders(): Promise<AIProviderType[]> {
+  if (_serverProviders) return _serverProviders;
+  try {
+    const res = await fetch('/api/ai');
+    if (res.ok) {
+      const data = await res.json();
+      _serverProviders = data.providers ?? [];
+      return _serverProviders!;
+    }
+  } catch { /* proxy not deployed */ }
+  return [];
 }

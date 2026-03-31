@@ -7,6 +7,8 @@ import {
   getPreferredProvider,
   setPreferredProvider,
   getAvailableProviders,
+  getServerProviders,
+  hasUserApiKey,
   type AIProviderType,
   type AIProvider,
 } from '../../lib/aiProvider';
@@ -854,10 +856,9 @@ export function AIPanel({
           value={getPreferredProvider()}
           onChange={(e) => {
             setPreferredProvider(e.target.value as AIProviderType);
-            // Force re-render
             setStatus(null);
           }}
-          title="AI Provider"
+          title="AI Provider — all configured providers are available as fallback"
           style={{
             fontSize: '8px',
             opacity: 0.4,
