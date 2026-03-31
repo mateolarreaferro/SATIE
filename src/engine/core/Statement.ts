@@ -121,7 +121,7 @@ export class Statement {
   wanderType: WanderType = WanderType.None;
   areaMin: Vec3 = { x: 0, y: 0, z: 0 };
   areaMax: Vec3 = { x: 0, y: 0, z: 0 };
-  wanderHz: RangeOrValue = RangeOrValue.single(0.3);
+  wanderHz: RangeOrValue = RangeOrValue.single(0.5); // 0-1 normalized, 0.5 = gentle drift
 
   customTrajectoryName: string | null = null;  // for WanderType.Custom
   isGenTrajectory: boolean = false;  // true if trajectory needs generation

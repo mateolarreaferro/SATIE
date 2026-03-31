@@ -5,6 +5,15 @@
  * so there's zero JS overhead per sample. No AudioWorklets needed.
  *
  * Chain order: source → [filter] → [distortion] → [delay] → [reverb] → [EQ] → output
+ *
+ * VALUE NORMALIZATION:
+ * The Satie DSL uses 0-1 for almost all parameters (except time and space).
+ * This module maps normalized values to real audio ranges:
+ *   - Filter cutoff:    0-1 → 20Hz-20000Hz (exponential)
+ *   - Filter resonance: 0-1 → 0.1-20 (exponential)
+ *   - Distortion drive: 0-1 → 0.1-50 (exponential)
+ *   - EQ gain:          0-1 → -12dB to +12dB (linear, 0.5 = 0dB)
+ *   - All wet/dry/feedback/damping etc: already 0-1
  */
 import type {
   ReverbParams,
@@ -29,6 +38,43 @@ export interface DSPNodes {
   eqRef?: { low: BiquadFilterNode; mid: BiquadFilterNode; high: BiquadFilterNode };
 }
 
+// ─── Value normalization (0-1 → real audio ranges) ────
+
+/** Map 0-1 to 20Hz-20000Hz (exponential, perceptually linear) */
+export function mapCutoff(n: number): number {
+  const clamped = Math.max(0, Math.min(1, n));
+  return 20 * Math.pow(1000, clamped); // 20 * 1000^n → 20Hz to 20000Hz
+}
+
+/** Map 0-1 to 0.1-20 (exponential) */
+export function mapResonance(n: number): number {
+  const clamped = Math.max(0, Math.min(1, n));
+  return 0.1 * Math.pow(200, clamped); // 0.1 to 20
+}
+
+/** Map 0-1 to 0.1-50 (exponential) */
+export function mapDrive(n: number): number {
+  const clamped = Math.max(0, Math.min(1, n));
+  return 0.1 * Math.pow(500, clamped); // 0.1 to 50
+}
+
+/** Map 0-1 to -12dB to +12dB (linear, 0.5 = 0dB) */
+export function mapEQGain(n: number): number {
+  const clamped = Math.max(0, Math.min(1, n));
+  return (clamped - 0.5) * 24; // -12 to +12
+}
+
+/**
+ * Map 0-1 speed to a perceptually useful range.
+ * 0 = nearly still, 0.5 = gentle drift, 1 = fast movement.
+ * Maps exponentially to 0.005-2.0 Hz for wander, or 0.01-1.0 for trajectories.
+ */
+export function mapSpeed(n: number): number {
+  const clamped = Math.max(0, Math.min(1, n));
+  // 0 → 0.005, 0.5 → ~0.1, 1.0 → 2.0
+  return 0.005 * Math.pow(400, clamped);
+}
+
 // ─── Filter ───────────────────────────────────────────
 
 function createFilter(
@@ -49,8 +95,8 @@ function createFilter(
     peak: 'peaking',
   };
   filter.type = modeMap[params.mode] ?? 'lowpass';
-  filter.frequency.value = params.cutoff.sample();
-  filter.Q.value = params.resonance.sample();
+  filter.frequency.value = mapCutoff(params.cutoff.sample());
+  filter.Q.value = mapResonance(params.resonance.sample());
 
   const w = params.dryWet.sample();
   dry.gain.value = 1 - w;
@@ -69,7 +115,20 @@ function createFilter(
 
 // ─── Distortion (WaveShaperNode) ──────────────────────
 
+// Distortion curve cache — avoid reallocating Float32Arrays every update frame
+const _curveCache = new Map<string, Float32Array>();
+const CURVE_CACHE_MAX = 64;
+
+function _curveCacheKey(mode: string, drive: number): string {
+  // Quantize drive to 2 decimal places for effective caching
+  return `${mode}:${(drive * 100 | 0)}`;
+}
+
 export function makeDistortionCurve(mode: string, drive: number, samples: number = 1024): Float32Array {
+  const key = _curveCacheKey(mode, drive);
+  const cached = _curveCache.get(key);
+  if (cached && cached.length === samples) return cached;
+
   const curve = new Float32Array(samples);
   const deg = Math.PI / 180;
 
@@ -99,6 +158,13 @@ export function makeDistortionCurve(mode: string, drive: number, samples: number
         break;
     }
   }
+
+  // Evict oldest entries if cache gets too large
+  if (_curveCache.size >= CURVE_CACHE_MAX) {
+    const first = _curveCache.keys().next().value;
+    if (first) _curveCache.delete(first);
+  }
+  _curveCache.set(key, curve);
   return curve;
 }
 
@@ -112,9 +178,9 @@ function createDistortion(
   const wet = ctx.createGain();
   const shaper = ctx.createWaveShaper();
 
-  const drive = params.drive.sample();
+  const drive = mapDrive(params.drive.sample());
   shaper.curve = makeDistortionCurve(params.mode, drive) as unknown as Float32Array<ArrayBuffer>;
-  shaper.oversample = '4x';
+  shaper.oversample = '2x'; // 2x is the best balance of quality vs. CPU cost
 
   const w = params.dryWet.sample();
   dry.gain.value = 1 - w;
@@ -260,18 +326,18 @@ function createEQ(
   const low = ctx.createBiquadFilter();
   low.type = 'lowshelf';
   low.frequency.value = 320;
-  low.gain.value = params.lowGain.sample();
+  low.gain.value = mapEQGain(params.lowGain.sample());
 
   const mid = ctx.createBiquadFilter();
   mid.type = 'peaking';
   mid.frequency.value = 1000;
   mid.Q.value = 0.5;
-  mid.gain.value = params.midGain.sample();
+  mid.gain.value = mapEQGain(params.midGain.sample());
 
   const high = ctx.createBiquadFilter();
   high.type = 'highshelf';
   high.frequency.value = 3200;
-  high.gain.value = params.highGain.sample();
+  high.gain.value = mapEQGain(params.highGain.sample());
 
   // Series: input → low → mid → high → output
   input.connect(low);

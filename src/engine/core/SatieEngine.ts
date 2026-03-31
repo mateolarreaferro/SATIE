@@ -14,7 +14,7 @@ import { Statement, WanderType, Vec3, isTrajectoryWanderType } from './Statement
 import { getTrajectory } from '../spatial/Trajectories';
 import { parse, pathFor } from './SatieParser';
 import { InterpolationData, ModulationType, LoopMode } from './InterpolationData';
-import { buildDSPChain, destroyDSPChain, makeDistortionCurve, type DSPNodes } from '../dsp/DSPChain';
+import { buildDSPChain, destroyDSPChain, makeDistortionCurve, mapCutoff, mapResonance, mapDrive, mapEQGain, mapSpeed, type DSPNodes } from '../dsp/DSPChain';
 import { generateAudio, type GenOptions } from '../audio/AudioGen';
 
 // Pre-computed hex lookup table (0-255 → "00"-"ff")
@@ -77,6 +77,7 @@ export interface EngineUIState {
   trackCount: number;
   statements: Statement[];
   errors: string | null;
+  runtimeWarnings: string[];
   mutedIndices: ReadonlySet<number>;
   soloedIndices: ReadonlySet<number>;
 }
@@ -91,6 +92,14 @@ const UI_NOTIFY_INTERVAL = 1000 / UI_NOTIFY_HZ;
 /** Spatial position update rate limit — 30fps is plenty for perception */
 const SPATIAL_HZ = 30;
 const SPATIAL_INTERVAL = 1000 / SPATIAL_HZ;
+
+/**
+ * AudioParam smoothing time constant (seconds).
+ * Used with setTargetAtTime for gain/pitch/DSP parameter changes.
+ * After ~4τ (28ms) the value reaches 98% of target — fast enough to feel
+ * instantaneous but smooth enough to avoid zipper noise.
+ */
+const PARAM_SMOOTHING = 0.007;
 
 export class SatieEngine {
   private ctx: AudioContext;
@@ -115,6 +124,10 @@ export class SatieEngine {
   private _lastUINotify: number = 0;
   private _lastSpatialUpdate: number = 0;
 
+  /** Runtime warnings (missing samples, generation failures, etc.) */
+  private _runtimeWarnings: string[] = [];
+  private _runtimeWarningsMax = 20;
+
   /** Runtime mixer state (independent of parsed mute/solo) */
   private _mutedIndices: Set<number> = new Set();
   private _soloedIndices: Set<number> = new Set();
@@ -124,14 +137,15 @@ export class SatieEngine {
     this.clock = new SatieDSPClock(this.ctx);
     this.scheduler = new SatieScheduler(this.clock);
     this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 0.5; // -6 dB headroom before limiter
 
-    // Master limiter — prevents clipping when many voices overlap
+    // Master limiter — brick-wall prevents clipping when many voices overlap
     this.limiter = this.ctx.createDynamicsCompressor();
-    this.limiter.threshold.value = -3;   // start compressing at -3 dB
-    this.limiter.knee.value = 6;         // soft knee for transparent limiting
-    this.limiter.ratio.value = 20;       // near-brick-wall limiting
-    this.limiter.attack.value = 0.001;   // fast attack to catch transients
-    this.limiter.release.value = 0.05;   // quick release for transparency
+    this.limiter.threshold.value = -2;   // start limiting at -2 dB
+    this.limiter.knee.value = 0;         // hard knee for true brick-wall
+    this.limiter.ratio.value = 20;       // near-brick-wall ratio
+    this.limiter.attack.value = 0.0005;  // 0.5ms attack — catch transients before they clip
+    this.limiter.release.value = 0.05;   // 50ms release for transparency
     this.masterGain.connect(this.limiter);
     this.limiter.connect(this.ctx.destination);
   }
@@ -143,29 +157,30 @@ export class SatieEngine {
   /** Get all decoded audio buffers (for offline export). */
   getAudioBuffers(): ReadonlyMap<string, AudioBuffer> { return this.audioBuffers; }
 
-  /** Sync the AudioListener to the camera/observer position. */
+  /** Sync the AudioListener to the camera/observer position (smoothed to avoid artifacts). */
   setListenerPosition(x: number, y: number, z: number): void {
     const l = this.ctx.listener;
+    const t = this.ctx.currentTime;
     if (l.positionX) {
-      l.positionX.value = x;
-      l.positionY.value = y;
-      l.positionZ.value = z;
+      l.positionX.setTargetAtTime(x, t, 0.010);
+      l.positionY.setTargetAtTime(y, t, 0.010);
+      l.positionZ.setTargetAtTime(z, t, 0.010);
     } else {
-      // Fallback for older browsers
       l.setPosition(x, y, z);
     }
   }
 
-  /** Sync the AudioListener orientation (forward + up vectors). */
+  /** Sync the AudioListener orientation (smoothed to avoid artifacts on rapid head turns). */
   setListenerOrientation(fx: number, fy: number, fz: number, ux: number, uy: number, uz: number): void {
     const l = this.ctx.listener;
+    const t = this.ctx.currentTime;
     if (l.forwardX) {
-      l.forwardX.value = fx;
-      l.forwardY.value = fy;
-      l.forwardZ.value = fz;
-      l.upX.value = ux;
-      l.upY.value = uy;
-      l.upZ.value = uz;
+      l.forwardX.setTargetAtTime(fx, t, 0.010);
+      l.forwardY.setTargetAtTime(fy, t, 0.010);
+      l.forwardZ.setTargetAtTime(fz, t, 0.010);
+      l.upX.setTargetAtTime(ux, t, 0.010);
+      l.upY.setTargetAtTime(uy, t, 0.010);
+      l.upZ.setTargetAtTime(uz, t, 0.010);
     } else {
       l.setOrientation(fx, fy, fz, ux, uy, uz);
     }
@@ -212,10 +227,26 @@ export class SatieEngine {
       trackCount: this.tracks.size,
       statements: this.statements,
       errors: this.errors,
+      runtimeWarnings: this._runtimeWarnings,
       mutedIndices: this._mutedIndices,
       soloedIndices: this._soloedIndices,
     };
     for (const listener of this.uiListeners) listener(uiState);
+  }
+
+  /** Add a runtime warning (surfaced to editor UI). */
+  private addRuntimeWarning(msg: string): void {
+    // Avoid duplicates
+    if (this._runtimeWarnings.includes(msg)) return;
+    this._runtimeWarnings.push(msg);
+    if (this._runtimeWarnings.length > this._runtimeWarningsMax) {
+      this._runtimeWarnings.shift();
+    }
+  }
+
+  /** Clear runtime warnings (called on play/stop). */
+  private clearRuntimeWarnings(): void {
+    this._runtimeWarnings = [];
   }
 
   // ── Audio loading ──
@@ -227,8 +258,8 @@ export class SatieEngine {
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
       this.audioBuffers.set(name, audioBuffer);
-    } catch (e) {
-      console.error(`[SatieEngine] Failed to load audio: ${name}`, e);
+    } catch (e: any) {
+      this.addRuntimeWarning(`Failed to load audio: ${name} (${e.message ?? 'unknown error'})`);
     }
   }
 
@@ -265,6 +296,7 @@ export class SatieEngine {
     if (this._isPlaying) return;
     if (this.ctx.state === 'suspended') await this.ctx.resume();
 
+    this.clearRuntimeWarnings();
     this._isPlaying = true;
     this.clock.start();
     this.scheduler.reset();
@@ -336,7 +368,7 @@ export class SatieEngine {
   private applyMixerState(): void {
     for (const track of this.tracks.values()) {
       const targetGain = this.isTrackAudible(track) ? track.volume : 0;
-      track.gainNode.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.016);
+      track.gainNode.gain.setTargetAtTime(targetGain, this.ctx.currentTime, PARAM_SMOOTHING);
     }
   }
 
@@ -369,7 +401,11 @@ export class SatieEngine {
     this.scheduler.reset();
 
     for (const track of this.tracks.values()) {
-      try { track.sourceNode?.stop(); } catch { /* ok */ }
+      if (track.sourceNode) {
+        try { track.sourceNode.stop(); } catch { /* ok */ }
+        try { track.sourceNode.disconnect(); } catch { /* ok */ }
+        track.sourceNode = null;
+      }
       if (track.dspChain) destroyDSPChain(track.dspChain);
       track.gainNode.disconnect();
       track.pannerNode.disconnect();
@@ -450,7 +486,7 @@ export class SatieEngine {
     const scB = parseInt(sc.substring(5, 7), 16);
 
     const seed = Math.random() * 1000;
-    const wanderHz = stmt.wanderHz.sample();
+    const wanderHz = mapSpeed(stmt.wanderHz.sample());
 
     const track: TrackState = {
       key,
@@ -575,12 +611,14 @@ export class SatieEngine {
         this.generateAndRetrigger(key, stmt, clipPath);
         return;
       }
-      console.warn(`[SatieEngine] Audio not loaded: ${stmt.clip} (tried: ${clipPath})`);
+      this.addRuntimeWarning(`Audio not loaded: ${stmt.clip}`);
       return;
     }
 
     if (track.sourceNode) {
       try { track.sourceNode.stop(); } catch { /* ok */ }
+      try { track.sourceNode.disconnect(); } catch { /* ok */ }
+      track.sourceNode = null;
     }
 
     const sourceNode = this.ctx.createBufferSource();
@@ -590,8 +628,11 @@ export class SatieEngine {
 
     const volume = stmt.volume.sample();
     const pitch = stmt.pitch.sample();
-    track.gainNode.gain.value = volume;
-    sourceNode.playbackRate.value = pitch;
+    const now = this.ctx.currentTime;
+
+    // Always start at zero to avoid click, then ramp up
+    track.gainNode.gain.setValueAtTime(0, now);
+    sourceNode.playbackRate.setValueAtTime(pitch, now);
     track.volume = volume;
     track.pitch = pitch;
     track.sourceNode = sourceNode;
@@ -602,11 +643,13 @@ export class SatieEngine {
       sourceNode.start();
     }
 
-    // Fade in — use AudioParam automation (runs on audio thread, not main thread)
+    // Fade in — explicit AudioParam automation (runs on audio thread)
     if (!stmt.fadeIn.isNull) {
       const fadeTime = stmt.fadeIn.sample();
-      track.gainNode.gain.setValueAtTime(0, this.ctx.currentTime);
-      track.gainNode.gain.linearRampToValueAtTime(volume, this.ctx.currentTime + fadeTime);
+      track.gainNode.gain.linearRampToValueAtTime(volume, now + fadeTime);
+    } else {
+      // 5ms micro-fade to eliminate click on start
+      track.gainNode.gain.linearRampToValueAtTime(volume, now + 0.005);
     }
 
     // Schedule next retrigger
@@ -624,6 +667,10 @@ export class SatieEngine {
     if (stmt.kind === 'oneshot' && stmt.every.isNull) {
       sourceNode.onended = () => {
         track.isPlaying = false;
+        if (track.sourceNode) {
+          try { track.sourceNode.disconnect(); } catch { /* ok */ }
+          track.sourceNode = null;
+        }
         if (track.dspChain) destroyDSPChain(track.dspChain);
         track.gainNode.disconnect();
         track.pannerNode.disconnect();
@@ -682,7 +729,7 @@ export class SatieEngine {
           this.audioBuffers.set(clipPath, audioBuffer);
         })
         .catch((e: any) => {
-          console.error(`[SatieEngine] Pre-generation failed: ${e.message}`);
+          this.addRuntimeWarning(`Audio generation failed: ${e.message}`);
         });
     }
   }
@@ -717,7 +764,7 @@ export class SatieEngine {
         this.retriggerAudio(key, stmt);
       }
     } catch (e: any) {
-      console.error(`[SatieEngine] Audio generation failed: ${e.message}`);
+      this.addRuntimeWarning(`Audio generation failed for "${stmt.genPrompt}": ${e.message}`);
     }
   }
 
@@ -730,7 +777,11 @@ export class SatieEngine {
     this.scheduler.cancelTrackEvents(key);
 
     const cleanup = () => {
-      try { track.sourceNode?.stop(); } catch { /* ok */ }
+      if (track.sourceNode) {
+        try { track.sourceNode.stop(); } catch { /* ok */ }
+        try { track.sourceNode.disconnect(); } catch { /* ok */ }
+        track.sourceNode = null;
+      }
       if (track.dspChain) destroyDSPChain(track.dspChain);
       track.gainNode.disconnect();
       track.pannerNode.disconnect();
@@ -738,18 +789,19 @@ export class SatieEngine {
       this._tracksArrayDirty = true;
     };
 
-    if (fadeOutTime > 0) {
-      track.gainNode.gain.linearRampToValueAtTime(0, this.ctx.currentTime + fadeOutTime);
-      this.scheduler.schedule({
-        scheduledSample: this.clock.currentSample + this.clock.secondsToSamples(fadeOutTime),
-        type: AudioEventType.Callback,
-        trackKey: key + '_cleanup',
-        debugLabel: `cleanup:${key}`,
-        onExecute: cleanup,
-      });
-    } else {
-      cleanup();
-    }
+    // Always use at least a 5ms micro-fade to avoid click on stop
+    const effectiveFade = Math.max(fadeOutTime, 0.005);
+    const now = this.ctx.currentTime;
+    track.gainNode.gain.cancelScheduledValues(now);
+    track.gainNode.gain.setValueAtTime(track.gainNode.gain.value, now);
+    track.gainNode.gain.linearRampToValueAtTime(0, now + effectiveFade);
+    this.scheduler.schedule({
+      scheduledSample: this.clock.currentSample + this.clock.secondsToSamples(effectiveFade + 0.01),
+      type: AudioEventType.Callback,
+      trackKey: key + '_cleanup',
+      debugLabel: `cleanup:${key}`,
+      onExecute: cleanup,
+    });
   }
 
   // ── Continuous per-frame updates ──
@@ -772,7 +824,7 @@ export class SatieEngine {
         }
         track.volume = val;
         const audibleVal = this.isTrackAudible(track) ? val : 0;
-        track.gainNode.gain.setTargetAtTime(audibleVal, ctxTime, 0.016);
+        track.gainNode.gain.setTargetAtTime(audibleVal, ctxTime, PARAM_SMOOTHING);
       }
 
       // Pitch modulation — multiply per-voice with group modulation
@@ -783,21 +835,21 @@ export class SatieEngine {
         if (stmt.groupPitchModulation) {
           val *= this.evalInterpCached(track, stmt.groupPitchModulation, elapsed);
         }
-        track.sourceNode.playbackRate.setTargetAtTime(val, ctxTime, 0.016);
+        track.sourceNode.playbackRate.setTargetAtTime(val, ctxTime, PARAM_SMOOTHING);
         track.pitch = val;
       }
 
-      // Spatial position — rate-limited
+      // Spatial position — rate-limited to 30fps with smoothing
       if (doSpatial && stmt.wanderType !== WanderType.None) {
         if (isTrajectoryWanderType(stmt.wanderType)) {
           this.calculateTrajectoryPositionInPlace(track, stmt, elapsed);
         } else {
           this.calculateWanderPositionInPlace(track, stmt, elapsed);
         }
-        // Use AudioParam properties directly (non-deprecated, more efficient)
-        track.pannerNode.positionX.value = track.position.x;
-        track.pannerNode.positionY.value = track.position.y;
-        track.pannerNode.positionZ.value = track.position.z;
+        // Smooth position transitions with 20ms time constant to avoid stepping artifacts
+        track.pannerNode.positionX.setTargetAtTime(track.position.x, ctxTime, 0.020);
+        track.pannerNode.positionY.setTargetAtTime(track.position.y, ctxTime, 0.020);
+        track.pannerNode.positionZ.setTargetAtTime(track.position.z, ctxTime, 0.020);
       }
 
       // Interpolated color — only compute when interpolation exists
@@ -831,21 +883,21 @@ export class SatieEngine {
   private updateDSPInterpolations(track: TrackState, stmt: Statement, elapsed: number, ctxTime: number, doSpatial: boolean): void {
     const dsp = track.dspChain!;
 
-    // Filter
+    // Filter (values are 0-1 normalized, map to real ranges)
     if (stmt.filterParams && dsp.filterRef) {
       const fp = stmt.filterParams;
       if (fp.cutoffInterpolation) {
         dsp.filterRef.filter.frequency.setTargetAtTime(
-          this.evalInterpCached(track, fp.cutoffInterpolation, elapsed), ctxTime, 0.016);
+          mapCutoff(this.evalInterpCached(track, fp.cutoffInterpolation, elapsed)), ctxTime, PARAM_SMOOTHING);
       }
       if (fp.resonanceInterpolation) {
         dsp.filterRef.filter.Q.setTargetAtTime(
-          this.evalInterpCached(track, fp.resonanceInterpolation, elapsed), ctxTime, 0.016);
+          mapResonance(this.evalInterpCached(track, fp.resonanceInterpolation, elapsed)), ctxTime, PARAM_SMOOTHING);
       }
       if (fp.dryWetInterpolation) {
         const w = clamp01(this.evalInterpCached(track, fp.dryWetInterpolation, elapsed));
-        dsp.filterRef.wet.gain.setTargetAtTime(w, ctxTime, 0.016);
-        dsp.filterRef.dry.gain.setTargetAtTime(1 - w, ctxTime, 0.016);
+        dsp.filterRef.wet.gain.setTargetAtTime(w, ctxTime, PARAM_SMOOTHING);
+        dsp.filterRef.dry.gain.setTargetAtTime(1 - w, ctxTime, PARAM_SMOOTHING);
       }
     }
 
@@ -853,14 +905,14 @@ export class SatieEngine {
     if (stmt.distortionParams && dsp.distortionRef) {
       const dp = stmt.distortionParams;
       if (dp.driveInterpolation && doSpatial) {
-        const drive = this.evalInterpCached(track, dp.driveInterpolation, elapsed);
+        const drive = mapDrive(this.evalInterpCached(track, dp.driveInterpolation, elapsed));
         dsp.distortionRef.shaper.curve = makeDistortionCurve(
           dsp.distortionRef.mode, drive) as unknown as Float32Array<ArrayBuffer>;
       }
       if (dp.dryWetInterpolation) {
         const w = clamp01(this.evalInterpCached(track, dp.dryWetInterpolation, elapsed));
-        dsp.distortionRef.wet.gain.setTargetAtTime(w, ctxTime, 0.016);
-        dsp.distortionRef.dry.gain.setTargetAtTime(1 - w, ctxTime, 0.016);
+        dsp.distortionRef.wet.gain.setTargetAtTime(w, ctxTime, PARAM_SMOOTHING);
+        dsp.distortionRef.dry.gain.setTargetAtTime(1 - w, ctxTime, PARAM_SMOOTHING);
       }
     }
 
@@ -870,17 +922,17 @@ export class SatieEngine {
       if (dlp.timeInterpolation) {
         const t = this.evalInterpCached(track, dlp.timeInterpolation, elapsed);
         for (const d of dsp.delayRef.delays) {
-          d.delayTime.setTargetAtTime(t, ctxTime, 0.016);
+          d.delayTime.setTargetAtTime(t, ctxTime, PARAM_SMOOTHING);
         }
       }
       if (dlp.feedbackInterpolation) {
         dsp.delayRef.fbGain.gain.setTargetAtTime(
-          this.evalInterpCached(track, dlp.feedbackInterpolation, elapsed), ctxTime, 0.016);
+          this.evalInterpCached(track, dlp.feedbackInterpolation, elapsed), ctxTime, PARAM_SMOOTHING);
       }
       if (dlp.dryWetInterpolation) {
         const w = clamp01(this.evalInterpCached(track, dlp.dryWetInterpolation, elapsed));
-        dsp.delayRef.wet.gain.setTargetAtTime(w, ctxTime, 0.016);
-        dsp.delayRef.dry.gain.setTargetAtTime(1 - w, ctxTime, 0.016);
+        dsp.delayRef.wet.gain.setTargetAtTime(w, ctxTime, PARAM_SMOOTHING);
+        dsp.delayRef.dry.gain.setTargetAtTime(1 - w, ctxTime, PARAM_SMOOTHING);
       }
     }
 
@@ -888,25 +940,25 @@ export class SatieEngine {
     if (stmt.reverbParams && dsp.reverbRef) {
       if (stmt.reverbParams.dryWetInterpolation) {
         const w = clamp01(this.evalInterpCached(track, stmt.reverbParams.dryWetInterpolation, elapsed));
-        dsp.reverbRef.wet.gain.setTargetAtTime(w, ctxTime, 0.016);
-        dsp.reverbRef.dry.gain.setTargetAtTime(1 - w, ctxTime, 0.016);
+        dsp.reverbRef.wet.gain.setTargetAtTime(w, ctxTime, PARAM_SMOOTHING);
+        dsp.reverbRef.dry.gain.setTargetAtTime(1 - w, ctxTime, PARAM_SMOOTHING);
       }
     }
 
-    // EQ
+    // EQ (0-1 normalized → -12dB to +12dB)
     if (stmt.eqParams && dsp.eqRef) {
       const eq = stmt.eqParams;
       if (eq.lowGainInterpolation) {
         dsp.eqRef.low.gain.setTargetAtTime(
-          this.evalInterpCached(track, eq.lowGainInterpolation, elapsed), ctxTime, 0.016);
+          mapEQGain(this.evalInterpCached(track, eq.lowGainInterpolation, elapsed)), ctxTime, PARAM_SMOOTHING);
       }
       if (eq.midGainInterpolation) {
         dsp.eqRef.mid.gain.setTargetAtTime(
-          this.evalInterpCached(track, eq.midGainInterpolation, elapsed), ctxTime, 0.016);
+          mapEQGain(this.evalInterpCached(track, eq.midGainInterpolation, elapsed)), ctxTime, PARAM_SMOOTHING);
       }
       if (eq.highGainInterpolation) {
         dsp.eqRef.high.gain.setTargetAtTime(
-          this.evalInterpCached(track, eq.highGainInterpolation, elapsed), ctxTime, 0.016);
+          mapEQGain(this.evalInterpCached(track, eq.highGainInterpolation, elapsed)), ctxTime, PARAM_SMOOTHING);
       }
     }
   }

@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import type { TrackState } from '../../engine';
 import { useHeadTracking } from '../hooks/useHeadTracking';
+import { useFaceTracking, type FaceMeshData } from '../hooks/useFaceTracking';
 
 const ViewportFocusContext = createContext<{ focused: boolean }>({ focused: false });
 const CameraResetContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
@@ -17,8 +18,20 @@ interface ListenerSync {
   onRotate?: (fx: number, fy: number, fz: number, ux: number, uy: number, uz: number) => void;
   linked: boolean;
   listenerPosRef: React.MutableRefObject<THREE.Vector3>;
+  /** Forward direction vector — updated by face/head tracking or camera */
+  listenerForwardRef: React.MutableRefObject<THREE.Vector3>;
+  /** True when external tracking (face/head) controls orientation — camera should not override */
+  externalTrackingActive: boolean;
+  /** Live face mesh data from webcam — null when face tracking is off */
+  faceMeshRef: React.MutableRefObject<FaceMeshData | null>;
 }
-const ListenerSyncContext = createContext<ListenerSync>({ linked: false, listenerPosRef: { current: new THREE.Vector3() } });
+const ListenerSyncContext = createContext<ListenerSync>({
+  linked: false,
+  listenerPosRef: { current: new THREE.Vector3() },
+  listenerForwardRef: { current: new THREE.Vector3(0, 0, -1) },
+  externalTrackingActive: false,
+  faceMeshRef: { current: null },
+});
 
 interface SpatialViewportProps {
   tracksRef: React.RefObject<TrackState[]>;
@@ -400,19 +413,57 @@ function NoseTriangle({ color }: { color: string }) {
   );
 }
 
-function Listener({ color }: { color: string }) {
-  const groupRef = useRef<THREE.Group>(null);
-  const { listenerPosRef } = useContext(ListenerSyncContext);
+function FaceMeshCloud({ color }: { color: string }) {
+  const { faceMeshRef } = useContext(ListenerSyncContext);
+  const geoRef = useRef<THREE.BufferGeometry>(null);
 
   useFrame(() => {
-    if (groupRef.current) {
-      groupRef.current.position.set(listenerPosRef.current.x, listenerPosRef.current.y + 0.02, listenerPosRef.current.z);
+    const mesh = faceMeshRef.current;
+    if (!mesh || !geoRef.current) return;
+    const pos = geoRef.current.getAttribute('position');
+    if (!pos || pos.count !== mesh.positions.length / 3) return;
+    const arr = pos.array as Float32Array;
+    const scale = 0.6;
+    for (let i = 0; i < mesh.positions.length / 3; i++) {
+      arr[i * 3] = -(mesh.positions[i * 3] - 0.5) * scale;
+      arr[i * 3 + 1] = -(mesh.positions[i * 3 + 1] - 0.5) * scale;
+      arr[i * 3 + 2] = -mesh.positions[i * 3 + 2] * scale * 0.5;
     }
+    pos.needsUpdate = true;
+  });
+
+  return (
+    <points>
+      <bufferGeometry ref={geoRef}>
+        <bufferAttribute attach="attributes-position" args={[new Float32Array(478 * 3), 3]} />
+      </bufferGeometry>
+      <pointsMaterial color={color} size={0.008} sizeAttenuation />
+    </points>
+  );
+}
+
+function Listener({ color, faceTrackingActive }: { color: string; faceTrackingActive: boolean }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const { listenerPosRef, listenerForwardRef } = useContext(ListenerSyncContext);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    groupRef.current.position.set(
+      listenerPosRef.current.x,
+      listenerPosRef.current.y + 0.02,
+      listenerPosRef.current.z,
+    );
+    const fwd = listenerForwardRef.current;
+    groupRef.current.rotation.y = Math.atan2(-fwd.x, -fwd.z);
   });
 
   return (
     <group ref={groupRef} position={[0, 0.02, 0]}>
-      <NoseTriangle color={color} />
+      {faceTrackingActive ? (
+        <FaceMeshCloud color={color} />
+      ) : (
+        <NoseTriangle color={color} />
+      )}
     </group>
   );
 }
@@ -422,6 +473,9 @@ function FlyControls() {
   const { camera, gl } = useThree();
   const { focused } = useContext(ViewportFocusContext);
   const listenerSync = useContext(ListenerSyncContext);
+  // Ref to keep useFrame closure in sync with latest context value
+  const listenerSyncRef = useRef(listenerSync);
+  listenerSyncRef.current = listenerSync;
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const keysDown = useRef(new Set<string>());
   const rightMouseDown = useRef(false);
@@ -542,20 +596,24 @@ function FlyControls() {
   }, [focused]);
 
   useFrame((_, delta) => {
+    const ls = listenerSyncRef.current;
     // Always sync AudioContext.listener to the triangle position
-    const lp = listenerSync.listenerPosRef.current;
-    if (listenerSync.onMove) {
-      listenerSync.onMove(lp.x, lp.y, lp.z);
+    const lp = ls.listenerPosRef.current;
+    if (ls.onMove) {
+      ls.onMove(lp.x, lp.y, lp.z);
     }
-    if (listenerSync.onRotate) {
-      // Listener faces toward the orbit target (camera look direction projected onto ground)
+    if (!ls.externalTrackingActive) {
+      // Default: orientation from camera direction
       camera.getWorldDirection(_forward);
-      listenerSync.onRotate(_forward.x, _forward.y, _forward.z, _up.x, _up.y, _up.z);
+      ls.listenerForwardRef.current.set(_forward.x, _forward.y, _forward.z);
+      if (ls.onRotate) {
+        ls.onRotate(_forward.x, _forward.y, _forward.z, _up.x, _up.y, _up.z);
+      }
     }
 
     const active = focused || rightMouseDown.current;
 
-    if (listenerSync.linked) {
+    if (ls.linked) {
       // 3rd-person mode: WASD moves the listener, camera follows behind
       if (active) {
         const keys = keysDown.current;
@@ -653,7 +711,7 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
           infiniteGrid
         />
       )}
-      <Listener color={listenerColor} />
+      <Listener color={listenerColor} faceTrackingActive={listenerSync.externalTrackingActive} />
       <AudioSourcePool tracksRef={tracksRef} />
       <FlyControls />
       <AxisGizmo />
@@ -692,17 +750,116 @@ function CanvasResizer({ containerRef }: { containerRef: React.RefObject<HTMLDiv
   return null;
 }
 
+/** Small compass/heading indicator in the top-left of the Space panel */
+function HeadingIndicator({ forwardRef, color, faceTrackingActive }: {
+  forwardRef: React.MutableRefObject<THREE.Vector3>;
+  color: string;
+  faceTrackingActive: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let raf = 0;
+    const draw = () => {
+      const fwd = forwardRef.current;
+      const yaw = Math.atan2(fwd.x, fwd.z);
+
+      const size = 36;
+      const cx = size / 2, cy = size / 2;
+      const r = 14;
+      ctx.clearRect(0, 0, size, size);
+
+      // Circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = color + '30';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Direction arrow (pointing where listener faces)
+      const ax = cx + Math.sin(yaw) * r * 0.85;
+      const ay = cy - Math.cos(yaw) * r * 0.85;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ax, ay);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Arrow head
+      const headLen = 4;
+      const angle = -yaw + Math.PI / 2;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - headLen * Math.cos(angle - 0.4), ay - headLen * Math.sin(angle - 0.4));
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - headLen * Math.cos(angle + 0.4), ay - headLen * Math.sin(angle + 0.4));
+      ctx.stroke();
+
+      // Dot at center
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+      ctx.fillStyle = color + '60';
+      ctx.fill();
+
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [forwardRef, color]);
+
+  return (
+    <div style={{
+      position: 'absolute',
+      top: 8,
+      left: 8,
+      zIndex: 10,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 4,
+      pointerEvents: 'none',
+    }}>
+      <canvas ref={canvasRef} width={36} height={36} style={{ width: 36, height: 36 }} />
+      {faceTrackingActive && (
+        <div style={{
+          fontSize: 8,
+          fontFamily: "'SF Mono', monospace",
+          color,
+          opacity: 0.5,
+          letterSpacing: '0.05em',
+        }}>
+          CAM
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColor = '#f4f3ee', onBgColorChange, onListenerMove, onListenerRotate }: SpatialViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [listenerLinked, setListenerLinked] = useState(false);
+  // Listener always follows camera orientation (linked mode removed — it was confusing)
   const [gridVisible, setGridVisible] = useState(true);
   const listenerPosRef = useRef(new THREE.Vector3(0, 0, 0));
+  const listenerForwardRef = useRef(new THREE.Vector3(0, 0, -1));
   const cameraResetRef = useRef<(() => void) | null>(null);
   const cameraZoomRef = useRef<((dir: number) => void) | null>(null);
   const cameraFitRef = useRef<(() => void) | null>(null);
-  const headTracking = useHeadTracking(onListenerRotate);
+
+  // Wrap the orientation callback to also update the forward ref for triangle rotation
+  const handleOrientationChange = useCallback((fx: number, fy: number, fz: number, ux: number, uy: number, uz: number) => {
+    listenerForwardRef.current.set(fx, fy, fz);
+    onListenerRotate?.(fx, fy, fz, ux, uy, uz);
+  }, [onListenerRotate]);
+
+  const headTracking = useHeadTracking(handleOrientationChange);
+  const faceTracking = useFaceTracking(handleOrientationChange);
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -727,10 +884,13 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
   const uiColor = useMemo(() => contrastColor(bgColor), [bgColor]);
   const listenerSync = useMemo<ListenerSync>(() => ({
     onMove: onListenerMove,
-    onRotate: onListenerRotate,
-    linked: listenerLinked,
+    onRotate: handleOrientationChange,
+    linked: false,
     listenerPosRef,
-  }), [onListenerMove, onListenerRotate, listenerLinked]);
+    listenerForwardRef,
+    externalTrackingActive: faceTracking.enabled || headTracking.enabled,
+    faceMeshRef: faceTracking.meshRef,
+  }), [onListenerMove, handleOrientationChange, faceTracking.enabled, headTracking.enabled, faceTracking.meshRef]);
 
   return (
     <div
@@ -746,6 +906,9 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {/* Heading indicator — always shows listener direction */}
+      <HeadingIndicator forwardRef={listenerForwardRef} color={uiColor} faceTrackingActive={faceTracking.enabled} />
+
       <Canvas
         camera={{ position: [4, 6, 8], fov: 55 }}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
@@ -822,53 +985,31 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
         >
           +
         </button>
+        {/* Webcam face tracking — only optional toggle */}
         <button
-          onClick={() => setListenerLinked(v => !v)}
-          title={listenerLinked ? 'Unlink listener from camera' : 'Link listener to camera'}
+          onClick={faceTracking.toggle}
+          title={faceTracking.enabled ? 'Disable face tracking' : faceTracking.loading ? 'Loading...' : 'Enable face tracking (webcam)'}
+          disabled={faceTracking.loading}
           style={{
             width: 20,
             height: 20,
             borderRadius: 4,
-            background: listenerLinked ? uiColor : 'none',
+            background: faceTracking.enabled ? uiColor : 'none',
             border: `1.5px solid ${uiColor}40`,
-            cursor: 'pointer',
+            cursor: faceTracking.loading ? 'wait' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             padding: 0,
-            opacity: listenerLinked ? 1 : 0.7,
+            opacity: faceTracking.enabled ? 1 : faceTracking.loading ? 0.4 : 0.7,
           }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={listenerLinked ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={faceTracking.enabled ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {/* Camera/eye icon */}
+            <circle cx="12" cy="10" r="3" />
+            <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
           </svg>
         </button>
-        {headTracking.available && (
-          <button
-            onClick={headTracking.toggle}
-            title={headTracking.enabled ? 'Disable head tracking' : 'Enable head tracking (device orientation)'}
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: 4,
-              background: headTracking.enabled ? uiColor : 'none',
-              border: `1.5px solid ${uiColor}40`,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 0,
-              opacity: headTracking.enabled ? 1 : 0.7,
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={headTracking.enabled ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2C8 2 6 5 6 8c0 2 1 3.5 1 5v1h10v-1c0-1.5 1-3 1-5 0-3-2-6-6-6z" />
-              <path d="M9 18h6" />
-              <path d="M10 22h4" />
-            </svg>
-          </button>
-        )}
         {onBgColorChange && (
           <div>
             <div

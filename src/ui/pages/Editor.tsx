@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, memo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { SatieEditor } from '../components/SatieEditor';
 import { SpatialViewport } from '../components/SpatialViewport';
@@ -31,6 +31,36 @@ import { ErrorBoundary } from '../components/ErrorBoundary';
 import { updateFeedback, editDistanceRatio } from '../../lib/feedbackStore';
 
 const DEFAULT_SCRIPT = `# satie\n`;
+
+const FIRST_TIME_SCRIPT = `# welcome to satie
+# hit Cmd+Enter (or the Run button) to hear this composition
+# then try changing the numbers and running again
+
+- a spatial soundscape with three layers
+
+loop gen gentle rain on leaves
+  volume 0.3
+  move fly x -8to8 y -1to3 z -8to8
+  speed 0.15
+  noise 0.3
+  fade_in 3
+
+2 * loop gen soft wind through trees
+  volume 0.15to0.25
+  pitch 0.8to1.2
+  move walk x -10to10 z -10to10
+  speed 0.1to0.3
+  start 1to3
+
+oneshot gen distant bird call every 4to8
+  volume 0.2to0.4
+  pitch 0.9to1.5
+  move fly x -6to6 y 2to5 z -6to6
+  speed 0.5
+  start 2
+`;
+
+const FIRST_TIME_KEY = 'satie-first-visit-done';
 const AUTOSAVE_DELAY = 2000;
 
 /** Memoized voices panel with mixer controls (mute/solo per voice) */
@@ -200,6 +230,8 @@ const PatchCord = memo(function PatchCord({ target }: { target: AITarget }) {
 
 export function Editor() {
   const { sketchId } = useParams<{ sketchId?: string }>();
+  const location = useLocation();
+  const templateState = (location.state as { templateTitle?: string; templateScript?: string } | null);
   const { user } = useAuth();
   const {
     engine: engineRef,
@@ -218,8 +250,17 @@ export function Editor() {
   } = useSatieEngine();
 
   const sfx = useSFX();
-  const [script, setScript] = useState(DEFAULT_SCRIPT);
-  const [sketchTitle, setSketchTitle] = useState('Untitled');
+  // First-time experience: show a demo composition on first visit
+  const isFirstTime = !sketchId && !templateState?.templateScript && !localStorage.getItem(FIRST_TIME_KEY);
+  const initialScript = templateState?.templateScript ?? (isFirstTime ? FIRST_TIME_SCRIPT : DEFAULT_SCRIPT);
+  const initialTitle = templateState?.templateTitle ?? (isFirstTime ? 'Welcome' : 'Untitled');
+
+  if (isFirstTime) {
+    localStorage.setItem(FIRST_TIME_KEY, '1');
+  }
+
+  const [script, setScript] = useState(initialScript);
+  const [sketchTitle, setSketchTitle] = useState(initialTitle);
   const [currentSketchId, setCurrentSketchId] = useState<string | undefined>(sketchId);
   const [isPublic, setIsPublic] = useState(false);
   const [sampleEntries, setSampleEntries] = useState<SampleEntry[]>([]);
@@ -239,10 +280,10 @@ export function Editor() {
   }, [currentSketchId]);
   const [panels, setPanels] = useState<PanelVisibility>({
     score: true,
-    samples: true,
+    samples: false,
     space: true,
-    voices: true,
-    ai: true,
+    voices: false,
+    ai: false,
     docs: false,
     export: false,
     versions: false,
@@ -671,6 +712,7 @@ export function Editor() {
                   onChange={setScript}
                   onRun={handleRun}
                   errors={uiState.errors}
+                  runtimeWarnings={uiState.runtimeWarnings}
                 />
               </div>
               <div style={{

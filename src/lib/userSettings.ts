@@ -34,7 +34,11 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
       .eq('user_id', userId)
       .single();
 
-    if (error && error.code !== 'PGRST116') throw error; // PGRST116 = not found
+    // PGRST116 = row not found, 42P01 = table doesn't exist, 400 = bad request (table missing)
+    if (error && error.code !== 'PGRST116' && error.code !== '42P01') {
+      // Silently fall back to localStorage for any Supabase error
+      return local;
+    }
 
     if (data) {
       // Sync to localStorage as cache
@@ -56,8 +60,8 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
       await saveSettings(userId, local);
     }
     return local;
-  } catch (e) {
-    console.error('[UserSettings] Failed to load from Supabase:', e);
+  } catch {
+    // Supabase unavailable or table missing — use localStorage silently
     return local;
   }
 }
@@ -81,8 +85,8 @@ export async function saveKey(
         { user_id: userId, [field]: value, updated_at: new Date().toISOString() },
         { onConflict: 'user_id' },
       );
-  } catch (e) {
-    console.error('[UserSettings] Failed to save to Supabase:', e);
+  } catch {
+    // Supabase unavailable or table missing — localStorage is the fallback
   }
 }
 
@@ -110,7 +114,7 @@ export async function saveSettings(
         },
         { onConflict: 'user_id' },
       );
-  } catch (e) {
-    console.error('[UserSettings] Failed to save to Supabase:', e);
+  } catch {
+    // Supabase unavailable or table missing — localStorage is the fallback
   }
 }

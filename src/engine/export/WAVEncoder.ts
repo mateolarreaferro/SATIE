@@ -108,14 +108,15 @@ export function encodeWAV(buffer: AudioBuffer, bitDepth: 16 | 24 = 16): Blob {
       }
     }
   } else {
-    // 24-bit
+    // 24-bit — use unsigned right shift to fix sign extension for negative samples
     for (let i = 0; i < numSamples; i++) {
       for (let ch = 0; ch < numChannels; ch++) {
         const sample = clampSample(channels[ch][i]);
         const value = Math.round(sample < 0 ? sample * 0x800000 : sample * 0x7fffff);
-        view.setUint8(offset, value & 0xff);
-        view.setUint8(offset + 1, (value >> 8) & 0xff);
-        view.setUint8(offset + 2, (value >> 16) & 0xff);
+        const u = value & 0xffffff; // mask to 24 bits, handles negative correctly
+        view.setUint8(offset, u & 0xff);
+        view.setUint8(offset + 1, (u >>> 8) & 0xff);
+        view.setUint8(offset + 2, (u >>> 16) & 0xff);
         offset += 3;
       }
     }

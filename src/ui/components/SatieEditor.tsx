@@ -1,12 +1,15 @@
 import { useRef, useCallback, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
-import { parse, SatieSyntaxError } from '../../engine';
+import { parseWithWarnings, SatieSyntaxError } from '../../engine';
+import type { ParseWarning } from '../../engine';
 
 interface SatieEditorProps {
   value: string;
   onChange: (value: string) => void;
   onRun?: () => void;
   errors: string | null;
+  /** Runtime warnings from the engine (missing samples, generation failures, etc.) */
+  runtimeWarnings?: string[];
 }
 
 const SATIE_LANG_ID = 'satie';
@@ -21,18 +24,18 @@ interface PropDoc {
 }
 
 const PROPERTY_DOCS: PropDoc[] = [
-  { label: 'volume', detail: 'number | range', documentation: 'Voice amplitude (0–1). Supports ranges like `0.3to0.8` and interpolation.' },
-  { label: 'pitch', detail: 'number | range', documentation: 'Playback rate (1 = normal). `0.5` = one octave down, `2` = one octave up.' },
-  { label: 'start', detail: 'seconds | range', documentation: 'When the voice starts playing (in seconds from the beginning).' },
-  { label: 'end', detail: 'seconds | range', documentation: 'When the voice stops playing (absolute time in seconds).' },
-  { label: 'duration', detail: 'seconds | range', documentation: 'How long the voice plays before stopping.' },
-  { label: 'fade_in', detail: 'seconds | range', documentation: 'Fade-in time in seconds. Volume ramps from 0 to target.' },
-  { label: 'fade_out', detail: 'seconds | range', documentation: 'Fade-out time in seconds when the voice stops.' },
-  { label: 'move', detail: 'walk|fly|fixed|spiral|orbit|lorenz <area>', documentation: 'Spatial movement type.\n- `walk x1 z1 x2 z2` — ground plane\n- `fly x1 y1 z1 x2 y2 z2` — 3D volume\n- `spiral/orbit/lorenz` — trajectory curves\n- `fixed x y z` — stationary position' },
-  { label: 'speed', detail: 'number | range', documentation: 'Movement speed for trajectories (Hz). Default: 0.3' },
-  { label: 'noise', detail: '0–1', documentation: 'Trajectory noise amplitude. Adds organic jitter to movement paths.' },
+  { label: 'volume', detail: '0–1 | range', documentation: 'Voice amplitude (0–1). Supports ranges like `0.3to0.8` and interpolation.\nExample: `volume 0.7` or `volume fade 0 1 every 2`' },
+  { label: 'pitch', detail: '0.1–4 | range', documentation: 'Playback rate (1 = normal). `0.5` = one octave down, `2` = one octave up.\nExample: `pitch 1.2` or `pitch fade 0.8 1.2 every 3 loop bounce`' },
+  { label: 'start', detail: 'seconds | range', documentation: 'When the voice starts playing (in seconds from the beginning).\nExample: `start 2` or `start 0to5`' },
+  { label: 'end', detail: 'seconds | range', documentation: 'When the voice stops playing (absolute time in seconds).\nExample: `end 10` or `end 10 fade 2`' },
+  { label: 'duration', detail: 'seconds | range', documentation: 'How long the voice plays before stopping.\nExample: `duration 5` or `duration 3to8`' },
+  { label: 'fade_in', detail: 'seconds | range', documentation: 'Fade-in time in seconds. Volume ramps from 0 to target.\nExample: `fade_in 1.5`' },
+  { label: 'fade_out', detail: 'seconds | range', documentation: 'Fade-out time in seconds when the voice stops.\nExample: `fade_out 2`' },
+  { label: 'move', detail: 'walk|fly|fixed|spiral|orbit|lorenz <area>', documentation: 'Spatial movement type.\n- `walk x1 z1 x2 z2` — ground plane\n- `fly x1 y1 z1 x2 y2 z2` — 3D volume\n- `spiral/orbit/lorenz` — trajectory curves\n- `fixed x y z` — stationary position\nExample: `move fly -5 -3 -5 5 3 5`' },
+  { label: 'speed', detail: '0.01–10 | range', documentation: 'Movement speed for trajectories (Hz). Default: 0.3\nExample: `speed 0.5`' },
+  { label: 'noise', detail: '0–1', documentation: 'Trajectory noise amplitude. Adds organic jitter to movement paths.\nExample: `noise 0.3`' },
   { label: 'color', detail: '#hex | name | r g b', documentation: 'Voice color in the viewport.\n- Hex: `#ff3300`\n- Named: `red`, `blue`, `cyan`\n- RGB: `0.8 0.2 0.1`\n- Supports interpolation per channel.' },
-  { label: 'alpha', detail: '0–1', documentation: 'Voice opacity in the viewport. Supports interpolation.' },
+  { label: 'alpha', detail: '0–1', documentation: 'Voice opacity in the viewport. Supports interpolation.\nExample: `alpha 0.5` or `alpha fade 0 1 every 3`' },
   { label: 'visual', detail: 'sphere|cube|trail|none [size N]', documentation: 'Visual representation in the 3D viewport. Combine types: `visual trail sphere`.\nOptional `size` multiplier (0.01–10, default 1): `visual cube size 2`' },
   { label: 'background', detail: '#hex | name | grayscale', documentation: 'Set the viewport background color.\n- Hex: `background #1a1a2e`\n- Named: `background black`\n- Grayscale: `background 40`\n- RGB: `background 26,26,46`', insertText: 'background ' },
   { label: 'overlap', detail: 'flag', documentation: 'Allow overlapping retriggers (oneshot only).' },
@@ -280,7 +283,7 @@ function registerSatieLanguage(monaco: any) {
 
 // ── Editor component ─────────────────────────────────────────
 
-export function SatieEditor({ value, onChange, onRun, errors }: SatieEditorProps) {
+export function SatieEditor({ value, onChange, onRun, errors, runtimeWarnings }: SatieEditorProps) {
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const onRunRef = useRef(onRun);
@@ -313,7 +316,24 @@ export function SatieEditor({ value, onChange, onRun, errors }: SatieEditorProps
       const markers: any[] = [];
 
       try {
-        parse(value);
+        const result = parseWithWarnings(value);
+
+        // Add warnings as yellow markers
+        for (const w of result.warnings) {
+          const lineNum = w.lineNumber > 0
+            ? Math.min(w.lineNumber, model.getLineCount())
+            : 1;
+          markers.push({
+            severity: w.severity === 'info'
+              ? monaco.MarkerSeverity.Info
+              : monaco.MarkerSeverity.Warning,
+            message: w.message,
+            startLineNumber: lineNum,
+            endLineNumber: lineNum,
+            startColumn: 1,
+            endColumn: model.getLineMaxColumn(lineNum),
+          });
+        }
       } catch (e: any) {
         if (e instanceof SatieSyntaxError && e.lineNumber >= 0) {
           markers.push({
@@ -325,7 +345,6 @@ export function SatieEditor({ value, onChange, onRun, errors }: SatieEditorProps
             endColumn: model.getLineMaxColumn(Math.min(e.lineNumber, model.getLineCount())),
           });
         } else if (e.message) {
-          // Generic error — try to extract line number from message
           const lineMatch = e.message.match(/line\s+(\d+)/i);
           const lineNum = lineMatch ? parseInt(lineMatch[1]) : 1;
           markers.push({
@@ -378,6 +397,7 @@ export function SatieEditor({ value, onChange, onRun, errors }: SatieEditorProps
           suggestOnTriggerCharacters: true,
         }}
       />
+      {/* Syntax errors */}
       {errors && (
         <div style={{
           padding: '6px 12px',
@@ -388,6 +408,23 @@ export function SatieEditor({ value, onChange, onRun, errors }: SatieEditorProps
           background: '#fdf6f0',
         }}>
           {errors}
+        </div>
+      )}
+      {/* Runtime warnings (missing samples, generation failures, etc.) */}
+      {runtimeWarnings && runtimeWarnings.length > 0 && (
+        <div style={{
+          padding: '6px 12px',
+          color: '#8b6914',
+          fontSize: '10px',
+          fontFamily: "'SF Mono', monospace",
+          borderTop: '1px solid #e8e0d8',
+          background: '#fefbf0',
+          maxHeight: 60,
+          overflow: 'auto',
+        }}>
+          {runtimeWarnings.map((w, i) => (
+            <div key={i} style={{ opacity: 0.85 }}>{w}</div>
+          ))}
         </div>
       )}
     </div>

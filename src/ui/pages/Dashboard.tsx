@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { getUserSketches, createSketch, deleteSketch, updateSketch } from '../../lib/sketches';
+import { TEMPLATES } from '../../lib/templates';
 import { loadSettings, saveKey as saveSettingsKey } from '../../lib/userSettings';
 import type { Sketch } from '../../lib/supabase';
 import { SplashScreen } from '../components/SplashScreen';
@@ -232,6 +233,8 @@ export function Dashboard() {
   });
   const [showSettings, setShowSettings] = useState(false);
   const [keys, setKeys] = useState<ApiKeys>({ anthropic_key: '', elevenlabs_key: '', openai_key: '', gemini_key: '' });
+  const [balanceCents, setBalanceCents] = useState<number | null>(null);
+  const [addingCredits, setAddingCredits] = useState(false);
 
   const handleSplashComplete = useCallback(() => {
     setShowSplash(false);
@@ -242,6 +245,49 @@ export function Dashboard() {
   useEffect(() => {
     loadSettings(user?.id ?? null).then(setKeys).catch(console.error);
   }, [user?.id]);
+
+  // Load credit balance
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      try {
+        const { supabase: sb } = await import('../../lib/supabase');
+        const { data: { session } } = await sb.auth.getSession();
+        if (!session) return;
+        const res = await fetch('/api/stripe/status', {
+          headers: { 'Authorization': `Bearer ${session.access_token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setBalanceCents(data.balance_cents ?? 0);
+        }
+      } catch { /* proxy not deployed yet */ }
+    })();
+  }, [user]);
+
+  const handleAddCredits = useCallback(async (amount: number) => {
+    setAddingCredits(true);
+    try {
+      const { supabase: sb } = await import('../../lib/supabase');
+      const { data: { session } } = await sb.auth.getSession();
+      if (!session) throw new Error('Sign in required');
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ amount }),
+      });
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+      else throw new Error(data.error || 'Failed');
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setAddingCredits(false);
+    }
+  }, []);
 
   const handleSaveKey = useCallback((field: keyof ApiKeys, value: string) => {
     setKeys(prev => ({ ...prev, [field]: value }));
@@ -275,6 +321,20 @@ export function Dashboard() {
       navigate(`/editor/${sketch.id}`);
     } catch (err) {
       console.error('Failed to create sketch:', err);
+    }
+  }, [user, navigate]);
+
+  const handleNewFromTemplate = useCallback(async (title: string, script: string) => {
+    if (!user) {
+      // Guest mode: navigate to editor with template in URL state
+      navigate('/editor', { state: { templateTitle: title, templateScript: script } });
+      return;
+    }
+    try {
+      const sketch = await createSketch(user.id, title, script);
+      navigate(`/editor/${sketch.id}`);
+    } catch (err) {
+      console.error('Failed to create sketch from template:', err);
     }
   }, [user, navigate]);
 
@@ -372,49 +432,100 @@ export function Dashboard() {
         {showSettings && (
           <div style={styles.settingsPanel}>
             <div style={styles.settingsInner}>
-              <div style={styles.settingsSection}>
-                <div style={styles.settingsLabel}>Anthropic API Key</div>
-                <input
-                  type="password"
-                  placeholder="sk-ant-..."
-                  value={keys.anthropic_key}
-                  onChange={(e) => handleSaveKey('anthropic_key', e.target.value)}
-                  style={styles.settingsInput}
-                />
-              </div>
-              <div style={styles.settingsSection}>
-                <div style={styles.settingsLabel}>OpenAI API Key</div>
-                <input
-                  type="password"
-                  placeholder="sk-..."
-                  value={keys.openai_key}
-                  onChange={(e) => handleSaveKey('openai_key', e.target.value)}
-                  style={styles.settingsInput}
-                />
-              </div>
-              <div style={styles.settingsSection}>
-                <div style={styles.settingsLabel}>Google Gemini API Key</div>
-                <input
-                  type="password"
-                  placeholder="AIza..."
-                  value={keys.gemini_key}
-                  onChange={(e) => handleSaveKey('gemini_key', e.target.value)}
-                  style={styles.settingsInput}
-                />
-              </div>
-              <div style={styles.settingsSection}>
-                <div style={styles.settingsLabel}>ElevenLabs API Key</div>
-                <input
-                  type="password"
-                  placeholder="sk_..."
-                  value={keys.elevenlabs_key}
-                  onChange={(e) => handleSaveKey('elevenlabs_key', e.target.value)}
-                  style={styles.settingsInput}
-                />
-              </div>
-              <div style={{ fontSize: '10px', opacity: 0.25, marginTop: '4px' }}>
-                {user ? 'synced to account' : 'stored locally'}
-              </div>
+              {/* Credits */}
+              {user && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 6,
+                    marginBottom: 10,
+                  }}>
+                    <span style={{
+                      fontSize: '18px',
+                      fontWeight: 700,
+                      fontFamily: "'SF Mono', monospace",
+                      color: '#1a3a2a',
+                    }}>
+                      {balanceCents != null ? `$${(balanceCents / 100).toFixed(2)}` : '—'}
+                    </span>
+                    <span style={{ fontSize: '10px', opacity: 0.35 }}>credits</span>
+                    {balanceCents != null && balanceCents < 100 && balanceCents >= 0 && (
+                      <span style={{ fontSize: '9px', color: '#8b0000', opacity: 0.8 }}>
+                        {balanceCents === 0 ? 'empty' : 'running low'}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {[5, 10, 20, 50].map(amt => (
+                      <button
+                        key={amt}
+                        onClick={() => handleAddCredits(amt)}
+                        disabled={addingCredits}
+                        style={{
+                          padding: '4px 12px',
+                          borderRadius: 6,
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          fontFamily: "'Inter', system-ui, sans-serif",
+                          background: '#1a3a2a',
+                          color: '#faf9f6',
+                          border: 'none',
+                          cursor: addingCredits ? 'wait' : 'pointer',
+                          opacity: addingCredits ? 0.5 : 1,
+                        }}
+                      >
+                        +${amt}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ fontSize: '9px', opacity: 0.25, marginTop: 6, lineHeight: 1.4 }}>
+                    Credits are used for AI script generation and audio synthesis.
+                    <br />The editor, playback, export, and sharing are always free.
+                  </div>
+                </div>
+              )}
+
+              {!user && (
+                <div style={{ fontSize: '10px', opacity: 0.4, marginBottom: 8, lineHeight: 1.4 }}>
+                  Sign in to add credits for AI and audio generation.
+                </div>
+              )}
+
+              {/* Advanced: own API keys */}
+              <details style={{ cursor: 'pointer' }}>
+                <summary style={{
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  opacity: 0.25,
+                  userSelect: 'none',
+                  marginBottom: 8,
+                  fontFamily: "'Inter', system-ui, sans-serif",
+                }}>
+                  Advanced: use your own API keys
+                </summary>
+                <div style={styles.settingsSection}>
+                  <div style={styles.settingsLabel}>Anthropic</div>
+                  <input type="password" placeholder="sk-ant-..." value={keys.anthropic_key} onChange={(e) => handleSaveKey('anthropic_key', e.target.value)} style={styles.settingsInput} />
+                </div>
+                <div style={styles.settingsSection}>
+                  <div style={styles.settingsLabel}>OpenAI</div>
+                  <input type="password" placeholder="sk-..." value={keys.openai_key} onChange={(e) => handleSaveKey('openai_key', e.target.value)} style={styles.settingsInput} />
+                </div>
+                <div style={styles.settingsSection}>
+                  <div style={styles.settingsLabel}>Gemini</div>
+                  <input type="password" placeholder="AIza..." value={keys.gemini_key} onChange={(e) => handleSaveKey('gemini_key', e.target.value)} style={styles.settingsInput} />
+                </div>
+                <div style={styles.settingsSection}>
+                  <div style={styles.settingsLabel}>ElevenLabs</div>
+                  <input type="password" placeholder="sk_..." value={keys.elevenlabs_key} onChange={(e) => handleSaveKey('elevenlabs_key', e.target.value)} style={styles.settingsInput} />
+                </div>
+                <div style={{ fontSize: '9px', opacity: 0.2, marginTop: 4 }}>
+                  Your own keys bypass credits — direct API calls, no limits.
+                </div>
+              </details>
             </div>
           </div>
         )}
@@ -452,7 +563,57 @@ export function Dashboard() {
           {user && !loadingSketches && sketches.length === 0 && (
             <div style={styles.welcome}>
               <div style={styles.welcomeTitle}>No sketches yet</div>
-              <p style={styles.welcomeSubtitle}>Create your first composition.</p>
+              <p style={styles.welcomeSubtitle}>Create your first composition, or start from a template.</p>
+            </div>
+          )}
+
+          {/* Templates — shown when user has no sketches or is new */}
+          {((!user) || (user && !loadingSketches && sketches.length < 3)) && (
+            <div style={{
+              position: 'absolute',
+              bottom: 24,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              gap: '10px',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+              maxWidth: '90%',
+            }}>
+              <div style={{
+                width: '100%',
+                textAlign: 'center',
+                fontSize: '9px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+                opacity: 0.3,
+                fontWeight: 600,
+                marginBottom: 2,
+                fontFamily: "'Inter', system-ui, sans-serif",
+              }}>Templates</div>
+              {TEMPLATES.map((tmpl) => (
+                <button
+                  key={tmpl.title}
+                  className="template-btn"
+                  onClick={() => { sfx.click(); handleNewFromTemplate(tmpl.title, tmpl.script); }}
+                  onMouseEnter={sfx.hover}
+                  style={{
+                    padding: '6px 12px',
+                    background: 'rgba(255,255,255,0.7)',
+                    border: '1px solid #d0cdc4',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontFamily: "'Inter', system-ui, sans-serif",
+                    fontSize: '10px',
+                    color: '#1a3a2a',
+                    transition: 'all 0.15s',
+                    backdropFilter: 'blur(8px)',
+                  }}
+                >
+                  <div style={{ fontWeight: 600, fontSize: '10px' }}>{tmpl.title}</div>
+                  <div style={{ fontSize: '8px', opacity: 0.4, marginTop: 1 }}>{tmpl.description}</div>
+                </button>
+              ))}
             </div>
           )}
 

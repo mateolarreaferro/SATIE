@@ -39,6 +39,71 @@ export class SatieSyntaxError extends Error {
   }
 }
 
+export interface ParseWarning {
+  message: string;
+  lineNumber: number;
+  severity: 'warning' | 'info';
+  suggestion?: string;
+}
+
+export interface ParseResult {
+  statements: Statement[];
+  warnings: ParseWarning[];
+}
+
+/**
+ * All known property names in the Satie DSL.
+ * Used to detect typos and suggest corrections.
+ */
+const KNOWN_PROPERTIES = new Set([
+  'volume', 'pitch', 'start', 'starts_at', 'end', 'duration',
+  'fade_in', 'fade_out', 'every', 'overlap', 'persistent',
+  'mute', 'solo', 'randomstart', 'random_start', 'visual', 'move',
+  'color', 'background', 'bg', 'alpha', 'reverb', 'delay',
+  'filter', 'distortion', 'eq', 'influence', 'loopable',
+  'speed', 'noise', 'prompt', 'size',
+]);
+
+/**
+ * Compute Levenshtein distance between two strings.
+ * Used for "did you mean?" suggestions on property typos.
+ */
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function suggestProperty(typo: string): string | undefined {
+  let best: string | undefined;
+  let bestDist = Infinity;
+  for (const prop of KNOWN_PROPERTIES) {
+    const d = levenshtein(typo, prop);
+    if (d < bestDist && d <= 2) {
+      best = prop;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+// Module-level warning collector (reset per parse call)
+let _parseWarnings: ParseWarning[] = [];
+let _currentLineOffset = 0;
+
+function addWarning(message: string, lineNumber: number, suggestion?: string, severity: 'warning' | 'info' = 'warning'): void {
+  _parseWarnings.push({ message, lineNumber, severity, suggestion });
+}
+
 // Regex patterns (compiled once)
 const GenRx = /^(?<prefix>(?:\d+\s*\*\s*)?)(?<kind>loop|oneshot)\s+gen\s+(?<prompt>.+?)(?=\s+every\s+|$)/i;
 
@@ -208,6 +273,17 @@ function parseSingle(block: string): Statement {
         break;
       }
       case 'loopable': s.genLoopable = true; break;
+      default: {
+        // Unknown property — try to suggest a correction
+        if (!KNOWN_PROPERTIES.has(k)) {
+          const suggestion = suggestProperty(k);
+          const msg = suggestion
+            ? `Unknown property '${k}'. Did you mean '${suggestion}'?`
+            : `Unknown property '${k}'`;
+          addWarning(msg, -1, suggestion);
+        }
+        break;
+      }
     }
   }
   return s;
@@ -820,8 +896,8 @@ function parseFilter(s: Statement, v: string): void {
 
   s.filterParams = {
     mode,
-    cutoff: cutoff?.range ?? RangeOrValue.single(1000),
-    resonance: res?.range ?? RangeOrValue.single(1),
+    cutoff: cutoff?.range ?? RangeOrValue.single(0.5),     // 0-1, maps to ~632Hz
+    resonance: res?.range ?? RangeOrValue.single(0.25),    // 0-1, maps to ~Q 1.2
     dryWet: wet?.range ?? RangeOrValue.single(1),
     cutoffInterpolation: cutoff?.interp ?? null,
     resonanceInterpolation: res?.interp ?? null,
@@ -841,7 +917,7 @@ function parseDistortion(s: Statement, v: string): void {
 
   s.distortionParams = {
     mode,
-    drive: drive?.range ?? RangeOrValue.single(1),
+    drive: drive?.range ?? RangeOrValue.single(0.3),      // 0-1, maps to ~drive 3.6
     dryWet: wet?.range ?? RangeOrValue.single(1),
     driveInterpolation: drive?.interp ?? null,
     dryWetInterpolation: wet?.interp ?? null,
@@ -854,9 +930,9 @@ function parseEQ(s: Statement, v: string): void {
   const high = parseDSPParam(v, /\bhigh\s+(.+?)(?=\s+(?:low|mid)\s+|$)/i);
 
   s.eqParams = {
-    lowGain: low?.range ?? RangeOrValue.single(0),
-    midGain: mid?.range ?? RangeOrValue.single(0),
-    highGain: high?.range ?? RangeOrValue.single(0),
+    lowGain: low?.range ?? RangeOrValue.single(0.5),      // 0-1, 0.5 = 0dB (flat)
+    midGain: mid?.range ?? RangeOrValue.single(0.5),
+    highGain: high?.range ?? RangeOrValue.single(0.5),
     lowGainInterpolation: low?.interp ?? null,
     midGainInterpolation: mid?.interp ?? null,
     highGainInterpolation: high?.interp ?? null,
@@ -1388,6 +1464,18 @@ function extractTrajectoryGenBlocks(
 
 // ============ MAIN PARSE FUNCTION ============
 
+/**
+ * Parse with warnings — returns both statements and non-fatal warnings.
+ * This is the preferred parse function for editor integration.
+ */
+export function parseWithWarnings(script: string): ParseResult {
+  _parseWarnings = [];
+  const statements = parse(script);
+  const warnings = _parseWarnings;
+  _parseWarnings = [];
+  return { statements, warnings };
+}
+
 export function parse(script: string): Statement[] {
   const rawLines = script.replace(/\r\n/g, '\n').split('\n');
 
@@ -1537,7 +1625,10 @@ export function parse(script: string): Statement[] {
       }
     }
 
-    console.warn(`[Satie] Unrecognised line: '${body}'`);
+    // Don't warn for lines that are just '#' hash comments or '@' metadata
+    if (!body.startsWith('#') && !body.startsWith('@')) {
+      addWarning(`Unrecognised line: '${body}'`, i + 1);
+    }
   }
 
   if (grp) flushGroup(outList, grp);

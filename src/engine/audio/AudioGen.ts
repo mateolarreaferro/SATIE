@@ -108,12 +108,10 @@ export async function generateAudio(
   options?: GenOptions,
 ): Promise<AudioBuffer> {
   const apiKey = localStorage.getItem('satie-elevenlabs-key') ?? '';
-  if (!apiKey) {
-    throw new Error('ElevenLabs API key not set. Add it in dashboard settings.');
-  }
 
   const duration = options?.duration ?? (isLoop ? LOOP_DURATION : ONESHOT_DURATION);
   const influence = options?.influence ?? PROMPT_INFLUENCE;
+  const outputFormat = ctx.sampleRate >= 48000 ? 'mp3_44100_192' : 'mp3_44100_128';
 
   // Check IndexedDB cache first (cached as MP3 bytes)
   const ck = cacheKey(prompt, duration, influence, clipName);
@@ -125,7 +123,13 @@ export async function generateAudio(
   // Deduplicate concurrent requests for the same clip
   let rawPromise = pending.get(clipName);
   if (!rawPromise) {
-    rawPromise = fetchSoundGenerationRateLimited(apiKey, prompt, duration, influence);
+    if (apiKey) {
+      // User has their own key — direct call
+      rawPromise = fetchSoundGenerationRateLimited(apiKey, prompt, duration, influence, outputFormat);
+    } else {
+      // No key — use proxy (requires auth)
+      rawPromise = fetchSoundGenerationViaProxy(prompt, duration, influence, outputFormat);
+    }
     pending.set(clipName, rawPromise);
   }
 
@@ -148,10 +152,11 @@ async function fetchSoundGenerationRateLimited(
   prompt: string,
   duration: number,
   influence: number,
+  outputFormat: string,
 ): Promise<ArrayBuffer> {
   await acquireSlot();
   try {
-    return await fetchSoundGeneration(apiKey, prompt, duration, influence);
+    return await fetchSoundGeneration(apiKey, prompt, duration, influence, outputFormat);
   } finally {
     releaseSlot();
   }
@@ -162,9 +167,10 @@ async function fetchSoundGeneration(
   prompt: string,
   duration: number,
   influence: number,
+  outputFormat: string,
 ): Promise<ArrayBuffer> {
   const res = await fetch(
-    'https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128',
+    `https://api.elevenlabs.io/v1/sound-generation?output_format=${outputFormat}`,
     {
       method: 'POST',
       headers: {
@@ -185,4 +191,45 @@ async function fetchSoundGeneration(
   }
 
   return res.arrayBuffer();
+}
+
+// ── Proxy path (no user API key needed) ──
+
+async function fetchSoundGenerationViaProxy(
+  prompt: string,
+  duration: number,
+  influence: number,
+  outputFormat: string,
+): Promise<ArrayBuffer> {
+  // Get Supabase JWT for authentication
+  const { createClient } = await import('@supabase/supabase-js');
+  const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL ?? '';
+  const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ?? '';
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    throw new Error('Sign in to generate audio, or add your ElevenLabs API key in settings.');
+  }
+
+  await acquireSlot();
+  try {
+    const res = await fetch('/api/generate-audio', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ prompt, duration, influence, outputFormat }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Proxy error ${res.status}` }));
+      throw new Error(err.error || `Audio generation failed (${res.status})`);
+    }
+
+    return res.arrayBuffer();
+  } finally {
+    releaseSlot();
+  }
 }

@@ -1,7 +1,12 @@
 /**
  * Unified AI provider abstraction for Satie.
  * Supports Anthropic (Claude), OpenAI, and Google Gemini.
+ *
+ * When the user has their own API key → direct calls (no proxy).
+ * When they don't → routes through /api/ai proxy (server-side keys).
  */
+
+import { supabase } from './supabase';
 
 export type AIProviderType = 'anthropic' | 'openai' | 'gemini';
 
@@ -23,7 +28,73 @@ export interface AIProvider {
   call(options: AICallOptions): Promise<string>;
 }
 
-// ── Anthropic (Claude) ─────────────────────────────────────
+// ── Proxied provider (uses /api/ai with Supabase JWT) ──────
+
+export class ProxiedProvider implements AIProvider {
+  readonly name: string;
+  readonly type: AIProviderType;
+  private model: string;
+
+  constructor(type: AIProviderType, model?: string) {
+    this.type = type;
+    this.name = type === 'anthropic' ? 'Claude' : type === 'openai' ? 'OpenAI' : 'Gemini';
+    this.model = model || this.defaultModel();
+  }
+
+  private defaultModel(): string {
+    switch (this.type) {
+      case 'anthropic': return 'claude-sonnet-4-20250514';
+      case 'openai': return 'gpt-4o';
+      case 'gemini': return 'gemini-2.0-flash';
+    }
+  }
+
+  private fastModel(): string {
+    switch (this.type) {
+      case 'anthropic': return 'claude-haiku-4-5-20251001';
+      case 'openai': return 'gpt-4o-mini';
+      case 'gemini': return 'gemini-2.0-flash-lite';
+    }
+  }
+
+  async call(options: AICallOptions): Promise<string> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      throw new Error('Sign in to use AI features.');
+    }
+
+    const response = await fetch('/api/ai', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        provider: this.type,
+        model: this.model,
+        systemPrompt: options.systemPrompt,
+        messages: options.messages,
+        maxTokens: options.maxTokens,
+        temperature: options.temperature,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: `Proxy error ${response.status}` }));
+      throw new Error(err.error || `AI proxy error (${response.status})`);
+    }
+
+    const data = await response.json();
+    return data.text ?? '';
+  }
+
+  fast(): ProxiedProvider {
+    return new ProxiedProvider(this.type, this.fastModel());
+  }
+}
+
+// ── Anthropic (Claude) — direct API call ───────────────────
 
 const ANTHROPIC_MODELS = {
   main: 'claude-sonnet-4-20250514',
@@ -61,13 +132,12 @@ export class AnthropicProvider implements AIProvider {
     return data.content?.[0]?.text ?? '';
   }
 
-  /** Create a fast (Haiku) variant for repair/verification tasks. */
   fast(): AnthropicProvider {
     return new AnthropicProvider(this.apiKey, ANTHROPIC_MODELS.fast);
   }
 }
 
-// ── OpenAI ──────────────────────────────────────────────────
+// ── OpenAI — direct API call ───────────────────────────────
 
 const OPENAI_MODELS = {
   main: 'gpt-4o',
@@ -113,7 +183,7 @@ export class OpenAIProvider implements AIProvider {
   }
 }
 
-// ── Google Gemini ───────────────────────────────────────────
+// ── Google Gemini — direct API call ────────────────────────
 
 const GEMINI_MODELS = {
   main: 'gemini-2.0-flash',
@@ -174,8 +244,9 @@ export function setPreferredProvider(provider: AIProviderType): void {
 }
 
 /**
- * Create an AI provider from the user's stored keys.
- * Falls through available providers if the preferred one has no key.
+ * Create an AI provider.
+ * If the user has their own API key → direct calls (faster, no rate limit).
+ * If not → proxy through /api/ai (server-side keys, rate-limited).
  */
 export function createProvider(preferred?: AIProviderType): AIProvider {
   const pref = preferred ?? getPreferredProvider();
@@ -183,7 +254,7 @@ export function createProvider(preferred?: AIProviderType): AIProvider {
   const openaiKey = localStorage.getItem('satie-openai-key') ?? '';
   const geminiKey = localStorage.getItem('satie-gemini-key') ?? '';
 
-  // Try preferred provider first, then fall back
+  // Try preferred provider with user's own key first
   const order: { type: AIProviderType; key: string; factory: (k: string) => AIProvider }[] = [
     { type: 'anthropic', key: anthropicKey, factory: (k) => new AnthropicProvider(k) },
     { type: 'openai', key: openaiKey, factory: (k) => new OpenAIProvider(k) },
@@ -197,7 +268,8 @@ export function createProvider(preferred?: AIProviderType): AIProvider {
     if (key) return factory(key);
   }
 
-  throw new Error('No AI provider configured. Add an API key in dashboard settings.');
+  // No user keys — fall back to proxy
+  return new ProxiedProvider(pref);
 }
 
 /**
@@ -213,11 +285,26 @@ export function createFastProvider(preferred?: AIProviderType): AIProvider {
 
 /**
  * Get available providers (those with API keys configured).
+ * Always includes 'proxy' as an option for signed-in users.
  */
 export function getAvailableProviders(): AIProviderType[] {
   const available: AIProviderType[] = [];
   if (localStorage.getItem('satie-anthropic-key')) available.push('anthropic');
   if (localStorage.getItem('satie-openai-key')) available.push('openai');
   if (localStorage.getItem('satie-gemini-key')) available.push('gemini');
+  // Proxy is always available for signed-in users (even if no keys)
+  if (available.length === 0) available.push('anthropic');
   return available;
+}
+
+/**
+ * Check if the user has any API key configured.
+ * If not, they'll use the proxy (requires sign-in).
+ */
+export function hasUserApiKey(): boolean {
+  return !!(
+    localStorage.getItem('satie-anthropic-key') ||
+    localStorage.getItem('satie-openai-key') ||
+    localStorage.getItem('satie-gemini-key')
+  );
 }

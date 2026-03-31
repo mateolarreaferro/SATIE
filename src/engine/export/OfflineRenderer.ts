@@ -6,13 +6,21 @@
  *   - stereo: 2ch with equalpower panning
  *   - binaural: 2ch with HRTF panning
  *   - ambisonic-foa: 4ch First-Order Ambisonics (AmbiX: W, Y, Z, X)
+ *
+ * This renderer faithfully replicates the live engine's behavior:
+ *   - Parameter interpolation (volume, pitch, DSP automation)
+ *   - Noise perturbation on trajectories
+ *   - Matched rolloff/distance model
+ *   - Proper loop timing
  */
 
 import { parse, pathFor } from '../core/SatieParser';
 import { Statement, WanderType, isTrajectoryWanderType } from '../core/Statement';
-import { buildDSPChain, destroyDSPChain } from '../dsp/DSPChain';
+import { InterpolationData, ModulationType, LoopMode } from '../core/InterpolationData';
+import { buildDSPChain, destroyDSPChain, makeDistortionCurve, mapCutoff, mapResonance, mapDrive, mapEQGain, mapSpeed } from '../dsp/DSPChain';
 import { getTrajectory } from '../spatial/Trajectories';
 import { computeFOAGains, distanceAttenuation } from './AmbisonicEncoder';
+import { SatieEngine } from '../core/SatieEngine';
 
 export type RenderMode = 'stereo' | 'binaural' | 'ambisonic-foa';
 
@@ -31,6 +39,10 @@ export interface RenderProgress {
   phase: 'parsing' | 'decoding' | 'rendering' | 'done';
   progress: number; // 0-1
 }
+
+/** Automation update rate for offline rendering (Hz) */
+const AUTOMATION_FPS = 30;
+const AUTOMATION_STEP = 1 / AUTOMATION_FPS;
 
 /**
  * Render a Satie script offline to an AudioBuffer.
@@ -59,30 +71,28 @@ export async function renderOffline(
 
   onProgress?.({ phase: 'decoding', progress: 0.1 });
 
-  // Build the decoded buffer map from multiple sources:
-  // 1. Pre-decoded AudioBuffers from the live engine (most complete — includes gen audio)
-  // 2. Raw ArrayBuffers decoded into the offline context
+  // Build the decoded buffer map
   const decodedBuffers = new Map<string, AudioBuffer>();
 
-  // First, copy pre-decoded buffers from the live engine
+  // Copy pre-decoded buffers from the live engine
   if (decodedAudioBuffers) {
     for (const [name, buf] of decodedAudioBuffers) {
-      // AudioBuffers can be shared across contexts — the buffer data is just Float32Arrays
-      // We need to re-create them in the offline context's sample rate if they differ
       if (buf.sampleRate === sampleRate) {
         decodedBuffers.set(name, buf);
       } else {
-        // Resample by creating a new buffer
+        // Resample with linear interpolation (higher quality than nearest-neighbor)
         const newBuf = offlineCtx.createBuffer(buf.numberOfChannels,
           Math.ceil(buf.duration * sampleRate), sampleRate);
         for (let ch = 0; ch < buf.numberOfChannels; ch++) {
-          // Simple nearest-neighbor copy (good enough — proper resampling would use OfflineAudioContext)
           const src = buf.getChannelData(ch);
           const dst = newBuf.getChannelData(ch);
           const ratio = buf.sampleRate / sampleRate;
           for (let i = 0; i < dst.length; i++) {
-            const srcIdx = Math.min(Math.floor(i * ratio), src.length - 1);
-            dst[i] = src[srcIdx];
+            const srcPos = i * ratio;
+            const i0 = Math.floor(srcPos);
+            const i1 = Math.min(i0 + 1, src.length - 1);
+            const frac = srcPos - i0;
+            dst[i] = src[i0] + (src[i1] - src[i0]) * frac;
           }
         }
         decodedBuffers.set(name, newBuf);
@@ -90,11 +100,11 @@ export async function renderOffline(
     }
   }
 
-  // Then decode raw ArrayBuffers (overrides any pre-decoded with same name)
+  // Decode raw ArrayBuffers sequentially
   const bufferEntries = Array.from(sampleBuffers.entries());
   for (let i = 0; i < bufferEntries.length; i++) {
     const [name, arrayBuffer] = bufferEntries[i];
-    if (decodedBuffers.has(name)) continue; // already have from engine
+    if (decodedBuffers.has(name)) continue;
     try {
       const copy = arrayBuffer.slice(0);
       const decoded = await offlineCtx.decodeAudioData(copy);
@@ -106,11 +116,6 @@ export async function renderOffline(
   }
 
   onProgress?.({ phase: 'rendering', progress: 0.3 });
-
-  // Log buffer state for debugging
-  console.log(`[OfflineRenderer] ${statements.length} statements, ${decodedBuffers.size} decoded buffers`);
-  console.log('[OfflineRenderer] Buffer keys:', Array.from(decodedBuffers.keys()));
-  console.log('[OfflineRenderer] Statement clips:', statements.map(s => `"${s.clip}" → pathFor="${pathFor(s.clip)}"`));
 
   // Create master output
   let sourcesScheduled: number;
@@ -131,6 +136,16 @@ export async function renderOffline(
   return result;
 }
 
+// ── Interpolation evaluation (mirrors SatieEngine.evalModulation) ──
+
+function evalModulation(mod: InterpolationData, elapsed: number, every: number): number {
+  return SatieEngine.evalModulation(mod, elapsed, every);
+}
+
+function clamp01(v: number): number {
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
 // ── Stereo / Binaural rendering ─────────────────────────────
 
 function renderStereoOrBinaural(
@@ -140,8 +155,18 @@ function renderStereoOrBinaural(
   duration: number,
   mode: RenderMode,
 ): number {
+  // Master gain + limiter matching live engine
   const masterGain = ctx.createGain();
-  masterGain.connect(ctx.destination);
+  masterGain.gain.value = 0.5; // -6 dB headroom — matches live engine
+  const limiter = ctx.createDynamicsCompressor();
+  limiter.threshold.value = -2;
+  limiter.knee.value = 0;
+  limiter.ratio.value = 20;
+  limiter.attack.value = 0.0005;
+  limiter.release.value = 0.05;
+  masterGain.connect(limiter);
+  limiter.connect(ctx.destination);
+
   let sourcesScheduled = 0;
 
   for (const stmt of statements) {
@@ -155,45 +180,55 @@ function renderStereoOrBinaural(
 
     const startTime = stmt.start.sample();
     const volume = stmt.volume.sample();
+    const pitch = stmt.pitch.sample();
 
     // Calculate repetitions based on 'every' and duration
     const times = computeStartTimes(stmt, startTime, duration, audioBuffer.duration);
 
-    for (const t of times) {
+    for (let ti = 0; ti < times.length; ti++) {
+      const t = times[ti];
       if (t >= duration) break;
+
+      const seed = Math.random() * 1000;
+      const wanderHz = mapSpeed(stmt.wanderHz.sample());
 
       // Source
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
-      source.playbackRate.value = stmt.pitch.sample();
+      source.playbackRate.setValueAtTime(pitch, t);
       if (stmt.kind === 'loop') source.loop = true;
 
-      // Gain
+      // Gain with micro-fade on start
       const gain = ctx.createGain();
-      gain.gain.value = volume;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(volume, t + 0.005);
 
       // Fade in/out
       applyFades(gain, stmt, t, audioBuffer.duration, duration);
 
-      // Panner
+      // Schedule parameter interpolation (volume, pitch)
+      const voiceDuration = computeVoiceDuration(stmt, audioBuffer.duration, duration - t);
+      scheduleParameterAutomation(gain, source, stmt, t, voiceDuration, volume, pitch, seed);
+
+      // Panner — matched to live engine
       const panner = ctx.createPanner();
       panner.panningModel = mode === 'binaural' ? 'HRTF' : 'equalpower';
       panner.distanceModel = 'inverse';
       panner.refDistance = 1;
-      panner.maxDistance = 100;
-      panner.rolloffFactor = 1;
+      panner.maxDistance = 50;   // match live engine
+      panner.rolloffFactor = 2; // match live engine
 
-      // Set position
+      // Set initial position at voice start time
       const pos = computeStaticPosition(stmt);
-      panner.positionX.setValueAtTime(pos.x, 0);
-      panner.positionY.setValueAtTime(pos.y, 0);
-      panner.positionZ.setValueAtTime(pos.z, 0);
+      panner.positionX.setValueAtTime(pos.x, t);
+      panner.positionY.setValueAtTime(pos.y, t);
+      panner.positionZ.setValueAtTime(pos.z, t);
 
       // Schedule position changes if applicable
       if (isTrajectoryWanderType(stmt.wanderType)) {
-        scheduleTrajectoryPositions(panner, stmt, t, duration);
+        scheduleTrajectoryPositions(panner, stmt, t, Math.min(t + voiceDuration, duration), seed, wanderHz);
       } else if (stmt.wanderType === WanderType.Walk || stmt.wanderType === WanderType.Fly) {
-        scheduleWanderPositions(panner, stmt, t, duration);
+        scheduleWanderPositions(panner, stmt, t, Math.min(t + voiceDuration, duration), seed, wanderHz);
       }
 
       // DSP chain
@@ -205,6 +240,11 @@ function renderStereoOrBinaural(
         eq: stmt.eqParams,
       });
 
+      // Schedule DSP parameter automation
+      if (dsp) {
+        scheduleDSPAutomation(dsp, stmt, t, voiceDuration);
+      }
+
       // Connect: source → gain → [DSP] → panner → master
       source.connect(gain);
       if (dsp) {
@@ -215,14 +255,9 @@ function renderStereoOrBinaural(
       }
       panner.connect(masterGain);
 
-      // Schedule
-      const voiceDuration = computeVoiceDuration(stmt, audioBuffer.duration, duration - t);
+      // Schedule start/stop
       source.start(t);
-      if (!stmt.persistent && stmt.kind !== 'loop') {
-        source.stop(t + voiceDuration);
-      } else if (stmt.kind === 'loop') {
-        source.stop(t + voiceDuration);
-      }
+      source.stop(t + voiceDuration);
 
       sourcesScheduled++;
     }
@@ -241,7 +276,12 @@ function renderAmbisonicFOA(
 ): number {
   // 4-channel merger: W(0), Y(1), Z(2), X(3)
   const merger = ctx.createChannelMerger(4);
-  merger.connect(ctx.destination);
+  // Master gain matching live engine
+  const masterGain = ctx.createGain();
+  masterGain.gain.value = 0.5;
+  merger.connect(masterGain);
+  masterGain.connect(ctx.destination);
+
   let sourcesScheduled = 0;
 
   for (const stmt of statements) {
@@ -252,21 +292,30 @@ function renderAmbisonicFOA(
 
     const startTime = stmt.start.sample();
     const volume = stmt.volume.sample();
+    const pitch = stmt.pitch.sample();
     const times = computeStartTimes(stmt, startTime, duration, audioBuffer.duration);
 
-    for (const t of times) {
+    for (let ti = 0; ti < times.length; ti++) {
+      const t = times[ti];
       if (t >= duration) break;
+
+      const seed = Math.random() * 1000;
+      const wanderHz = mapSpeed(stmt.wanderHz.sample());
 
       // Source
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
-      source.playbackRate.value = stmt.pitch.sample();
+      source.playbackRate.setValueAtTime(pitch, t);
       if (stmt.kind === 'loop') source.loop = true;
 
-      // Volume gain
+      // Volume gain with micro-fade
       const gain = ctx.createGain();
-      gain.gain.value = volume;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(volume, t + 0.005);
       applyFades(gain, stmt, t, audioBuffer.duration, duration);
+
+      const voiceDuration = computeVoiceDuration(stmt, audioBuffer.duration, duration - t);
+      scheduleParameterAutomation(gain, source, stmt, t, voiceDuration, volume, pitch, seed);
 
       // DSP chain
       const dsp = buildDSPChain(ctx as unknown as AudioContext, {
@@ -276,6 +325,10 @@ function renderAmbisonicFOA(
         reverb: stmt.reverbParams,
         eq: stmt.eqParams,
       });
+
+      if (dsp) {
+        scheduleDSPAutomation(dsp, stmt, t, voiceDuration);
+      }
 
       // Connect source → gain → [DSP] → dspOut
       source.connect(gain);
@@ -291,17 +344,17 @@ function renderAmbisonicFOA(
       const pos = computeStaticPosition(stmt);
       const gains = computeFOAGains(pos.x, pos.y, pos.z);
       const dist = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
-      const atten = distanceAttenuation(dist);
+      const atten = distanceAttenuation(dist, 1, 50, 2); // match live engine rolloff
 
       const wGain = ctx.createGain();
       const yGain = ctx.createGain();
       const zGain = ctx.createGain();
       const xGain = ctx.createGain();
 
-      wGain.gain.value = gains.w * atten;
-      yGain.gain.value = gains.y * atten;
-      zGain.gain.value = gains.z * atten;
-      xGain.gain.value = gains.x * atten;
+      wGain.gain.setValueAtTime(gains.w * atten, t);
+      yGain.gain.setValueAtTime(gains.y * atten, t);
+      zGain.gain.setValueAtTime(gains.z * atten, t);
+      xGain.gain.setValueAtTime(gains.x * atten, t);
 
       dspOut.connect(wGain);
       dspOut.connect(yGain);
@@ -315,13 +368,14 @@ function renderAmbisonicFOA(
 
       // Schedule position-based gain automation for moving sources
       if (isTrajectoryWanderType(stmt.wanderType)) {
-        scheduleAmbisonicTrajectory(ctx, wGain, yGain, zGain, xGain, stmt, t, duration);
+        scheduleAmbisonicTrajectory(ctx, wGain, yGain, zGain, xGain, stmt, t,
+          Math.min(t + voiceDuration, duration), seed, wanderHz);
       } else if (stmt.wanderType === WanderType.Walk || stmt.wanderType === WanderType.Fly) {
-        scheduleAmbisonicWander(ctx, wGain, yGain, zGain, xGain, stmt, t, duration);
+        scheduleAmbisonicWander(ctx, wGain, yGain, zGain, xGain, stmt, t,
+          Math.min(t + voiceDuration, duration), seed, wanderHz);
       }
 
       // Schedule
-      const voiceDuration = computeVoiceDuration(stmt, audioBuffer.duration, duration - t);
       source.start(t);
       source.stop(t + voiceDuration);
 
@@ -332,12 +386,340 @@ function renderAmbisonicFOA(
   return sourcesScheduled;
 }
 
+// ── Parameter automation (volume, pitch interpolation) ──────
+
+function scheduleParameterAutomation(
+  gain: GainNode,
+  source: AudioBufferSourceNode,
+  stmt: Statement,
+  startTime: number,
+  voiceDuration: number,
+  baseVolume: number,
+  basePitch: number,
+  _seed: number,
+): void {
+  const endTime = startTime + voiceDuration;
+  const hasVolumeInterp = !!stmt.volumeInterpolation || !!stmt.groupVolumeModulation;
+  const hasPitchInterp = !!stmt.pitchInterpolation || !!stmt.groupPitchModulation;
+
+  if (!hasVolumeInterp && !hasPitchInterp) return;
+
+  const volumeEvery = stmt.volumeInterpolation ? stmt.volumeInterpolation.every.sample() : 0;
+  const groupVolEvery = stmt.groupVolumeModulation ? stmt.groupVolumeModulation.every.sample() : 0;
+  const pitchEvery = stmt.pitchInterpolation ? stmt.pitchInterpolation.every.sample() : 0;
+  const groupPitchEvery = stmt.groupPitchModulation ? stmt.groupPitchModulation.every.sample() : 0;
+
+  for (let t = startTime; t < endTime; t += AUTOMATION_STEP) {
+    const elapsed = t - startTime;
+
+    if (hasVolumeInterp) {
+      let vol = stmt.volumeInterpolation
+        ? evalModulation(stmt.volumeInterpolation, elapsed, volumeEvery)
+        : baseVolume;
+      if (stmt.groupVolumeModulation) {
+        vol *= evalModulation(stmt.groupVolumeModulation, elapsed, groupVolEvery);
+      }
+      gain.gain.setValueAtTime(vol, t);
+    }
+
+    if (hasPitchInterp) {
+      let p = stmt.pitchInterpolation
+        ? evalModulation(stmt.pitchInterpolation, elapsed, pitchEvery)
+        : basePitch;
+      if (stmt.groupPitchModulation) {
+        p *= evalModulation(stmt.groupPitchModulation, elapsed, groupPitchEvery);
+      }
+      source.playbackRate.setValueAtTime(p, t);
+    }
+  }
+}
+
+// ── DSP parameter automation ────────────────────────────────
+
+function scheduleDSPAutomation(
+  dsp: ReturnType<typeof buildDSPChain>,
+  stmt: Statement,
+  startTime: number,
+  voiceDuration: number,
+): void {
+  if (!dsp) return;
+  const endTime = startTime + voiceDuration;
+
+  // Pre-cache every durations
+  const fp = stmt.filterParams;
+  const dp = stmt.distortionParams;
+  const dlp = stmt.delayParams;
+  const rp = stmt.reverbParams;
+  const eq = stmt.eqParams;
+
+  const hasFilterInterp = fp && (fp.cutoffInterpolation || fp.resonanceInterpolation || fp.dryWetInterpolation);
+  const hasDistInterp = dp && (dp.driveInterpolation || dp.dryWetInterpolation);
+  const hasDelayInterp = dlp && (dlp.timeInterpolation || dlp.feedbackInterpolation || dlp.dryWetInterpolation);
+  const hasReverbInterp = rp && rp.dryWetInterpolation;
+  const hasEqInterp = eq && (eq.lowGainInterpolation || eq.midGainInterpolation || eq.highGainInterpolation);
+
+  if (!hasFilterInterp && !hasDistInterp && !hasDelayInterp && !hasReverbInterp && !hasEqInterp) return;
+
+  // Cache every values
+  const filterCutoffEvery = fp?.cutoffInterpolation?.every.sample() ?? 0;
+  const filterResEvery = fp?.resonanceInterpolation?.every.sample() ?? 0;
+  const filterDWEvery = fp?.dryWetInterpolation?.every.sample() ?? 0;
+  const distDriveEvery = dp?.driveInterpolation?.every.sample() ?? 0;
+  const distDWEvery = dp?.dryWetInterpolation?.every.sample() ?? 0;
+  const delayTimeEvery = dlp?.timeInterpolation?.every.sample() ?? 0;
+  const delayFbEvery = dlp?.feedbackInterpolation?.every.sample() ?? 0;
+  const delayDWEvery = dlp?.dryWetInterpolation?.every.sample() ?? 0;
+  const reverbDWEvery = rp?.dryWetInterpolation?.every.sample() ?? 0;
+  const eqLowEvery = eq?.lowGainInterpolation?.every.sample() ?? 0;
+  const eqMidEvery = eq?.midGainInterpolation?.every.sample() ?? 0;
+  const eqHighEvery = eq?.highGainInterpolation?.every.sample() ?? 0;
+
+  for (let t = startTime; t < endTime; t += AUTOMATION_STEP) {
+    const elapsed = t - startTime;
+
+    // Filter automation (0-1 → real ranges)
+    if (hasFilterInterp && dsp.filterRef) {
+      if (fp!.cutoffInterpolation) {
+        dsp.filterRef.filter.frequency.setValueAtTime(
+          mapCutoff(evalModulation(fp!.cutoffInterpolation, elapsed, filterCutoffEvery)), t);
+      }
+      if (fp!.resonanceInterpolation) {
+        dsp.filterRef.filter.Q.setValueAtTime(
+          mapResonance(evalModulation(fp!.resonanceInterpolation, elapsed, filterResEvery)), t);
+      }
+      if (fp!.dryWetInterpolation) {
+        const w = clamp01(evalModulation(fp!.dryWetInterpolation, elapsed, filterDWEvery));
+        dsp.filterRef.wet.gain.setValueAtTime(w, t);
+        dsp.filterRef.dry.gain.setValueAtTime(1 - w, t);
+      }
+    }
+
+    // Distortion automation
+    if (hasDistInterp && dsp.distortionRef) {
+      if (dp!.driveInterpolation) {
+        const drive = mapDrive(evalModulation(dp!.driveInterpolation, elapsed, distDriveEvery));
+        dsp.distortionRef.shaper.curve = makeDistortionCurve(
+          dsp.distortionRef.mode, drive) as unknown as Float32Array<ArrayBuffer>;
+      }
+      if (dp!.dryWetInterpolation) {
+        const w = clamp01(evalModulation(dp!.dryWetInterpolation, elapsed, distDWEvery));
+        dsp.distortionRef.wet.gain.setValueAtTime(w, t);
+        dsp.distortionRef.dry.gain.setValueAtTime(1 - w, t);
+      }
+    }
+
+    // Delay automation
+    if (hasDelayInterp && dsp.delayRef) {
+      if (dlp!.timeInterpolation) {
+        const val = evalModulation(dlp!.timeInterpolation, elapsed, delayTimeEvery);
+        for (const d of dsp.delayRef.delays) {
+          d.delayTime.setValueAtTime(val, t);
+        }
+      }
+      if (dlp!.feedbackInterpolation) {
+        dsp.delayRef.fbGain.gain.setValueAtTime(
+          evalModulation(dlp!.feedbackInterpolation, elapsed, delayFbEvery), t);
+      }
+      if (dlp!.dryWetInterpolation) {
+        const w = clamp01(evalModulation(dlp!.dryWetInterpolation, elapsed, delayDWEvery));
+        dsp.delayRef.wet.gain.setValueAtTime(w, t);
+        dsp.delayRef.dry.gain.setValueAtTime(1 - w, t);
+      }
+    }
+
+    // Reverb automation
+    if (hasReverbInterp && dsp.reverbRef) {
+      const w = clamp01(evalModulation(rp!.dryWetInterpolation!, elapsed, reverbDWEvery));
+      dsp.reverbRef.wet.gain.setValueAtTime(w, t);
+      dsp.reverbRef.dry.gain.setValueAtTime(1 - w, t);
+    }
+
+    // EQ automation (0-1 → -12dB to +12dB)
+    if (hasEqInterp && dsp.eqRef) {
+      if (eq!.lowGainInterpolation) {
+        dsp.eqRef.low.gain.setValueAtTime(
+          mapEQGain(evalModulation(eq!.lowGainInterpolation, elapsed, eqLowEvery)), t);
+      }
+      if (eq!.midGainInterpolation) {
+        dsp.eqRef.mid.gain.setValueAtTime(
+          mapEQGain(evalModulation(eq!.midGainInterpolation, elapsed, eqMidEvery)), t);
+      }
+      if (eq!.highGainInterpolation) {
+        dsp.eqRef.high.gain.setValueAtTime(
+          mapEQGain(evalModulation(eq!.highGainInterpolation, elapsed, eqHighEvery)), t);
+      }
+    }
+  }
+}
+
+// ── Spatial: wander position scheduling with noise ──────────
+
+function computeWanderPosition(
+  stmt: Statement,
+  elapsed: number,
+  wanderSpeed: number,
+  seed: number,
+): { x: number; y: number; z: number } {
+  const px1 = seed * 1.0, px2 = seed * 2.3;
+  const py1 = seed * 3.7, py2 = seed * 0.5;
+  const pz1 = seed * 1.3, pz2 = seed * 4.2;
+
+  const t = elapsed * wanderSpeed;
+
+  let nx = (Math.sin(t + px1) + Math.sin(t * 1.3 + px2) + Math.sin(t * 0.7 + px1 * 0.3)) / 6 + 0.5;
+  let ny = (Math.sin(t * 0.8 + py1) + Math.sin(t * 1.1 + py2) + Math.sin(t * 0.6 + py1 * 0.4)) / 6 + 0.5;
+  let nz = (Math.sin(t * 1.2 + pz1) + Math.sin(t * 0.7 + pz2) + Math.sin(t * 0.9 + pz1 * 0.6)) / 6 + 0.5;
+
+  // High-frequency noise perturbation — mirrors live engine
+  if (stmt.noise > 0) {
+    const ht = elapsed * 3.7;
+    const n = stmt.noise * 0.15;
+    nx += (Math.sin(ht * 2.3 + px2 * 5) + Math.sin(ht * 3.1 + px1 * 7)) * n;
+    ny += (Math.sin(ht * 1.9 + py2 * 5) + Math.sin(ht * 2.7 + py1 * 7)) * n;
+    nz += (Math.sin(ht * 2.1 + pz2 * 5) + Math.sin(ht * 3.3 + pz1 * 7)) * n;
+  }
+
+  const isWalk = stmt.wanderType === WanderType.Walk;
+  return {
+    x: stmt.areaMin.x + (stmt.areaMax.x - stmt.areaMin.x) * nx,
+    y: isWalk ? 0 : stmt.areaMin.y + (stmt.areaMax.y - stmt.areaMin.y) * ny,
+    z: stmt.areaMin.z + (stmt.areaMax.z - stmt.areaMin.z) * nz,
+  };
+}
+
+function computeTrajectoryPosition(
+  stmt: Statement,
+  elapsed: number,
+  seed: number,
+  wanderHz: number,
+): { x: number; y: number; z: number } {
+  const trajectoryName = stmt.wanderType === WanderType.Custom ? stmt.customTrajectoryName : stmt.wanderType;
+  const trajectory = trajectoryName ? getTrajectory(trajectoryName) : undefined;
+  if (!trajectory) return computeStaticPosition(stmt);
+
+  const trajectoryPhase = (seed / 1000) % 1;
+  const t = (elapsed * wanderHz + trajectoryPhase) % 1;
+  const pt = trajectory.evaluate(t);
+
+  const px1 = seed * 1.0, px2 = seed * 2.3;
+  const py1 = seed * 3.7, py2 = seed * 0.5;
+  const pz1 = seed * 1.3, pz2 = seed * 4.2;
+
+  const minX = stmt.areaMin.x, minY = stmt.areaMin.y, minZ = stmt.areaMin.z;
+  const rangeX = stmt.areaMax.x - minX;
+  const rangeY = stmt.areaMax.y - minY;
+  const rangeZ = stmt.areaMax.z - minZ;
+
+  if (stmt.noise > 0) {
+    const n = stmt.noise * 0.5;
+    const nt = elapsed * 0.7;
+    const nx = (Math.sin(nt + px1) + Math.sin(nt * 1.7 + px2)) * n;
+    const ny = (Math.sin(nt * 0.9 + py1) + Math.sin(nt * 1.4 + py2)) * n;
+    const nz = (Math.sin(nt * 1.1 + pz1) + Math.sin(nt * 1.6 + pz2)) * n;
+    return {
+      x: minX + rangeX * (pt.x + nx),
+      y: minY + rangeY * (pt.y + ny),
+      z: minZ + rangeZ * (pt.z + nz),
+    };
+  }
+
+  return {
+    x: minX + rangeX * pt.x,
+    y: minY + rangeY * pt.y,
+    z: minZ + rangeZ * pt.z,
+  };
+}
+
+// ── Panner position scheduling ──────────────────────────────
+
+function scheduleTrajectoryPositions(
+  panner: PannerNode,
+  stmt: Statement,
+  startTime: number,
+  endTime: number,
+  seed: number,
+  wanderHz: number,
+): void {
+  for (let t = startTime; t < endTime; t += AUTOMATION_STEP) {
+    const elapsed = t - startTime;
+    const pos = computeTrajectoryPosition(stmt, elapsed, seed, wanderHz);
+    panner.positionX.setValueAtTime(pos.x, t);
+    panner.positionY.setValueAtTime(pos.y, t);
+    panner.positionZ.setValueAtTime(pos.z, t);
+  }
+}
+
+function scheduleWanderPositions(
+  panner: PannerNode,
+  stmt: Statement,
+  startTime: number,
+  endTime: number,
+  seed: number,
+  wanderHz: number,
+): void {
+  const wanderSpeed = wanderHz * 0.01 * 2 * Math.PI;
+
+  for (let t = startTime; t < endTime; t += AUTOMATION_STEP) {
+    const elapsed = t - startTime;
+    const pos = computeWanderPosition(stmt, elapsed, wanderSpeed, seed);
+    panner.positionX.setValueAtTime(pos.x, t);
+    panner.positionY.setValueAtTime(pos.y, t);
+    panner.positionZ.setValueAtTime(pos.z, t);
+  }
+}
+
+// ── Ambisonic position scheduling ───────────────────────────
+
+function scheduleAmbisonicTrajectory(
+  _ctx: OfflineAudioContext,
+  wGain: GainNode, yGain: GainNode, zGain: GainNode, xGain: GainNode,
+  stmt: Statement,
+  startTime: number,
+  endTime: number,
+  seed: number,
+  wanderHz: number,
+): void {
+  for (let t = startTime; t < endTime; t += AUTOMATION_STEP) {
+    const elapsed = t - startTime;
+    const pos = computeTrajectoryPosition(stmt, elapsed, seed, wanderHz);
+    const gains = computeFOAGains(pos.x, pos.y, pos.z);
+    const dist = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+    const atten = distanceAttenuation(dist, 1, 50, 2);
+
+    wGain.gain.setValueAtTime(gains.w * atten, t);
+    yGain.gain.setValueAtTime(gains.y * atten, t);
+    zGain.gain.setValueAtTime(gains.z * atten, t);
+    xGain.gain.setValueAtTime(gains.x * atten, t);
+  }
+}
+
+function scheduleAmbisonicWander(
+  _ctx: OfflineAudioContext,
+  wGain: GainNode, yGain: GainNode, zGain: GainNode, xGain: GainNode,
+  stmt: Statement,
+  startTime: number,
+  endTime: number,
+  seed: number,
+  wanderHz: number,
+): void {
+  const wanderSpeed = wanderHz * 0.01 * 2 * Math.PI;
+
+  for (let t = startTime; t < endTime; t += AUTOMATION_STEP) {
+    const elapsed = t - startTime;
+    const pos = computeWanderPosition(stmt, elapsed, wanderSpeed, seed);
+    const gains = computeFOAGains(pos.x, pos.y, pos.z);
+    const dist = Math.sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
+    const atten = distanceAttenuation(dist, 1, 50, 2);
+
+    wGain.gain.setValueAtTime(gains.w * atten, t);
+    yGain.gain.setValueAtTime(gains.y * atten, t);
+    zGain.gain.setValueAtTime(gains.z * atten, t);
+    xGain.gain.setValueAtTime(gains.x * atten, t);
+  }
+}
+
 // ── Helpers ─────────────────────────────────────────────────
 
-/**
- * Resolve an audio buffer by clip name, matching the engine's lookup logic:
- * try pathFor(clip) first, then raw clip name.
- */
 function resolveBuffer(buffers: Map<string, AudioBuffer>, clip: string): AudioBuffer | undefined {
   const resolved = pathFor(clip);
   return buffers.get(resolved) ?? buffers.get(clip);
@@ -347,17 +729,18 @@ function computeStartTimes(
   stmt: Statement,
   firstStart: number,
   totalDuration: number,
-  bufferDuration: number,
+  _bufferDuration: number,
 ): number[] {
   const times: number[] = [firstStart];
 
   if (!stmt.every.isNull) {
+    // Sample interval once and reuse — matches live engine behavior
     const interval = stmt.every.sample();
     if (interval > 0) {
       let t = firstStart + interval;
       while (t < totalDuration) {
         times.push(t);
-        t += stmt.every.sample(); // re-sample for ranges
+        t += interval;
       }
     }
   }
@@ -376,18 +759,14 @@ function computeVoiceDuration(
   if (!stmt.end.isNull) {
     return Math.min(stmt.end.sample() - stmt.start.sample(), remainingTime);
   }
-  if (stmt.kind === 'loop') {
-    // Loops play until next event or end of composition
-    if (!stmt.every.isNull) {
-      return Math.min(stmt.every.sample(), remainingTime);
-    }
+  // Loops and persistent voices play until end of composition
+  if (stmt.kind === 'loop' || stmt.persistent) {
     return remainingTime;
   }
   return Math.min(bufferDuration, remainingTime);
 }
 
 function computeStaticPosition(stmt: Statement): { x: number; y: number; z: number } {
-  // Midpoint of area bounds, or (0, 0, 0) if no spatial
   if (stmt.wanderType === WanderType.None) {
     return {
       x: (stmt.areaMin.x + stmt.areaMax.x) / 2,
@@ -400,7 +779,6 @@ function computeStaticPosition(stmt: Statement): { x: number; y: number; z: numb
     return { x: stmt.areaMin.x, y: stmt.areaMin.y, z: stmt.areaMin.z };
   }
 
-  // For moving sources, return the center of the movement area
   return {
     x: (stmt.areaMin.x + stmt.areaMax.x) / 2,
     y: (stmt.areaMin.y + stmt.areaMax.y) / 2,
@@ -415,9 +793,9 @@ function applyFades(
   bufferDuration: number,
   totalDuration: number,
 ): void {
-  const volume = gain.gain.value;
+  const volume = stmt.volume.sample();
 
-  // Fade in
+  // Fade in (overrides the micro-fade)
   if (!stmt.fadeIn.isNull) {
     const fadeIn = stmt.fadeIn.sample();
     if (fadeIn > 0) {
@@ -438,180 +816,4 @@ function applyFades(
       }
     }
   }
-}
-
-/**
- * Schedule panner position changes along a trajectory for stereo/binaural mode.
- * Uses setValueAtTime at 30fps intervals.
- */
-function scheduleTrajectoryPositions(
-  panner: PannerNode,
-  stmt: Statement,
-  startTime: number,
-  totalDuration: number,
-): void {
-  const trajectory = getTrajectoryForStatement(stmt);
-  if (!trajectory) return;
-
-  const speed = stmt.wanderHz.sample();
-  const fps = 30;
-  const step = 1 / fps;
-  const endTime = totalDuration;
-
-  for (let t = startTime; t < endTime; t += step) {
-    const elapsed = t - startTime;
-    const phase = (elapsed * speed) % 1;
-    const pos = trajectory.evaluate(phase);
-
-    // Remap from [0,1] to area bounds
-    const x = stmt.areaMin.x + pos.x * (stmt.areaMax.x - stmt.areaMin.x);
-    const y = stmt.areaMin.y + pos.y * (stmt.areaMax.y - stmt.areaMin.y);
-    const z = stmt.areaMin.z + pos.z * (stmt.areaMax.z - stmt.areaMin.z);
-
-    panner.positionX.setValueAtTime(x, t);
-    panner.positionY.setValueAtTime(y, t);
-    panner.positionZ.setValueAtTime(z, t);
-  }
-}
-
-/**
- * Schedule panner position changes for walk/fly wander (sinusoidal movement).
- * Mirrors the live engine's calculateWanderPositionInPlace logic.
- */
-function scheduleWanderPositions(
-  panner: PannerNode,
-  stmt: Statement,
-  startTime: number,
-  totalDuration: number,
-): void {
-  const wanderHz = stmt.wanderHz.sample();
-  const wanderSpeed = wanderHz * 0.01 * 2 * Math.PI;
-  const seed = Math.random() * 1000;
-  const px1 = seed * 1.0, px2 = seed * 2.3;
-  const py1 = seed * 3.7, py2 = seed * 0.5;
-  const pz1 = seed * 1.3, pz2 = seed * 4.2;
-
-  const fps = 30;
-  const step = 1 / fps;
-  const isWalk = stmt.wanderType === WanderType.Walk;
-
-  for (let t = startTime; t < totalDuration; t += step) {
-    const elapsed = t - startTime;
-    const wt = elapsed * wanderSpeed;
-
-    const nx = (Math.sin(wt + px1) + Math.sin(wt * 1.3 + px2) + Math.sin(wt * 0.7 + px1 * 0.3)) / 6 + 0.5;
-    const ny = (Math.sin(wt * 0.8 + py1) + Math.sin(wt * 1.1 + py2) + Math.sin(wt * 0.6 + py1 * 0.4)) / 6 + 0.5;
-    const nz = (Math.sin(wt * 1.2 + pz1) + Math.sin(wt * 0.7 + pz2) + Math.sin(wt * 0.9 + pz1 * 0.6)) / 6 + 0.5;
-
-    const x = stmt.areaMin.x + (stmt.areaMax.x - stmt.areaMin.x) * nx;
-    const y = isWalk ? 0 : stmt.areaMin.y + (stmt.areaMax.y - stmt.areaMin.y) * ny;
-    const z = stmt.areaMin.z + (stmt.areaMax.z - stmt.areaMin.z) * nz;
-
-    panner.positionX.setValueAtTime(x, t);
-    panner.positionY.setValueAtTime(y, t);
-    panner.positionZ.setValueAtTime(z, t);
-  }
-}
-
-/**
- * Schedule ambisonic gain changes along a trajectory.
- * Updates W, Y, Z, X gain values at 30fps.
- */
-function scheduleAmbisonicTrajectory(
-  ctx: OfflineAudioContext,
-  wGain: GainNode,
-  yGain: GainNode,
-  zGain: GainNode,
-  xGain: GainNode,
-  stmt: Statement,
-  startTime: number,
-  totalDuration: number,
-): void {
-  const trajectory = getTrajectoryForStatement(stmt);
-  if (!trajectory) return;
-
-  const speed = stmt.wanderHz.sample();
-  const fps = 30;
-  const step = 1 / fps;
-
-  for (let t = startTime; t < totalDuration; t += step) {
-    const elapsed = t - startTime;
-    const phase = (elapsed * speed) % 1;
-    const pos = trajectory.evaluate(phase);
-
-    const x = stmt.areaMin.x + pos.x * (stmt.areaMax.x - stmt.areaMin.x);
-    const y = stmt.areaMin.y + pos.y * (stmt.areaMax.y - stmt.areaMin.y);
-    const z = stmt.areaMin.z + pos.z * (stmt.areaMax.z - stmt.areaMin.z);
-
-    const gains = computeFOAGains(x, y, z);
-    const dist = Math.sqrt(x * x + y * y + z * z);
-    const atten = distanceAttenuation(dist);
-
-    wGain.gain.setValueAtTime(gains.w * atten, t);
-    yGain.gain.setValueAtTime(gains.y * atten, t);
-    zGain.gain.setValueAtTime(gains.z * atten, t);
-    xGain.gain.setValueAtTime(gains.x * atten, t);
-  }
-}
-
-/**
- * Schedule ambisonic gain changes for walk/fly wander (sinusoidal movement).
- * Mirrors the live engine's calculateWanderPositionInPlace logic.
- */
-function scheduleAmbisonicWander(
-  ctx: OfflineAudioContext,
-  wGain: GainNode,
-  yGain: GainNode,
-  zGain: GainNode,
-  xGain: GainNode,
-  stmt: Statement,
-  startTime: number,
-  totalDuration: number,
-): void {
-  const wanderHz = stmt.wanderHz.sample();
-  const wanderSpeed = wanderHz * 0.01 * 2 * Math.PI;
-  const seed = Math.random() * 1000;
-  const px1 = seed * 1.0, px2 = seed * 2.3;
-  const py1 = seed * 3.7, py2 = seed * 0.5;
-  const pz1 = seed * 1.3, pz2 = seed * 4.2;
-
-  const fps = 30;
-  const step = 1 / fps;
-  const isWalk = stmt.wanderType === WanderType.Walk;
-
-  for (let time = startTime; time < totalDuration; time += step) {
-    const elapsed = time - startTime;
-    const t = elapsed * wanderSpeed;
-
-    let nx = (Math.sin(t + px1) + Math.sin(t * 1.3 + px2) + Math.sin(t * 0.7 + px1 * 0.3)) / 6 + 0.5;
-    let ny = (Math.sin(t * 0.8 + py1) + Math.sin(t * 1.1 + py2) + Math.sin(t * 0.6 + py1 * 0.4)) / 6 + 0.5;
-    let nz = (Math.sin(t * 1.2 + pz1) + Math.sin(t * 0.7 + pz2) + Math.sin(t * 0.9 + pz1 * 0.6)) / 6 + 0.5;
-
-    const x = stmt.areaMin.x + (stmt.areaMax.x - stmt.areaMin.x) * nx;
-    const y = isWalk ? 0 : stmt.areaMin.y + (stmt.areaMax.y - stmt.areaMin.y) * ny;
-    const z = stmt.areaMin.z + (stmt.areaMax.z - stmt.areaMin.z) * nz;
-
-    const gains = computeFOAGains(x, y, z);
-    const dist = Math.sqrt(x * x + y * y + z * z);
-    const atten = distanceAttenuation(dist);
-
-    wGain.gain.setValueAtTime(gains.w * atten, time);
-    yGain.gain.setValueAtTime(gains.y * atten, time);
-    zGain.gain.setValueAtTime(gains.z * atten, time);
-    xGain.gain.setValueAtTime(gains.x * atten, time);
-  }
-}
-
-function getTrajectoryForStatement(stmt: Statement): ReturnType<typeof getTrajectory> {
-  if (stmt.wanderType === WanderType.Custom && stmt.customTrajectoryName) {
-    return getTrajectory(stmt.customTrajectoryName);
-  }
-  // Map built-in wander types to trajectory names
-  const nameMap: Record<string, string> = {
-    [WanderType.Spiral]: 'spiral',
-    [WanderType.Orbit]: 'orbit',
-    [WanderType.Lorenz]: 'lorenz',
-  };
-  const name = nameMap[stmt.wanderType];
-  return name ? getTrajectory(name) : undefined;
 }

@@ -24,15 +24,25 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
+  // Preview state
+  const [previewBuffer, setPreviewBuffer] = useState<AudioBuffer | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+  const previewCtxRef = useRef<AudioContext | null>(null);
+  const previewSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Cancel support
+  const cancelledRef = useRef(false);
+
   const handleExportAudio = useCallback(async () => {
-    if (format === 'video') return; // handled separately
+    if (format === 'video') return;
     setExporting(true);
     setError(null);
     setProgress(null);
+    setPreviewBuffer(null);
+    cancelledRef.current = false;
 
     try {
       const mode: RenderMode = format;
-      // Pull decoded buffers from the live engine (includes gen audio)
       const engineBuffers = engineRef.current?.getAudioBuffers();
 
       const result = await renderOffline(
@@ -44,26 +54,79 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
           sampleRate,
           mode,
         },
-        setProgress,
+        (p) => {
+          if (cancelledRef.current) throw new Error('Export cancelled');
+          setProgress(p);
+        },
       );
 
-      const blob = encodeWAV(result, bitDepth);
+      if (cancelledRef.current) return;
 
-      const suffixMap: Record<string, string> = {
-        'stereo': 'stereo',
-        'binaural': 'binaural-HRTF',
-        'ambisonic-foa': 'FOA-AmbiX',
-      };
-      const filename = `satie-export-${suffixMap[format]}-${sampleRate}Hz.wav`;
-      downloadBlob(blob, filename);
+      // Store for preview instead of auto-downloading
+      setPreviewBuffer(result);
+      setProgress({ phase: 'done', progress: 1 });
     } catch (e) {
-      console.error('[ExportPanel] Export failed:', e);
-      setError(e instanceof Error ? e.message : 'Export failed');
+      if (cancelledRef.current) {
+        setError(null);
+      } else {
+        console.error('[ExportPanel] Export failed:', e);
+        setError(e instanceof Error ? e.message : 'Export failed');
+      }
     } finally {
       setExporting(false);
-      setProgress(null);
     }
   }, [format, script, sampleBuffers, duration, sampleRate, bitDepth]);
+
+  const handleCancel = useCallback(() => {
+    cancelledRef.current = true;
+    setExporting(false);
+    setProgress(null);
+  }, []);
+
+  const handleDownload = useCallback(() => {
+    if (!previewBuffer) return;
+    const blob = encodeWAV(previewBuffer, bitDepth);
+    const suffixMap: Record<string, string> = {
+      'stereo': 'stereo',
+      'binaural': 'binaural-HRTF',
+      'ambisonic-foa': 'FOA-AmbiX',
+    };
+    const filename = `satie-export-${suffixMap[format]}-${sampleRate}Hz.wav`;
+    downloadBlob(blob, filename);
+  }, [previewBuffer, bitDepth, format, sampleRate]);
+
+  const handlePreview = useCallback(() => {
+    if (!previewBuffer) return;
+
+    if (previewing) {
+      // Stop preview
+      previewSourceRef.current?.stop();
+      previewSourceRef.current = null;
+      setPreviewing(false);
+      return;
+    }
+
+    // Play preview
+    const ctx = previewCtxRef.current ?? new AudioContext();
+    previewCtxRef.current = ctx;
+
+    // For ambisonic (4ch), we need to downmix to stereo for preview
+    let buffer = previewBuffer;
+    if (previewBuffer.numberOfChannels > 2) {
+      // Simple W-channel mono preview for ambisonic
+      const mono = ctx.createBuffer(1, previewBuffer.length, previewBuffer.sampleRate);
+      mono.copyToChannel(previewBuffer.getChannelData(0), 0);
+      buffer = mono;
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.onended = () => setPreviewing(false);
+    source.start();
+    previewSourceRef.current = source;
+    setPreviewing(true);
+  }, [previewBuffer, previewing]);
 
   const handleStartVideoRecord = useCallback(() => {
     const canvas = document.querySelector('canvas') as HTMLCanvasElement | null;
@@ -74,26 +137,16 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
 
     try {
       const videoStream = canvas.captureStream(30);
-
-      // Try to get audio from any existing AudioContext
-      const audioCtx = new AudioContext();
-      const dest = audioCtx.createMediaStreamDestination();
-      // Connect to destination (this captures whatever is playing)
-      // Note: this captures silence if nothing is playing through this context
-      // The real audio comes from the engine's AudioContext
-
       const tracks = [...videoStream.getVideoTracks()];
 
-      // Try to get audio tracks if available
       try {
         const existingCtx = (window as unknown as Record<string, unknown>).__satieAudioCtx as AudioContext | undefined;
         if (existingCtx) {
           const audioDest = existingCtx.createMediaStreamDestination();
-          // This won't work perfectly — MediaRecorder needs the stream from the same context
           tracks.push(...audioDest.stream.getAudioTracks());
         }
       } catch {
-        // Audio capture may not be available — record video only
+        // Audio capture may not be available
       }
 
       const combined = new MediaStream(tracks);
@@ -110,12 +163,10 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
         const blob = new Blob(chunksRef.current, { type: 'video/webm' });
         downloadBlob(blob, 'satie-capture.webm');
         setRecording(false);
-        dest.disconnect();
-        audioCtx.close();
       };
 
       recorderRef.current = recorder;
-      recorder.start(100); // collect data every 100ms
+      recorder.start(100);
       setRecording(true);
       setError(null);
     } catch (e) {
@@ -217,19 +268,71 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
             </div>
           </div>
 
-          <button
-            onClick={handleExportAudio}
-            disabled={exporting || !script.trim()}
-            style={{
-              ...styles.exportBtn,
-              opacity: exporting || !script.trim() ? 0.4 : 1,
-            }}
-          >
-            {exporting
-              ? `${progress?.phase ?? 'preparing'}... ${progressPercent}%`
-              : 'Export WAV'
-            }
-          </button>
+          {/* Export / Cancel button */}
+          {!exporting ? (
+            <button
+              onClick={handleExportAudio}
+              disabled={!script.trim()}
+              style={{
+                ...styles.exportBtn,
+                opacity: !script.trim() ? 0.4 : 1,
+              }}
+            >
+              Render
+            </button>
+          ) : (
+            <button
+              onClick={handleCancel}
+              style={{
+                ...styles.exportBtn,
+                background: '#8b0000',
+                borderColor: '#8b0000',
+              }}
+            >
+              Cancel ({progress?.phase ?? 'preparing'}... {progressPercent}%)
+            </button>
+          )}
+
+          {/* Progress bar */}
+          {exporting && (
+            <div style={{
+              height: 3,
+              background: '#e8e0d8',
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                width: `${progressPercent}%`,
+                height: '100%',
+                background: '#1a3a2a',
+                transition: 'width 0.3s ease',
+              }} />
+            </div>
+          )}
+
+          {/* Preview + Download (shown after render completes) */}
+          {previewBuffer && !exporting && (
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                onClick={handlePreview}
+                style={{
+                  ...styles.exportBtn,
+                  flex: 1,
+                  background: previewing ? '#8b6914' : 'transparent',
+                  color: previewing ? '#faf9f6' : '#1a3a2a',
+                  borderColor: previewing ? '#8b6914' : '#1a3a2a',
+                }}
+              >
+                {previewing ? 'Stop' : 'Preview'}
+              </button>
+              <button
+                onClick={handleDownload}
+                style={{ ...styles.exportBtn, flex: 1 }}
+              >
+                Download WAV
+              </button>
+            </div>
+          )}
         </>
       )}
 

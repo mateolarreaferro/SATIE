@@ -20,6 +20,7 @@ export function useSatieEngine() {
     trackCount: 0,
     statements: [],
     errors: null,
+    runtimeWarnings: [],
     mutedIndices: emptySet,
     soloedIndices: emptySet,
   });
