@@ -45,6 +45,7 @@ src/
 │   ├── supabase.ts          # Supabase client init
 │   ├── AuthContext.tsx       # OAuth provider (GitHub/Google)
 │   ├── aiProvider.ts        # Unified AI provider abstraction (Claude/OpenAI/Gemini)
+│   ├── aiGenerate.ts        # AI generation pipeline (generateCode, buildSystemPrompt, verifyAndRepair, etc.)
 │   ├── sketches.ts          # Sketch CRUD
 │   ├── sampleCache.ts       # Client-side audio sample cache (IndexedDB)
 │   ├── sampleStorage.ts     # Supabase Storage for samples
@@ -53,7 +54,8 @@ src/
 │   └── userSettings.ts      # API key storage (localStorage + Supabase)
 ├── ui/
 │   ├── pages/
-│   │   ├── Dashboard.tsx    # Landing page, sketch management, settings
+│   │   ├── Chat.tsx         # Default landing page — natural language soundscape chat
+│   │   ├── Dashboard.tsx    # Sketch management, settings (/sketches)
 │   │   ├── Editor.tsx       # Main workspace (editor + viewport + panels)
 │   │   ├── SketchView.tsx   # Public sketch view (/s/:id) with play/like/fork
 │   │   ├── Gallery.tsx      # Public sketch gallery (/explore)
@@ -61,10 +63,12 @@ src/
 │   │   └── Embed.tsx        # Embeddable sketch player (/embed/:id)
 │   ├── components/
 │   │   ├── SatieEditor.tsx  # Monaco editor: syntax highlighting, autocomplete, hover docs, live validation
-│   │   ├── SpatialViewport.tsx # Three.js R3F 3D visualization with axis gizmo
+│   │   ├── SpatialViewport.tsx # Three.js R3F 3D visualization with axis gizmo; supports overlayMode
+│   │   ├── ChatMessage.tsx  # Chat message bubble (user + assistant variants)
+│   │   ├── ChatInput.tsx    # Glassmorphism chat input bar
 │   │   ├── DocsPanel.tsx    # In-app language reference (10 sections)
 │   │   ├── AssetPanel.tsx   # Samples + Trajectories tabs
-│   │   ├── AIPanel.tsx      # AI generation UI (multi-provider)
+│   │   ├── AIPanel.tsx      # AI generation UI (multi-provider) — imports from lib/aiGenerate.ts
 │   │   ├── RecordWidget.tsx # Mic recording with waveform trim
 │   │   ├── Sidebar.tsx      # Sidebar with transport, panel toggles, save/share
 │   │   ├── Panel.tsx        # Draggable/resizable panel wrapper (persists layout)
@@ -122,6 +126,55 @@ Source → Gain → Filter → Distortion → Delay → Reverb → EQ → Panner
 - `createProvider()` selects preferred provider, falls back to any configured one
 - `createFastProvider()` returns cheaper model variant for repair/verification
 - Provider preference stored in `localStorage` (`satie-ai-provider`)
+
+### AI Generation Pipeline
+
+`src/lib/aiGenerate.ts` contains all pure AI generation logic (no React). Imported by both `AIPanel.tsx` and `Chat.tsx`:
+
+- `generateCode(prompt, currentScript, loadedSamples, history)` — full pipeline: build prompt → call AI → clean → verify/repair
+- `buildSystemPrompt(samples, libraryResult, topExamples, antiPatterns)` — compositional system prompt with Satie DSL reference
+- `buildEnrichedPrompt(prompt, currentScript, libraryResult)` — adds sample availability + current script context
+- `verifyAndRepair(code)` — parses with `tryParse`, repairs with fast model if needed
+- `cleanGeneratedCode(raw)` — strips markdown fences and prose
+- `generateSampleSpec(prompt)` — generates `{name, prompt}` JSON for ElevenLabs
+
+**AI generation rules baked into the system prompt:**
+- Moving voices (walk/fly/spiral/orbit/lorenz/gen) always get `visual trail`
+- Static voices always get `visual sphere`
+
+### Chat Landing Page
+
+`src/ui/pages/Chat.tsx` is the default landing page (`/`). It provides a ChatGPT-like interface for generating soundscapes via natural language.
+
+**Visual layering (bottom → top):**
+1. CSS background — theme color from `useDayNightCycle`
+2. `RiverCanvas` (z:0) — 2D particle animation (light/dark/fade modes)
+3. `SpatialViewport` with `overlayMode` (z:1) — transparent WebGL, trails visible behind chat UI
+4. Chat UI (z:2, `pointerEvents: none` on wrapper) — header, messages, input bar
+
+**Key behaviors:**
+- Auth required — unauthenticated users see a sign-in prompt
+- Iterative refinement — conversation history (last 6 pairs) passed to `generateCode` so "add more reverb" works
+- Save as sketch — creates a sketch and navigates to `/editor/:id`
+- Camera controls pass through the UI layer: right-click drag to orbit, WASD to fly (disabled while typing in the input)
+
+### SpatialViewport Overlay Mode
+
+`SpatialViewport` accepts `overlayMode?: boolean`. When true:
+- WebGL canvas renders with transparent background (`alpha = 0`) — RiverCanvas shows through
+- Grid is shown but subtle (gray, fast fade) to indicate 3D space
+- No heading indicator, no bottom controls, no axis gizmo
+- `OverlayFlyControls` replaces `FlyControls` — works without viewport focus, skips WASD when a text input is active
+- Trail width 6 (vs 2.5), trail length 140 (vs 80), wider FOV camera at `[0, 3, 12]` (vs `[4, 6, 8]`)
+
+### Voice Visuals
+
+Every voice always renders a **sphere + label**, regardless of the `visual` property:
+- `visual none` / `visual sphere` — wireframe sphere + label
+- `visual trail` — trail wrapping a wireframe sphere + label
+- `visual trail+sphere` / `visual trail+cube` — trail + mesh + label
+
+Label rendering: 2× resolution canvas texture (`600 44px Inter`), dynamic width to fit text, dark pill background, white text. Labels strip generation indices (`_0_1`) and underscores from clip names.
 
 ### Sketch Sharing & Public View
 
@@ -199,7 +252,8 @@ Defined in both `tsconfig.json` and `vite.config.ts`:
 ## Routing
 
 ```
-/              → Dashboard (sketch list, auth, settings)
+/              → Chat (default landing — natural language soundscape generation)
+/sketches      → Dashboard (sketch list, auth, settings)
 /editor        → Editor (new sketch)
 /editor/:id    → Editor (load sketch by ID)
 /explore       → Gallery (public sketches)
