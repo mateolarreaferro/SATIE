@@ -12,6 +12,7 @@ const ViewportFocusContext = createContext<{ focused: boolean }>({ focused: fals
 const CameraResetContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
 const CameraZoomContext = createContext<React.MutableRefObject<((dir: number) => void) | null>>({ current: null });
 const CameraFitContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
+const OverlayModeContext = createContext<boolean>(false);
 
 interface ListenerSync {
   onMove?: (x: number, y: number, z: number) => void;
@@ -39,13 +40,19 @@ interface SpatialViewportProps {
   onBgColorChange?: (color: string) => void;
   onListenerMove?: (x: number, y: number, z: number) => void;
   onListenerRotate?: (fx: number, fy: number, fz: number, ux: number, uy: number, uz: number) => void;
+  /** When true: transparent bg, no grid/controls/pointer-events — for layering over other content */
+  overlayMode?: boolean;
 }
 
-function BgColorUpdater({ color }: { color: string }) {
+function BgColorUpdater({ color, transparent }: { color: string; transparent?: boolean }) {
   const { gl } = useThree();
   useEffect(() => {
-    gl.setClearColor(color, 1);
-  }, [gl, color]);
+    if (transparent) {
+      gl.setClearColor(0x000000, 0);
+    } else {
+      gl.setClearColor(color, 1);
+    }
+  }, [gl, color, transparent]);
   return null;
 }
 
@@ -96,24 +103,73 @@ function useAudioSourceFrame(
     }
 
     if (labelRef.current) {
-      const yOff = meshRef.current ? 0.4 : 0.2;
+      const yOff = meshRef.current ? 0.55 : 0.3;
       labelRef.current.position.set(track.position.x, track.position.y + yOff, track.position.z);
 
-      const label = track.statement.clip.split('/').pop() ?? '';
+      // Clean label: strip path prefix, generation indices, underscores → spaces
+      const raw = track.statement.clip.split('/').pop() ?? '';
+      const label = raw
+        .replace(/_\d+$/g, '')      // strip trailing _0, _1 indices
+        .replace(/_\d+$/g, '')      // strip second level _0 (e.g. _0_0)
+        .replace(/_/g, ' ')         // underscores → spaces
+        .trim();
+
       if (label !== prevLabel.current) {
         prevLabel.current = label;
         if (labelTexRef.current) labelTexRef.current.dispose();
+
+        // Render at 2× resolution for crisp text on retina displays
+        const SCALE = 2;
+        const H = 48 * SCALE;
+        const FONT_SIZE = 22 * SCALE;
+        const PADDING_X = 18 * SCALE;
+        const PADDING_Y = 10 * SCALE;
+
+        // Measure text first to size canvas
+        const offscreen = document.createElement('canvas');
+        const offCtx = offscreen.getContext('2d')!;
+        offCtx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+        const textW = offCtx.measureText(label).width;
+
+        const W = textW + PADDING_X * 2;
         const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 32;
+        canvas.width = W;
+        canvas.height = H;
         const ctx = canvas.getContext('2d')!;
-        ctx.font = '18px Inter, system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(26, 58, 42, 0.5)';
+
+        // Background pill
+        const r = H * 0.38;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.52)';
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(W - r, 0);
+        ctx.quadraticCurveTo(W, 0, W, r);
+        ctx.lineTo(W, H - r);
+        ctx.quadraticCurveTo(W, H, W - r, H);
+        ctx.lineTo(r, H);
+        ctx.quadraticCurveTo(0, H, 0, H - r);
+        ctx.lineTo(0, r);
+        ctx.quadraticCurveTo(0, 0, r, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        // Text
+        ctx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
         ctx.textAlign = 'center';
-        ctx.fillText(label, 128, 22);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, W / 2, H / 2);
+
         const tex = new THREE.CanvasTexture(canvas);
         tex.minFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
         labelTexRef.current = tex;
+
+        // Scale sprite to match canvas aspect ratio; world height = 0.28
+        const worldH = 0.28;
+        const worldW = worldH * (W / H);
+        labelRef.current.scale.set(worldW, worldH, 1);
+
         (labelRef.current.material as THREE.SpriteMaterial).map = tex;
         (labelRef.current.material as THREE.SpriteMaterial).needsUpdate = true;
       }
@@ -163,29 +219,27 @@ function CubeGeo({ meshRef, matRef }: {
 
 function LabelSprite({ labelRef }: { labelRef: React.RefObject<THREE.Sprite | null> }) {
   return (
-    <sprite ref={labelRef} scale={[1.2, 0.15, 1]}>
+    <sprite ref={labelRef} scale={[2.0, 0.28, 1]}>
       <spriteMaterial transparent depthTest={false} />
     </sprite>
   );
 }
 
-// ── Voice with no visual — audio only, just a label ──────────
+// ── Voice with no visual — sphere + label ────────────────────
 
 function AudioSourceNone({ trackRef }: { trackRef: React.RefObject<TrackState | null> }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const labelRef = useRef<THREE.Sprite>(null);
-  const nullMesh = useRef<THREE.Mesh | null>(null);
-  const nullMat = useRef<THREE.MeshStandardMaterial | null>(null);
 
-  useAudioSourceFrame(trackRef, nullMesh, nullMat, labelRef);
+  useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
 
-  // Position the label directly since there's no mesh
-  useFrame(() => {
-    const track = trackRef.current;
-    if (!track || !labelRef.current) return;
-    labelRef.current.position.set(track.position.x, track.position.y, track.position.z);
-  });
-
-  return <LabelSprite labelRef={labelRef} />;
+  return (
+    <>
+      <SphereGeo meshRef={meshRef} matRef={matRef} />
+      <LabelSprite labelRef={labelRef} />
+    </>
+  );
 }
 
 // ── Voice with mesh (sphere or cube), no trail ───────────────
@@ -215,6 +269,7 @@ function AudioSourceTrailOnly({ trackRef }: { trackRef: React.RefObject<TrackSta
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const labelRef = useRef<THREE.Sprite>(null);
   const trailRef = useRef<any>(null);
+  const overlayMode = useContext(OverlayModeContext);
 
   useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
 
@@ -229,17 +284,21 @@ function AudioSourceTrailOnly({ trackRef }: { trackRef: React.RefObject<TrackSta
     }
   });
 
+  const trailWidth = overlayMode ? 6 : 2.5;
+  const trailLength = overlayMode ? 140 : 80;
+
   return (
     <>
-      <Trail ref={trailRef} width={2.5} length={80} decay={1} attenuation={(w) => w * w}>
+      <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
         <mesh ref={meshRef}>
-          <sphereGeometry args={[0.05, 8, 8]} />
+          <sphereGeometry args={[1, 24, 24]} />
           <meshStandardMaterial
             ref={matRef}
             emissiveIntensity={0.3}
             transparent
-            opacity={0.6}
+            opacity={0.8}
             roughness={0.6}
+            wireframe
           />
         </mesh>
       </Trail>
@@ -255,6 +314,7 @@ function AudioSourceTrailMesh({ trackRef, shape }: { trackRef: React.RefObject<T
   const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const labelRef = useRef<THREE.Sprite>(null);
   const trailRef = useRef<any>(null);
+  const overlayMode = useContext(OverlayModeContext);
 
   useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
 
@@ -269,9 +329,12 @@ function AudioSourceTrailMesh({ trackRef, shape }: { trackRef: React.RefObject<T
     }
   });
 
+  const trailWidth = overlayMode ? 6 : 2.5;
+  const trailLength = overlayMode ? 140 : 80;
+
   return (
     <>
-      <Trail ref={trailRef} width={2.5} length={80} decay={1} attenuation={(w) => w * w}>
+      <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
         <mesh ref={meshRef}>
           {shape === 'cube'
             ? <boxGeometry args={[1, 1, 1]} />
@@ -580,6 +643,102 @@ function HearingCone({ color }: { color: string }) {
   );
 }
 
+// Overlay fly controls — WASD + right-click when no text input is focused
+function OverlayFlyControls() {
+  const { camera } = useThree();
+  const controlsRef = useRef<OrbitControlsImpl>(null);
+  const keysDown = useRef(new Set<string>());
+  const rightMouseDown = useRef(false);
+  const flySpeed = 5;
+
+  const isInputFocused = useCallback(() => {
+    const el = document.activeElement;
+    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  }, []);
+
+  const onKeyDown = useCallback((e: KeyboardEvent) => {
+    const key = e.key.toLowerCase();
+    if (isInputFocused()) return;
+    keysDown.current.add(key);
+    if (['w', 'a', 's', 'd', 'q', 'e'].includes(key)) {
+      e.preventDefault();
+    }
+  }, [isInputFocused]);
+
+  const onKeyUp = useCallback((e: KeyboardEvent) => {
+    keysDown.current.delete(e.key.toLowerCase());
+  }, []);
+
+  const onMouseDown = useCallback((e: MouseEvent) => {
+    if (e.button === 2) rightMouseDown.current = true;
+  }, []);
+
+  const onMouseUp = useCallback((e: MouseEvent) => {
+    if (e.button === 2) rightMouseDown.current = false;
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [onKeyDown, onKeyUp, onMouseDown, onMouseUp]);
+
+  const _forward = useMemo(() => new THREE.Vector3(), []);
+  const _right = useMemo(() => new THREE.Vector3(), []);
+  const _move = useMemo(() => new THREE.Vector3(), []);
+  const _up = useMemo(() => new THREE.Vector3(0, 1, 0), []);
+
+  useFrame((_, delta) => {
+    if (isInputFocused()) {
+      keysDown.current.clear();
+      return;
+    }
+    const active = rightMouseDown.current || keysDown.current.size > 0;
+    if (!active) return;
+
+    const keys = keysDown.current;
+    const speed = delta * flySpeed;
+    camera.getWorldDirection(_forward);
+    _right.crossVectors(_forward, _up).normalize();
+    _move.set(0, 0, 0);
+
+    if (keys.has('w') || keys.has('arrowup')) _move.addScaledVector(_forward, speed);
+    if (keys.has('s') || keys.has('arrowdown')) _move.addScaledVector(_forward, -speed);
+    if (keys.has('a') || keys.has('arrowleft')) _move.addScaledVector(_right, -speed);
+    if (keys.has('d') || keys.has('arrowright')) _move.addScaledVector(_right, speed);
+    if (keys.has('e')) _move.y += speed;
+    if (keys.has('q')) _move.y -= speed;
+
+    if (_move.lengthSq() > 0) {
+      camera.position.add(_move);
+      if (controlsRef.current) {
+        controlsRef.current.target.add(_move);
+      }
+    }
+  });
+
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      makeDefault
+      enableDamping
+      dampingFactor={0.05}
+      mouseButtons={{
+        LEFT: undefined as any,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT: THREE.MOUSE.ROTATE,
+      }}
+    />
+  );
+}
+
 // Unity-style fly camera: WASD when viewport focused
 function FlyControls() {
   const { camera, gl } = useThree();
@@ -808,35 +967,53 @@ function contrastColor(hex: string): string {
   return lum > 0.5 ? '#1a1a1a' : '#e8e8e8';
 }
 
-const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, showGrid }: { tracksRef: React.RefObject<TrackState[]>; bgColor: string; listenerSync: ListenerSync; showGrid: boolean }) {
+const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, showGrid, overlayMode }: { tracksRef: React.RefObject<TrackState[]>; bgColor: string; listenerSync: ListenerSync; showGrid: boolean; overlayMode?: boolean }) {
   const listenerColor = useMemo(() => contrastColor(bgColor), [bgColor]);
   return (
-    <ListenerSyncContext.Provider value={listenerSync}>
-      <ambientLight intensity={0.5} />
-      <directionalLight position={[10, 15, 10]} intensity={0.3} />
-      {showGrid && (
-        <Grid
-          args={[20, 20]}
-          cellColor="#e0ddd4"
-          sectionColor="#d0cdc4"
-          fadeDistance={25}
-          infiniteGrid
-        />
-      )}
-      <Listener color={listenerColor} faceTrackingActive={listenerSync.externalTrackingActive} />
-      <HearingCone color={listenerColor} />
-      <AudioSourcePool tracksRef={tracksRef} />
-      <FlyControls />
-      <AxisGizmo />
-      <EffectComposer>
-        <Bloom
-          luminanceThreshold={0.4}
-          luminanceSmoothing={0.9}
-          intensity={0.6}
-          mipmapBlur
-        />
-      </EffectComposer>
-    </ListenerSyncContext.Provider>
+    <OverlayModeContext.Provider value={!!overlayMode}>
+      <ListenerSyncContext.Provider value={listenerSync}>
+        <ambientLight intensity={overlayMode ? 1 : 0.5} />
+        <directionalLight position={[10, 15, 10]} intensity={overlayMode ? 0.8 : 0.3} />
+        {/* Normal grid for editor; subtle grid for overlay to indicate 3D space */}
+        {overlayMode ? (
+          <Grid
+            args={[40, 40]}
+            cellColor="#888888"
+            sectionColor="#aaaaaa"
+            cellSize={2}
+            sectionSize={8}
+            fadeDistance={35}
+            fadeStrength={4}
+            infiniteGrid
+          />
+        ) : (
+          showGrid && (
+            <Grid
+              args={[20, 20]}
+              cellColor="#e0ddd4"
+              sectionColor="#d0cdc4"
+              fadeDistance={25}
+              infiniteGrid
+            />
+          )
+        )}
+        {!overlayMode && <Listener color={listenerColor} faceTrackingActive={listenerSync.externalTrackingActive} />}
+        {!overlayMode && <HearingCone color={listenerColor} />}
+        <AudioSourcePool tracksRef={tracksRef} />
+        {overlayMode ? <OverlayFlyControls /> : <FlyControls />}
+        {!overlayMode && <AxisGizmo />}
+        {!overlayMode && (
+          <EffectComposer>
+            <Bloom
+              luminanceThreshold={0.4}
+              luminanceSmoothing={0.9}
+              intensity={0.6}
+              mipmapBlur
+            />
+          </EffectComposer>
+        )}
+      </ListenerSyncContext.Provider>
+    </OverlayModeContext.Provider>
   );
 });
 
@@ -955,7 +1132,7 @@ function HeadingIndicator({ forwardRef, color, faceTrackingActive }: {
   );
 }
 
-export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColor = '#f4f3ee', onBgColorChange, onListenerMove, onListenerRotate }: SpatialViewportProps) {
+export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColor = '#f4f3ee', onBgColorChange, onListenerMove, onListenerRotate, overlayMode }: SpatialViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -1015,37 +1192,40 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
         height: '100%',
         borderRadius: 'inherit',
         overflow: 'hidden',
-        outline: focused ? '2px solid #1a3a2a' : 'none',
+        outline: overlayMode ? 'none' : (focused ? '2px solid #1a3a2a' : 'none'),
         outlineOffset: '-2px',
         position: 'relative',
       }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Heading indicator — always shows listener direction */}
-      <HeadingIndicator forwardRef={listenerForwardRef} color={uiColor} faceTrackingActive={faceTracking.enabled} />
+      {!overlayMode && <HeadingIndicator forwardRef={listenerForwardRef} color={uiColor} faceTrackingActive={faceTracking.enabled} />}
 
       <Canvas
-        camera={{ position: [4, 6, 8], fov: 55 }}
+        camera={overlayMode
+          ? { position: [0, 3, 12], fov: 65 }
+          : { position: [4, 6, 8], fov: 55 }
+        }
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         resize={{ scroll: false, debounce: 0, offsetSize: true }}
         gl={{ alpha: true, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
-          gl.setClearColor(bgColor, 1);
+          gl.setClearColor(overlayMode ? 0x000000 : bgColor, overlayMode ? 0 : 1);
         }}
       >
-        <BgColorUpdater color={bgColor} />
+        <BgColorUpdater color={bgColor} transparent={overlayMode} />
         <CameraResetContext.Provider value={cameraResetRef}>
           <CameraZoomContext.Provider value={cameraZoomRef}>
             <CameraFitContext.Provider value={cameraFitRef}>
               <ViewportFocusContext.Provider value={focusValue}>
-                <SceneInner tracksRef={tracksRef} bgColor={bgColor} listenerSync={listenerSync} showGrid={gridVisible} />
+                <SceneInner tracksRef={tracksRef} bgColor={bgColor} listenerSync={listenerSync} showGrid={gridVisible} overlayMode={overlayMode} />
               </ViewportFocusContext.Provider>
             </CameraFitContext.Provider>
           </CameraZoomContext.Provider>
         </CameraResetContext.Provider>
       </Canvas>
-      {/* Bottom-right controls */}
-      <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 10, display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+      {/* Bottom-right controls — hidden in overlay mode */}
+      <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 10, display: overlayMode ? 'none' : 'flex', gap: 6, alignItems: 'flex-end' }}>
         <button
           onClick={() => setGridVisible(v => !v)}
           title={gridVisible ? 'Hide grid' : 'Show grid'}

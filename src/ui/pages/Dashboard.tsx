@@ -669,9 +669,27 @@ export function Dashboard() {
             </div>
           </div>
 
-          {/* Center — logo + explore */}
+          {/* Center — logo + nav */}
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
-            <span style={{ ...styles.logo, color: theme.text }}>satie</span>
+            <Link to="/" className="header-link" onMouseEnter={sfx.hover} onClick={sfx.click} style={{
+              ...styles.logo,
+              color: theme.text,
+              textDecoration: 'none',
+              opacity: mode === 'fade' ? 0.45 : 0.25,
+              fontWeight: 700,
+            }}>
+              satie
+            </Link>
+            <span style={{
+              ...styles.logo,
+              color: theme.text,
+              fontSize: '16px',
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              opacity: 1,
+            }}>
+              sketches
+            </span>
             <Link to="/explore" className="header-link" onMouseEnter={sfx.hover} onClick={sfx.click} style={{
               fontSize: '16px',
               color: theme.text,
