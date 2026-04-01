@@ -70,7 +70,7 @@ export function UserProfile() {
       <div style={styles.container}>
         <div style={styles.center}>
           <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>User not found</div>
-          <Link to="/explore" style={{ fontSize: '12px', color: '#0a0a0a', opacity: 0.5 }}>
+          <Link to="/explore" style={{ fontSize: '16px', color: '#0a0a0a', opacity: 0.5 }}>
             Browse public sketches
           </Link>
         </div>
@@ -86,11 +86,11 @@ export function UserProfile() {
           <div style={{ fontSize: '16px', fontWeight: 700, letterSpacing: '0.04em' }}>satie</div>
         </Link>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Link to="/explore" style={{ fontSize: '11px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none' }}>
+          <Link to="/explore" style={{ fontSize: '16px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none' }}>
             explore
           </Link>
           {user && (
-            <Link to="/" style={{ fontSize: '11px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none' }}>
+            <Link to="/" style={{ fontSize: '16px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none' }}>
               dashboard
             </Link>
           )}
@@ -139,15 +139,15 @@ export function UserProfile() {
                 <div style={{ fontSize: '20px', fontWeight: 600 }}>
                   {profile.display_name || profile.username}
                 </div>
-                <div style={{ fontSize: '12px', opacity: 0.35, marginTop: '2px' }}>
+                <div style={{ fontSize: '16px', opacity: 0.35, marginTop: '2px' }}>
                   @{profile.username}
                 </div>
                 {profile.bio && (
-                  <div style={{ fontSize: '13px', opacity: 0.6, marginTop: '8px', lineHeight: '1.5' }}>
+                  <div style={{ fontSize: '15px', opacity: 0.6, marginTop: '8px', lineHeight: '1.5' }}>
                     {profile.bio}
                   </div>
                 )}
-                <div style={{ fontSize: '11px', opacity: 0.25, marginTop: '8px' }}>
+                <div style={{ fontSize: '16px', opacity: 0.25, marginTop: '8px' }}>
                   Joined {formatDate(profile.created_at)}
                   {' · '}
                   {sketches.length} public sketch{sketches.length !== 1 ? 'es' : ''}
@@ -167,7 +167,7 @@ export function UserProfile() {
           <div style={styles.sectionTitle}>Public Sketches</div>
 
           {sketches.length === 0 && (
-            <div style={{ fontSize: '13px', opacity: 0.3, marginTop: '16px' }}>
+            <div style={{ fontSize: '15px', opacity: 0.3, marginTop: '16px' }}>
               No public sketches yet.
             </div>
           )}
@@ -187,7 +187,7 @@ export function UserProfile() {
                   e.currentTarget.style.transform = 'translateY(0)';
                 }}
               >
-                <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                <div style={{ fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>
                   {sketch.title}
                 </div>
                 <pre style={styles.preview}>
@@ -219,7 +219,7 @@ const styles: Record<string, React.CSSProperties> = {
   center: {
     position: 'absolute', top: '50%', left: '50%',
     transform: 'translate(-50%, -50%)', textAlign: 'center',
-    fontSize: '12px', opacity: 0.4,
+    fontSize: '16px', opacity: 0.4,
   },
   header: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -236,27 +236,27 @@ const styles: Record<string, React.CSSProperties> = {
   editBtn: {
     marginTop: '8px', padding: '4px 12px', background: 'none',
     border: '1px solid #d0cdc4', borderRadius: 6, cursor: 'pointer',
-    fontSize: '10px', fontFamily: "'Inter', system-ui, sans-serif",
+    fontSize: '15px', fontFamily: "'Inter', system-ui, sans-serif",
     color: '#0a0a0a', opacity: 0.5,
   },
   editInput: {
     padding: '6px 10px', border: '1px solid #d0cdc4', borderRadius: 6,
-    fontSize: '13px', fontFamily: "'Inter', system-ui, sans-serif",
+    fontSize: '15px', fontFamily: "'Inter', system-ui, sans-serif",
     background: 'transparent', color: '#0a0a0a', outline: 'none', width: '100%',
     boxSizing: 'border-box' as const,
   },
   saveBtn: {
     padding: '5px 14px', background: '#0a0a0a', color: '#faf9f6',
     border: 'none', borderRadius: 6, cursor: 'pointer',
-    fontSize: '11px', fontFamily: "'Inter', system-ui, sans-serif", fontWeight: 600,
+    fontSize: '16px', fontFamily: "'Inter', system-ui, sans-serif", fontWeight: 600,
   },
   cancelBtn: {
     padding: '5px 14px', background: 'none', color: '#0a0a0a',
     border: '1px solid #d0cdc4', borderRadius: 6, cursor: 'pointer',
-    fontSize: '11px', fontFamily: "'Inter', system-ui, sans-serif",
+    fontSize: '16px', fontFamily: "'Inter', system-ui, sans-serif",
   },
   sectionTitle: {
-    fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' as const,
+    fontSize: '16px', fontWeight: 600, textTransform: 'uppercase' as const,
     letterSpacing: '0.08em', opacity: 0.35,
   },
   grid: {
@@ -269,11 +269,11 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'border-color 0.15s, transform 0.15s',
   },
   preview: {
-    fontSize: '9px', fontFamily: "'SF Mono', monospace", opacity: 0.3,
+    fontSize: '16px', fontFamily: "'SF Mono', monospace", opacity: 0.3,
     whiteSpace: 'pre-wrap' as const, overflow: 'hidden', maxHeight: 36,
     margin: '0 0 10px',
   },
   meta: {
-    display: 'flex', gap: '10px', fontSize: '10px', opacity: 0.25,
+    display: 'flex', gap: '10px', fontSize: '15px', opacity: 0.25,
   },
 };

@@ -6,7 +6,7 @@ import { SpatialViewport } from '../components/SpatialViewport';
 import { AssetPanel } from '../components/AssetPanel';
 import { type SampleEntry } from '../components/SamplesTab';
 import { AIPanel, type AITarget } from '../components/AIPanel';
-import { Sidebar, type PanelVisibility } from '../components/Sidebar';
+import { Sidebar, type PanelVisibility, type PopoverType } from '../components/Sidebar';
 import { Panel } from '../components/Panel';
 import { useAuth } from '../../lib/AuthContext';
 import { getSketch, updateSketch, createSketch } from '../../lib/sketches';
@@ -83,7 +83,7 @@ const VoicesPanel = memo(function VoicesPanel({
     <div style={{
       padding: '4px 14px 8px',
       fontFamily: "'SF Mono', 'Consolas', monospace",
-      fontSize: '11px',
+      fontSize: '16px',
       color: '#1a3a2a',
       overflow: 'auto',
       height: '100%',
@@ -112,14 +112,14 @@ const VoicesPanel = memo(function VoicesPanel({
                 color: isMuted ? '#faf9f6' : '#1a3a2a',
                 border: '1px solid #1a3a2a',
                 borderRadius: 3,
-                fontSize: '8px',
+                fontSize: '16px',
                 fontWeight: 700,
                 fontFamily: "'SF Mono', monospace",
-                width: 16,
-                height: 14,
+                width: 22,
+                height: 20,
                 padding: 0,
                 cursor: 'pointer',
-                lineHeight: '14px',
+                lineHeight: '20px',
                 opacity: isMuted ? 1 : 0.4,
                 flexShrink: 0,
               }}
@@ -134,14 +134,14 @@ const VoicesPanel = memo(function VoicesPanel({
                 color: isSoloed ? '#faf9f6' : '#1a3a2a',
                 border: `1px solid ${isSoloed ? '#8b6914' : '#1a3a2a'}`,
                 borderRadius: 3,
-                fontSize: '8px',
+                fontSize: '16px',
                 fontWeight: 700,
                 fontFamily: "'SF Mono', monospace",
-                width: 16,
-                height: 14,
+                width: 22,
+                height: 20,
                 padding: 0,
                 cursor: 'pointer',
-                lineHeight: '14px',
+                lineHeight: '20px',
                 opacity: isSoloed ? 1 : 0.4,
                 flexShrink: 0,
               }}
@@ -174,28 +174,32 @@ const PatchCord = memo(function PatchCord({ target }: { target: AITarget }) {
   const rafRef = useRef(0);
 
   useEffect(() => {
-    const update = () => {
-      const aiEl = document.querySelector('[data-panel-id="ai"]') as HTMLElement | null;
-      const targetId = target === 'script' ? 'score' : 'samples';
-      const targetEl = document.querySelector(`[data-panel-id="${targetId}"]`) as HTMLElement | null;
+    let lastUpdate = 0;
+    const THROTTLE_MS = 66; // ~15fps — panels don't move fast
 
-      if (aiEl && targetEl) {
-        // AI panel: left edge center
-        const aiRect = aiEl.getBoundingClientRect();
-        const tRect = targetEl.getBoundingClientRect();
-        // Get parent offset (the flex container)
-        const parent = aiEl.parentElement;
-        const pRect = parent?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    const update = (now: number) => {
+      if (now - lastUpdate >= THROTTLE_MS) {
+        lastUpdate = now;
+        const aiEl = document.querySelector('[data-panel-id="ai"]') as HTMLElement | null;
+        const targetId = target === 'script' ? 'score' : 'samples';
+        const targetEl = document.querySelector(`[data-panel-id="${targetId}"]`) as HTMLElement | null;
 
-        const x1 = aiRect.left - pRect.left;
-        const y1 = aiRect.top - pRect.top + aiRect.height * 0.35;
-        const x2 = tRect.right - pRect.left;
-        const y2 = tRect.top - pRect.top + tRect.height * 0.5;
+        if (aiEl && targetEl) {
+          const aiRect = aiEl.getBoundingClientRect();
+          const tRect = targetEl.getBoundingClientRect();
+          const parent = aiEl.parentElement;
+          const pRect = parent?.getBoundingClientRect() ?? { left: 0, top: 0 };
 
-        const dx = Math.abs(x2 - x1) * 0.5;
-        setPath(`M${x1},${y1} C${x1 - dx},${y1} ${x2 + dx},${y2} ${x2},${y2}`);
-      } else {
-        setPath('');
+          const x1 = aiRect.left - pRect.left;
+          const y1 = aiRect.top - pRect.top + aiRect.height * 0.35;
+          const x2 = tRect.right - pRect.left;
+          const y2 = tRect.top - pRect.top + tRect.height * 0.5;
+
+          const dx = Math.abs(x2 - x1) * 0.5;
+          setPath(`M${x1},${y1} C${x1 - dx},${y1} ${x2 + dx},${y2} ${x2},${y2}`);
+        } else {
+          setPath('');
+        }
       }
       rafRef.current = requestAnimationFrame(update);
     };
@@ -279,17 +283,13 @@ export function Editor() {
     }
   }, [currentSketchId]);
   const [panels, setPanels] = useState<PanelVisibility>({
-    score: true,
     samples: false,
-    space: true,
     voices: false,
     ai: false,
-    docs: false,
-    export: false,
-    versions: false,
   });
+  const [activePopover, setActivePopover] = useState<PopoverType>(null);
   const [aiTarget, setAiTarget] = useState<AITarget>('script');
-  const [workspaceZoom, setWorkspaceZoom] = useState(1);
+  const [workspaceZoom, setWorkspaceZoom] = useState(0.9);
 
   const autosaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   /** Raw ArrayBuffers for samples loaded this session — used for uploading on save. */
@@ -359,6 +359,10 @@ export function Editor() {
 
   const togglePanel = useCallback((key: keyof PanelVisibility) => {
     setPanels(prev => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  const togglePopover = useCallback((p: 'docs' | 'export' | 'versions') => {
+    setActivePopover(prev => prev === p ? null : p);
   }, []);
 
   const handleRun = useCallback(() => {
@@ -600,9 +604,9 @@ export function Editor() {
   }, [user, currentSketchId, script, sketchTitle, isPublic]);
 
   const zoomBtnStyle: React.CSSProperties = {
-    width: 22,
-    height: 22,
-    borderRadius: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 5,
     background: '#faf9f6',
     border: '1px solid #d0cdc4',
     cursor: 'pointer',
@@ -611,7 +615,7 @@ export function Editor() {
     justifyContent: 'center',
     padding: 0,
     color: '#1a3a2a',
-    fontSize: '13px',
+    fontSize: '15px',
     fontFamily: "'SF Mono', monospace",
     lineHeight: 1,
     boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
@@ -635,6 +639,8 @@ export function Editor() {
         onMasterVolume={setMasterVolume}
         panels={panels}
         onTogglePanel={togglePanel}
+        activePopover={activePopover}
+        onTogglePopover={togglePopover}
         sketchTitle={sketchTitle}
         onSketchTitleChange={setSketchTitle}
         onSave={user ? handleSave : undefined}
@@ -670,7 +676,7 @@ export function Editor() {
             title="Reset zoom"
             style={{
               ...zoomBtnStyle,
-              fontSize: '8px',
+              fontSize: '16px',
               width: 'auto',
               padding: '0 6px',
               fontFamily: "'SF Mono', monospace",
@@ -694,63 +700,62 @@ export function Editor() {
         {/* Patch cord — rendered first so it sits behind all panels */}
         {panels.ai && <PatchCord target={aiTarget} />}
 
-        {panels.score && (
-          <Panel
-            panelId="score"
-            title="Score"
-            defaultX={16}
-            defaultY={16}
-            defaultWidth={480}
-            defaultHeight={540}
-            minWidth={280}
-            minHeight={200}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              <div style={{ flex: 1, overflow: 'hidden' }}>
-                <SatieEditor
-                  value={script}
-                  onChange={setScript}
-                  onRun={handleRun}
-                  errors={uiState.errors}
-                  runtimeWarnings={uiState.runtimeWarnings}
-                />
-              </div>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                padding: '6px 12px',
-                borderTop: '1px solid #e8e0d8',
-                gap: '8px',
-              }}>
-                <button
-                  className="run-btn"
-                  onClick={() => { sfx.play(); handleRun(); }}
-                  onMouseEnter={sfx.hover}
-                  style={{
-                    padding: '3px 12px',
-                    background: 'none',
-                    border: '1.5px solid #1a3a2a',
-                    borderRadius: 8,
-                    cursor: 'pointer',
-                    fontSize: '11px',
-                    fontFamily: "'Inter', system-ui, sans-serif",
-                    color: '#1a3a2a',
-                    fontWeight: 500,
-                  }}
-                >
-                  Run
-                </button>
-                <span style={{
-                  fontSize: '9px',
-                  opacity: 0.2,
-                  fontFamily: "'SF Mono', monospace",
-                }}>
-                  Cmd+Enter
-                </span>
-              </div>
+        {/* Score — always visible */}
+        <Panel
+          panelId="score"
+          title="Score"
+          defaultX={16}
+          defaultY={16}
+          defaultWidth={480}
+          defaultHeight={540}
+          minWidth={280}
+          minHeight={200}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <SatieEditor
+                value={script}
+                onChange={setScript}
+                onRun={handleRun}
+                errors={uiState.errors}
+                runtimeWarnings={uiState.runtimeWarnings}
+              />
             </div>
-          </Panel>
-        )}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '6px 12px',
+              borderTop: '1px solid #e8e0d8',
+              gap: '8px',
+            }}>
+              <button
+                className="run-btn"
+                onClick={() => { sfx.play(); handleRun(); }}
+                onMouseEnter={sfx.hover}
+                style={{
+                  padding: '3px 12px',
+                  background: 'none',
+                  border: '1.5px solid #1a3a2a',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  fontFamily: "'Inter', system-ui, sans-serif",
+                  color: '#1a3a2a',
+                  fontWeight: 500,
+                }}
+              >
+                Run
+              </button>
+              <span style={{
+                fontSize: '16px',
+                opacity: 0.2,
+                fontFamily: "'SF Mono', monospace",
+              }}>
+                Cmd+Enter
+              </span>
+            </div>
+          </div>
+        </Panel>
 
         {panels.samples && (
           <Panel
@@ -775,22 +780,21 @@ export function Editor() {
           </Panel>
         )}
 
-        {panels.space && (
-          <Panel
-            panelId="space"
-            title="Space"
-            defaultX={512}
-            defaultY={16}
-            defaultWidth={500}
-            defaultHeight={400}
-            minWidth={280}
-            minHeight={200}
-          >
-            <ErrorBoundary name="Space">
-              <SpatialViewport tracksRef={tracksRef} bgColor={spaceBgColor} onBgColorChange={handleBgColorChange} onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
-            </ErrorBoundary>
-          </Panel>
-        )}
+        {/* Space — always visible */}
+        <Panel
+          panelId="space"
+          title="Space"
+          defaultX={512}
+          defaultY={16}
+          defaultWidth={500}
+          defaultHeight={400}
+          minWidth={280}
+          minHeight={200}
+        >
+          <ErrorBoundary name="Space">
+            <SpatialViewport tracksRef={tracksRef} bgColor={spaceBgColor} onBgColorChange={handleBgColorChange} onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
+          </ErrorBoundary>
+        </Panel>
 
         {panels.voices && (
           <Panel
@@ -842,65 +846,126 @@ export function Editor() {
           </Panel>
         )}
 
-        {panels.export && (
-          <Panel
-            panelId="export"
-            title="Export"
-            defaultX={512}
-            defaultY={432}
-            defaultWidth={340}
-            defaultHeight={280}
-            minWidth={280}
-            minHeight={200}
-          >
-            <ErrorBoundary name="Export">
-              <ExportPanel
-                script={script}
-                sampleBuffers={sampleBuffers}
-                engineRef={engineRef}
-                isPlaying={uiState.isPlaying}
-                currentTime={uiState.currentTime}
-              />
-            </ErrorBoundary>
-          </Panel>
-        )}
-
-        {panels.docs && (
-          <Panel
-            panelId="docs"
-            title="Reference"
-            defaultX={768}
-            defaultY={16}
-            defaultWidth={380}
-            defaultHeight={460}
-            minWidth={280}
-            minHeight={200}
-          >
-            <DocsPanel />
-          </Panel>
-        )}
-
-        {panels.versions && (
-          <Panel
-            panelId="versions"
-            title="Versions"
-            defaultX={768}
-            defaultY={16}
-            defaultWidth={280}
-            defaultHeight={300}
-            minWidth={200}
-            minHeight={140}
-          >
-            <ErrorBoundary name="Versions">
-              <VersionsPanel
-                sketchId={currentSketchId}
-                onRestore={handleRestoreVersion}
-              />
-            </ErrorBoundary>
-          </Panel>
-        )}
-
         </div>{/* end scaled workspace */}
+
+        {/* Popover overlays — rendered outside the scaled workspace so they stay at native size */}
+        {activePopover === 'export' && (
+          <div style={{
+            position: 'absolute',
+            left: 16,
+            bottom: 48,
+            width: 340,
+            maxHeight: 'calc(100vh - 100px)',
+            background: '#faf9f6',
+            border: '1.5px solid #1a3a2a',
+            borderRadius: 12,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+            zIndex: 300,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px 8px',
+              borderBottom: '1px solid #e8e0d8',
+            }}>
+              <span style={{ fontSize: '16px', fontWeight: 600, color: '#1a3a2a', fontFamily: "'Inter', system-ui, sans-serif" }}>Export</span>
+              <button
+                onClick={() => setActivePopover(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#1a3a2a', opacity: 0.4, padding: 0, lineHeight: 1 }}
+              >&times;</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <ErrorBoundary name="Export">
+                <ExportPanel
+                  script={script}
+                  sampleBuffers={sampleBuffers}
+                  engineRef={engineRef}
+                  isPlaying={uiState.isPlaying}
+                  currentTime={uiState.currentTime}
+                />
+              </ErrorBoundary>
+            </div>
+          </div>
+        )}
+
+        {activePopover === 'docs' && (
+          <div style={{
+            position: 'absolute',
+            left: 16,
+            bottom: 48,
+            width: 380,
+            height: 'calc(100vh - 100px)',
+            background: '#faf9f6',
+            border: '1.5px solid #1a3a2a',
+            borderRadius: 12,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+            zIndex: 300,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px 8px',
+              borderBottom: '1px solid #e8e0d8',
+            }}>
+              <span style={{ fontSize: '16px', fontWeight: 600, color: '#1a3a2a', fontFamily: "'Inter', system-ui, sans-serif" }}>Reference</span>
+              <button
+                onClick={() => setActivePopover(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#1a3a2a', opacity: 0.4, padding: 0, lineHeight: 1 }}
+              >&times;</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <DocsPanel />
+            </div>
+          </div>
+        )}
+
+        {activePopover === 'versions' && (
+          <div style={{
+            position: 'absolute',
+            left: 16,
+            top: 16,
+            width: 280,
+            maxHeight: 340,
+            background: '#faf9f6',
+            border: '1.5px solid #1a3a2a',
+            borderRadius: 12,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
+            zIndex: 300,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px 8px',
+              borderBottom: '1px solid #e8e0d8',
+            }}>
+              <span style={{ fontSize: '16px', fontWeight: 600, color: '#1a3a2a', fontFamily: "'Inter', system-ui, sans-serif" }}>Versions</span>
+              <button
+                onClick={() => setActivePopover(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#1a3a2a', opacity: 0.4, padding: 0, lineHeight: 1 }}
+              >&times;</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <ErrorBoundary name="Versions">
+                <VersionsPanel
+                  sketchId={currentSketchId}
+                  onRestore={handleRestoreVersion}
+                />
+              </ErrorBoundary>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

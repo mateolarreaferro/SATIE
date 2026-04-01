@@ -40,7 +40,7 @@ export function AudioLoader({ loadedFiles, onLoadFile, onLoadBuffer }: AudioLoad
         display: 'flex',
         flexDirection: 'column',
         fontFamily: "'Inter', system-ui, sans-serif",
-        fontSize: '11px',
+        fontSize: '16px',
         color: '#1a3a2a',
       }}
     >
@@ -62,13 +62,13 @@ export function AudioLoader({ loadedFiles, onLoadFile, onLoadBuffer }: AudioLoad
             border: '1px solid #d0cdc4',
             borderRadius: 8,
             cursor: 'pointer',
-            fontSize: '10px',
+            fontSize: '15px',
             fontFamily: 'inherit',
           }}
         >
           {isLoading ? '...' : '+ add'}
         </button>
-        <span style={{ opacity: 0.2, fontSize: '10px' }}>
+        <span style={{ opacity: 0.2, fontSize: '15px' }}>
           {loadedFiles.length > 0 ? `${loadedFiles.length} loaded` : ''}
         </span>
         <input
@@ -90,7 +90,7 @@ export function AudioLoader({ loadedFiles, onLoadFile, onLoadBuffer }: AudioLoad
         {loadedFiles.length === 0 && (
           <div style={{
             opacity: dragOver ? 0.4 : 0.15,
-            fontSize: '10px',
+            fontSize: '15px',
             fontStyle: 'italic',
             padding: '12px 0',
             textAlign: 'center',
@@ -104,7 +104,7 @@ export function AudioLoader({ loadedFiles, onLoadFile, onLoadBuffer }: AudioLoad
             key={name}
             style={{
               padding: '3px 0',
-              fontSize: '11px',
+              fontSize: '16px',
               fontFamily: "'SF Mono', 'Consolas', monospace",
               opacity: 0.6,
               display: 'flex',
@@ -112,7 +112,7 @@ export function AudioLoader({ loadedFiles, onLoadFile, onLoadBuffer }: AudioLoad
               gap: '6px',
             }}
           >
-            <span style={{ opacity: 0.3, fontSize: '9px' }}>♪</span>
+            <span style={{ opacity: 0.3, fontSize: '16px' }}>♪</span>
             {name.replace('Audio/', '')}
           </div>
         ))}

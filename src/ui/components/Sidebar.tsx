@@ -4,15 +4,12 @@ import { useAuth } from '../../lib/AuthContext';
 import { useSFX } from '../hooks/useSFX';
 
 export interface PanelVisibility {
-  score: boolean;
   samples: boolean;
-  space: boolean;
   voices: boolean;
   ai: boolean;
-  export: boolean;
-  versions: boolean;
-  docs: boolean;
 }
+
+export type PopoverType = 'docs' | 'export' | 'versions' | null;
 
 interface SidebarProps {
   isPlaying: boolean;
@@ -23,6 +20,8 @@ interface SidebarProps {
   onMasterVolume: (vol: number) => void;
   panels: PanelVisibility;
   onTogglePanel: (panel: keyof PanelVisibility) => void;
+  activePopover: PopoverType;
+  onTogglePopover: (p: 'docs' | 'export' | 'versions') => void;
   sketchTitle?: string;
   onSketchTitleChange?: (title: string) => void;
   onSave?: () => void;
@@ -42,6 +41,8 @@ export function Sidebar({
   onMasterVolume,
   panels,
   onTogglePanel,
+  activePopover,
+  onTogglePopover,
   sketchTitle,
   onSketchTitleChange,
   onSave,
@@ -68,9 +69,38 @@ export function Sidebar({
     return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
   };
 
+  const iconBtnStyle = (active: boolean): React.CSSProperties => ({
+    width: 36,
+    height: 30,
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    color: '#1a3a2a',
+    opacity: active ? 0.6 : 0.15,
+    padding: 0,
+    transition: 'opacity 0.15s',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  });
+
+  const smallBtnStyle = (active?: boolean): React.CSSProperties => ({
+    width: 36,
+    height: 28,
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    opacity: active ? 0.6 : 0.2,
+    padding: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'opacity 0.15s',
+  });
+
   return (
     <div style={{
-      width: 52,
+      width: 72,
       height: '100vh',
       background: '#faf9f6',
       borderRight: '1.5px solid #1a3a2a',
@@ -78,7 +108,7 @@ export function Sidebar({
       flexDirection: 'column',
       alignItems: 'center',
       padding: '16px 0',
-      gap: '6px',
+      gap: '10px',
       fontFamily: "'Inter', system-ui, sans-serif",
       flexShrink: 0,
       position: 'relative',
@@ -88,7 +118,7 @@ export function Sidebar({
       <div
         onClick={() => navigate('/')}
         style={{
-          fontSize: '13px',
+          fontSize: '16px',
           fontWeight: 700,
           color: '#1a3a2a',
           letterSpacing: '0.02em',
@@ -112,8 +142,8 @@ export function Sidebar({
             onBlur={() => setEditingTitle(false)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingTitle(false); }}
             style={{
-              width: 36,
-              fontSize: '8px',
+              width: 48,
+              fontSize: '16px',
               fontFamily: "'SF Mono', monospace",
               color: '#1a3a2a',
               background: 'transparent',
@@ -130,7 +160,7 @@ export function Sidebar({
             onDoubleClick={() => setEditingTitle(true)}
             title="Double-click to rename"
             style={{
-              fontSize: '8px',
+              fontSize: '16px',
               fontFamily: "'SF Mono', monospace",
               color: '#1a3a2a',
               opacity: 0.35,
@@ -156,11 +186,11 @@ export function Sidebar({
         onMouseEnter={sfx.hover}
         title={isPlaying ? 'Stop' : 'Play'}
         style={{
-          width: 30,
-          height: 30,
+          width: 38,
+          height: 38,
           background: 'none',
           border: '1.5px solid ' + (isPlaying ? '#8b0000' : '#1a3a2a'),
-          borderRadius: isPlaying ? 6 : 15,
+          borderRadius: isPlaying ? 8 : 19,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -169,11 +199,11 @@ export function Sidebar({
         }}
       >
         {isPlaying ? (
-          <svg width="10" height="10" viewBox="0 0 10 10">
+          <svg width="14" height="14" viewBox="0 0 10 10">
             <rect x="1.5" y="1.5" width="7" height="7" rx="1" fill="#8b0000"/>
           </svg>
         ) : (
-          <svg width="10" height="10" viewBox="0 0 10 10">
+          <svg width="14" height="14" viewBox="0 0 10 10">
             <polygon points="2.5,1 8.5,5 2.5,9" fill="#1a3a2a"/>
           </svg>
         )}
@@ -181,20 +211,22 @@ export function Sidebar({
 
       {/* Time */}
       <div style={{
-        fontSize: '8px',
+        fontSize: '11px',
         color: '#1a3a2a',
         opacity: 0.4,
         fontFamily: "'SF Mono', monospace",
-        letterSpacing: '0.3px',
+        letterSpacing: '-0.3px',
+        whiteSpace: 'nowrap',
       }}>
         {formatTime(currentTime)}
       </div>
 
       {/* Voices */}
       <div style={{
-        fontSize: '8px',
+        fontSize: '11px',
         color: '#1a3a2a',
         opacity: 0.2,
+        fontFamily: "'SF Mono', monospace",
       }}>
         {trackCount}v
       </div>
@@ -209,195 +241,196 @@ export function Sidebar({
         onChange={(e) => onMasterVolume(parseFloat(e.target.value))}
         title="Master volume"
         style={{
-          width: 32,
+          width: 50,
           accentColor: '#000',
           opacity: 0.3,
           writingMode: 'vertical-lr',
           direction: 'rtl',
-          marginTop: '4px',
         }}
       />
 
-      {/* Save button */}
-      {canSave && onSave && (
+      {/* ── Panels ── */}
+      <div style={{
+        marginTop: '4px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        alignItems: 'center',
+        paddingTop: '10px',
+        borderTop: '1px solid #d0cdc4',
+      }}>
+        {/* Samples */}
         <button
           className="sidebar-btn"
-          onClick={() => { sfx.save(); onSave(); }}
+          onClick={() => { sfx.toggle(); onTogglePanel('samples'); }}
           onMouseEnter={sfx.hover}
-          title={isSaved ? 'Saved' : 'Save sketch'}
-          style={{
-            width: 28,
-            height: 20,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            opacity: isSaved ? 0.2 : 0.5,
-            padding: 0,
-            marginTop: '4px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'opacity 0.15s',
-          }}
+          title={`${panels.samples ? 'Hide' : 'Show'} assets`}
+          style={iconBtnStyle(panels.samples)}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
-            <path d="M2.5 1.5h7l2.5 2.5v8h-10v-10.5z" strokeLinejoin="round"/>
-            <path d="M4.5 1.5v3h5v-3" strokeLinejoin="round"/>
-            <rect x="4" y="8" width="6" height="3.5" rx="0.5"/>
+          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+            <path d="M3 1.5 L3 12.5 L11.5 12.5 L11.5 4.5 L8.5 1.5 Z" strokeLinejoin="round"/>
+            <path d="M8.5 1.5 L8.5 4.5 L11.5 4.5" strokeLinejoin="round"/>
           </svg>
         </button>
-      )}
 
-      {/* Public toggle */}
-      {canSave && onTogglePublic && (
+        {/* Voices */}
         <button
           className="sidebar-btn"
-          onClick={() => { sfx.toggle(); onTogglePublic(); }}
+          onClick={() => { sfx.toggle(); onTogglePanel('voices'); }}
           onMouseEnter={sfx.hover}
-          title={isPublic ? 'Make private' : 'Make public (shareable)'}
-          style={{
-            width: 28,
-            height: 20,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            opacity: isPublic ? 0.6 : 0.2,
-            padding: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'opacity 0.15s',
-          }}
+          title={`${panels.voices ? 'Hide' : 'Show'} voices`}
+          style={iconBtnStyle(panels.voices)}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke={isPublic ? '#1a3a2a' : '#1a3a2a'} strokeWidth="1.2">
-            <circle cx="7" cy="7" r="5.5"/>
-            <path d="M1.5 7 L12.5 7" strokeLinecap="round"/>
-            <ellipse cx="7" cy="7" rx="2.5" ry="5.5"/>
+          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+            <line x1="2" y1="3.5" x2="12" y2="3.5" strokeLinecap="round"/>
+            <line x1="2" y1="7" x2="12" y2="7" strokeLinecap="round"/>
+            <line x1="2" y1="10.5" x2="12" y2="10.5" strokeLinecap="round"/>
           </svg>
         </button>
-      )}
 
-      {/* Share link (only when public) */}
-      {isPublic && sketchId && (
+        {/* AI */}
         <button
           className="sidebar-btn"
-          onClick={() => {
-            navigator.clipboard.writeText(`${window.location.origin}/s/${sketchId}`);
-            sfx.save();
-          }}
+          onClick={() => { sfx.toggle(); onTogglePanel('ai'); }}
           onMouseEnter={sfx.hover}
-          title="Copy share link"
-          style={{
-            width: 28,
-            height: 20,
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            opacity: 0.35,
-            padding: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'opacity 0.15s',
-          }}
+          title={`${panels.ai ? 'Hide' : 'Show'} AI`}
+          style={iconBtnStyle(panels.ai)}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
-            <path d="M5.5 8.5 L8.5 5.5" strokeLinecap="round"/>
-            <path d="M6 9 C4.5 10.5 2.5 10.5 2 10 C1.5 9.5 1.5 7.5 3 6 L4.5 4.5" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M8 5 C9.5 3.5 11.5 3.5 12 4 C12.5 4.5 12.5 6.5 11 8 L9.5 9.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+            <path d="M7 1.5 C7 1.5 3 1.5 3 5 C3 7 4.5 7.5 4.5 9.5 L9.5 9.5 C9.5 7.5 11 7 11 5 C11 1.5 7 1.5 7 1.5 Z" strokeLinejoin="round"/>
+            <line x1="5" y1="9.5" x2="5" y2="11.5" strokeLinecap="round"/>
+            <line x1="9" y1="9.5" x2="9" y2="11.5" strokeLinecap="round"/>
+            <path d="M5 11.5 Q7 13 9 11.5" strokeLinecap="round"/>
           </svg>
         </button>
-      )}
+      </div>
 
-      {/* Panel toggles */}
-      <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
-        {(['score', 'samples', 'space', 'voices', 'ai', 'docs', 'export', 'versions'] as const).map((key) => {
-          const icon = {
-            score: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3">
-                <path d="M4 3 L1 7 L4 11" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M10 3 L13 7 L10 11" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            ),
-            samples: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <path d="M3 1.5 L3 12.5 L11.5 12.5 L11.5 4.5 L8.5 1.5 Z" strokeLinejoin="round"/>
-                <path d="M8.5 1.5 L8.5 4.5 L11.5 4.5" strokeLinejoin="round"/>
-              </svg>
-            ),
-            space: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <path d="M7 1 L13 4.5 L13 9.5 L7 13 L1 9.5 L1 4.5 Z" strokeLinejoin="round"/>
-                <path d="M7 1 L7 13" />
-                <path d="M1 4.5 L13 9.5" />
-                <path d="M13 4.5 L1 9.5" />
-              </svg>
-            ),
-            voices: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <line x1="2" y1="3.5" x2="12" y2="3.5" strokeLinecap="round"/>
-                <line x1="2" y1="7" x2="12" y2="7" strokeLinecap="round"/>
-                <line x1="2" y1="10.5" x2="12" y2="10.5" strokeLinecap="round"/>
-              </svg>
-            ),
-            ai: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <path d="M7 1.5 C7 1.5 3 1.5 3 5 C3 7 4.5 7.5 4.5 9.5 L9.5 9.5 C9.5 7.5 11 7 11 5 C11 1.5 7 1.5 7 1.5 Z" strokeLinejoin="round"/>
-                <line x1="5" y1="9.5" x2="5" y2="11.5" strokeLinecap="round"/>
-                <line x1="9" y1="9.5" x2="9" y2="11.5" strokeLinecap="round"/>
-                <path d="M5 11.5 Q7 13 9 11.5" strokeLinecap="round"/>
-              </svg>
-            ),
-            docs: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <path d="M7 2 C5 2 2 2.5 2 3.5 L2 11 C2 11 4 10.5 7 11 C10 10.5 12 11 12 11 L12 3.5 C12 2.5 9 2 7 2 Z" strokeLinejoin="round"/>
-                <path d="M7 2 L7 11"/>
-              </svg>
-            ),
-            export: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <path d="M7 1.5 L7 9" strokeLinecap="round"/>
-                <path d="M4 6.5 L7 9.5 L10 6.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M2 11.5 L12 11.5" strokeLinecap="round"/>
-              </svg>
-            ),
-            versions: (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
-                <circle cx="7" cy="7" r="5.5"/>
-                <path d="M7 4 L7 7.5 L9.5 9" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            ),
-          }[key];
-          return (
+      {/* ── Pop-ups ── */}
+      <div style={{
+        marginTop: '4px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        alignItems: 'center',
+        paddingTop: '10px',
+        borderTop: '1px solid #d0cdc4',
+      }}>
+        {/* Save */}
+        {canSave && onSave && (
           <button
-            key={key}
             className="sidebar-btn"
-            onClick={() => { sfx.toggle(); onTogglePanel(key); }}
+            onClick={() => { sfx.save(); onSave(); }}
             onMouseEnter={sfx.hover}
-            title={`${panels[key] ? 'Hide' : 'Show'} ${key}`}
-            style={{
-              width: 28,
-              height: 22,
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: '#1a3a2a',
-              opacity: panels[key] ? 0.6 : 0.15,
-              padding: 0,
-              transition: 'opacity 0.15s',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
+            title={isSaved ? 'Saved' : 'Save sketch'}
+            style={smallBtnStyle(isSaved ? false : true)}
           >
-            {icon}
+            <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
+              <path d="M2.5 1.5h7l2.5 2.5v8h-10v-10.5z" strokeLinejoin="round"/>
+              <path d="M4.5 1.5v3h5v-3" strokeLinejoin="round"/>
+              <rect x="4" y="8" width="6" height="3.5" rx="0.5"/>
+            </svg>
           </button>
-          );
-        })}
+        )}
+
+        {/* Public toggle */}
+        {canSave && onTogglePublic && (
+          <button
+            className="sidebar-btn"
+            onClick={() => { sfx.toggle(); onTogglePublic(); }}
+            onMouseEnter={sfx.hover}
+            title={isPublic ? 'Make private' : 'Make public (shareable)'}
+            style={smallBtnStyle(isPublic)}
+          >
+            <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
+              <circle cx="7" cy="7" r="5.5"/>
+              <path d="M1.5 7 L12.5 7" strokeLinecap="round"/>
+              <ellipse cx="7" cy="7" rx="2.5" ry="5.5"/>
+            </svg>
+          </button>
+        )}
+
+        {/* Share link (only when public) */}
+        {isPublic && sketchId && (
+          <button
+            className="sidebar-btn"
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/s/${sketchId}`);
+              sfx.save();
+            }}
+            onMouseEnter={sfx.hover}
+            title="Copy share link"
+            style={smallBtnStyle()}
+          >
+            <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
+              <path d="M5.5 8.5 L8.5 5.5" strokeLinecap="round"/>
+              <path d="M6 9 C4.5 10.5 2.5 10.5 2 10 C1.5 9.5 1.5 7.5 3 6 L4.5 4.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M8 5 C9.5 3.5 11.5 3.5 12 4 C12.5 4.5 12.5 6.5 11 8 L9.5 9.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        )}
+
+        {/* Export */}
+        <button
+          className="sidebar-btn"
+          onClick={() => { sfx.toggle(); onTogglePopover('export'); }}
+          onMouseEnter={sfx.hover}
+          title={activePopover === 'export' ? 'Hide export' : 'Export audio'}
+          style={smallBtnStyle(activePopover === 'export')}
+        >
+          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
+            <path d="M7 1.5 L7 9" strokeLinecap="round"/>
+            <path d="M4 6.5 L7 9.5 L10 6.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M2 11.5 L12 11.5" strokeLinecap="round"/>
+          </svg>
+        </button>
+
+        {/* Versions */}
+        {canSave && (
+          <button
+            className="sidebar-btn"
+            onClick={() => { sfx.toggle(); onTogglePopover('versions'); }}
+            onMouseEnter={sfx.hover}
+            title={activePopover === 'versions' ? 'Hide versions' : 'Version history'}
+            style={smallBtnStyle(activePopover === 'versions')}
+          >
+            <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
+              <circle cx="7" cy="7" r="5.5"/>
+              <path d="M7 4 L7 7.5 L9.5 9" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Spacer */}
       <div style={{ flex: 1 }} />
+
+      {/* Docs — bottom of sidebar */}
+      <button
+        className="sidebar-btn"
+        onClick={() => { sfx.toggle(); onTogglePopover('docs'); }}
+        onMouseEnter={sfx.hover}
+        title={activePopover === 'docs' ? 'Hide docs' : 'Language reference'}
+        style={{
+          width: 36,
+          height: 36,
+          background: 'none',
+          border: activePopover === 'docs' ? '1px solid #1a3a2a' : '1px solid transparent',
+          borderRadius: 18,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '16px',
+          fontWeight: 500,
+          color: '#1a3a2a',
+          opacity: activePopover === 'docs' ? 0.7 : 0.25,
+          fontFamily: "'SF Mono', monospace",
+          transition: 'all 0.15s',
+          marginBottom: '4px',
+        }}
+      >
+        ?
+      </button>
 
       {/* User avatar / sign in */}
       {user ? (
@@ -408,16 +441,16 @@ export function Sidebar({
             onMouseEnter={sfx.hover}
             title={`${user.email ?? user.user_metadata?.user_name}\nClick for dashboard`}
             style={{
-              width: 28,
-              height: 28,
+              width: 36,
+              height: 36,
               background: '#1a3a2a',
               border: 'none',
-              borderRadius: 14,
+              borderRadius: 18,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '11px',
+              fontSize: '16px',
               color: '#faf9f6',
               fontWeight: 600,
               fontFamily: "'Inter', system-ui, sans-serif",
@@ -432,7 +465,7 @@ export function Sidebar({
               background: 'none',
               border: 'none',
               cursor: 'pointer',
-              fontSize: '7px',
+              fontSize: '16px',
               fontFamily: "'SF Mono', monospace",
               color: '#1a3a2a',
               opacity: 0.25,
@@ -449,22 +482,22 @@ export function Sidebar({
           onMouseEnter={sfx.hover}
           title="Sign in with GitHub"
           style={{
-            width: 28,
-            height: 28,
+            width: 36,
+            height: 36,
             background: 'none',
             border: '1px solid #d0cdc4',
-            borderRadius: 14,
+            borderRadius: 18,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '10px',
+            fontSize: '16px',
             color: '#1a3a2a',
             opacity: 0.4,
             marginBottom: '4px',
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
+          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2">
             <circle cx="7" cy="5" r="3"/>
             <path d="M2 13c0-2.8 2.2-5 5-5s5 2.2 5 5" strokeLinecap="round"/>
           </svg>

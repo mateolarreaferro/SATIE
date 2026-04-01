@@ -95,22 +95,22 @@ export function useSFX() {
     // 120ms cooldown — prevents rapid-fire when moving across buttons
     if (now - lastHover.current < 120) return;
     lastHover.current = now;
-    microTap(0.015);
+    microTap(0.019);
   }, []);
 
   const click = useCallback(() => {
     if (!enabled.current) return;
-    tap(0.025);
+    tap(0.031);
   }, []);
 
   const save = useCallback(() => {
     if (!enabled.current) return;
-    tap(0.02);
+    tap(0.025);
   }, []);
 
   const toggle = useCallback(() => {
     if (!enabled.current) return;
-    tap(0.03);
+    tap(0.0375);
   }, []);
 
   const open = useCallback(() => {}, []);
@@ -119,17 +119,17 @@ export function useSFX() {
   // Only play/stop/delete get louder sound — the key moments
   const play = useCallback(() => {
     if (!enabled.current) return;
-    tap(0.04);
+    tap(0.05);
   }, []);
 
   const stop = useCallback(() => {
     if (!enabled.current) return;
-    thud(0.035);
+    thud(0.044);
   }, []);
 
   const del = useCallback(() => {
     if (!enabled.current) return;
-    thud(0.05);
+    thud(0.0625);
   }, []);
 
   const splash = useCallback(() => {}, []);

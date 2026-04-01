@@ -59,8 +59,8 @@ export function VersionsPanel({ sketchId, onRestore }: VersionsPanelProps) {
           >
             <div style={styles.versionBadge}>v{v.version_number}</div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '11px', fontWeight: 500 }}>{v.title}</div>
-              <div style={{ fontSize: '9px', opacity: 0.35 }}>{formatDate(v.created_at)}</div>
+              <div style={{ fontSize: '16px', fontWeight: 500 }}>{v.title}</div>
+              <div style={{ fontSize: '16px', opacity: 0.35 }}>{formatDate(v.created_at)}</div>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); handleRestore(v); }}
@@ -85,14 +85,14 @@ const styles: Record<string, React.CSSProperties> = {
   container: {
     padding: '6px 10px',
     fontFamily: "'SF Mono', 'Consolas', monospace",
-    fontSize: '11px',
+    fontSize: '16px',
     color: '#1a3a2a',
     overflow: 'auto',
     height: '100%',
   },
   empty: {
     padding: '16px',
-    fontSize: '10px',
+    fontSize: '15px',
     opacity: 0.3,
     textAlign: 'center',
     fontFamily: "'Inter', system-ui, sans-serif",
@@ -110,7 +110,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '4px 0',
   },
   versionBadge: {
-    fontSize: '9px',
+    fontSize: '16px',
     fontWeight: 700,
     background: '#1a3a2a',
     color: '#faf9f6',
@@ -124,14 +124,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #d0cdc4',
     borderRadius: 4,
     cursor: 'pointer',
-    fontSize: '9px',
+    fontSize: '16px',
     fontFamily: "'Inter', system-ui, sans-serif",
     color: '#1a3a2a',
     opacity: 0.5,
     flexShrink: 0,
   },
   scriptPreview: {
-    fontSize: '9px',
+    fontSize: '16px',
     fontFamily: "'SF Mono', monospace",
     background: '#faf9f6',
     border: '1px solid #e8e0d8',

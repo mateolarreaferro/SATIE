@@ -186,7 +186,7 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
     <div style={{
       padding: '10px 14px',
       fontFamily: "'SF Mono', 'Consolas', monospace",
-      fontSize: '11px',
+      fontSize: '16px',
       color: '#1a3a2a',
       display: 'flex',
       flexDirection: 'column',
@@ -221,7 +221,7 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
       </div>
 
       {/* Format description */}
-      <div style={{ fontSize: '9px', opacity: 0.35, lineHeight: '1.4' }}>
+      <div style={{ fontSize: '16px', opacity: 0.35, lineHeight: '1.4' }}>
         {format === 'stereo' && '2ch WAV — standard stereo with equalpower panning'}
         {format === 'binaural' && '2ch WAV — HRTF binaural rendering for headphones'}
         {format === 'ambisonic-foa' && '4ch WAV — First-Order Ambisonics (AmbiX: W,Y,Z,X)'}
@@ -339,7 +339,7 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
       {/* Video export */}
       {format === 'video' && (
         <>
-          <div style={{ fontSize: '9px', opacity: 0.3, lineHeight: '1.4' }}>
+          <div style={{ fontSize: '16px', opacity: 0.3, lineHeight: '1.4' }}>
             Records the Space viewport in real-time. Start playback first, then record.
             {!isPlaying && ' (not playing)'}
           </div>
@@ -368,7 +368,7 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
 
       {/* Error */}
       {error && (
-        <div style={{ fontSize: '9px', color: '#8b0000', opacity: 0.8 }}>
+        <div style={{ fontSize: '16px', color: '#8b0000', opacity: 0.8 }}>
           {error}
         </div>
       )}
@@ -378,7 +378,7 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
 
 const styles: Record<string, React.CSSProperties> = {
   label: {
-    fontSize: '8px',
+    fontSize: '16px',
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
     opacity: 0.35,
@@ -390,7 +390,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #d0cdc4',
     borderRadius: 6,
     cursor: 'pointer',
-    fontSize: '10px',
+    fontSize: '15px',
     fontFamily: "'Inter', system-ui, sans-serif",
     fontWeight: 500,
     transition: 'all 0.1s',
@@ -400,7 +400,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '4px 6px',
     border: '1px solid #d0cdc4',
     borderRadius: 4,
-    fontSize: '10px',
+    fontSize: '15px',
     fontFamily: "'SF Mono', monospace",
     background: 'transparent',
     color: '#1a3a2a',
@@ -413,7 +413,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1.5px solid #1a3a2a',
     borderRadius: 8,
     cursor: 'pointer',
-    fontSize: '11px',
+    fontSize: '16px',
     fontFamily: "'Inter', system-ui, sans-serif",
     fontWeight: 600,
     transition: 'opacity 0.15s',

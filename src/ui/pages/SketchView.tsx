@@ -118,7 +118,7 @@ export function SketchView() {
           <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>
             Sketch not found
           </div>
-          <p style={{ fontSize: '13px', opacity: 0.4, marginBottom: '20px' }}>
+          <p style={{ fontSize: '15px', opacity: 0.4, marginBottom: '20px' }}>
             This sketch may be private or may have been deleted.
           </p>
           <Link to="/explore" style={styles.linkBtn}>Browse public sketches</Link>
@@ -151,7 +151,7 @@ export function SketchView() {
             </button>
           )}
           {!user && likeCount > 0 && (
-            <span style={{ fontSize: '11px', opacity: 0.35 }}>{likeCount} likes</span>
+            <span style={{ fontSize: '16px', opacity: 0.35 }}>{likeCount} likes</span>
           )}
           {user && (
             <button onClick={handleFork} style={styles.actionBtn}>
@@ -188,7 +188,7 @@ export function SketchView() {
             <h1 style={{ fontSize: '22px', fontWeight: 600, margin: '0 0 6px', letterSpacing: '-0.01em' }}>
               {sketch.title}
             </h1>
-            <div style={{ fontSize: '12px', opacity: 0.35, marginBottom: '4px' }}>
+            <div style={{ fontSize: '16px', opacity: 0.35, marginBottom: '4px' }}>
               {author ? (
                 <Link
                   to={`/u/${author.username}`}
@@ -203,7 +203,7 @@ export function SketchView() {
               })}
             </div>
             {sketch.forked_from && (
-              <div style={{ fontSize: '10px', opacity: 0.25, fontStyle: 'italic' }}>
+              <div style={{ fontSize: '15px', opacity: 0.25, fontStyle: 'italic' }}>
                 forked from <Link to={`/s/${sketch.forked_from}`} style={{ color: '#0a0a0a' }}>another sketch</Link>
               </div>
             )}
@@ -247,7 +247,7 @@ const styles: Record<string, React.CSSProperties> = {
     left: '50%',
     transform: 'translate(-50%, -50%)',
     textAlign: 'center',
-    fontSize: '12px',
+    fontSize: '16px',
     opacity: 0.4,
   },
   header: {
@@ -263,7 +263,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1.5px solid #0a0a0a',
     borderRadius: 8,
     cursor: 'pointer',
-    fontSize: '11px',
+    fontSize: '16px',
     fontFamily: "'Inter', system-ui, sans-serif",
     color: '#0a0a0a',
     fontWeight: 500,
@@ -274,13 +274,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: 'none',
     borderRadius: 8,
     cursor: 'pointer',
-    fontSize: '11px',
+    fontSize: '16px',
     fontFamily: "'Inter', system-ui, sans-serif",
     color: '#faf9f6',
     fontWeight: 600,
   },
   linkBtn: {
-    fontSize: '12px',
+    fontSize: '16px',
     color: '#0a0a0a',
     textDecoration: 'underline',
     opacity: 0.5,
@@ -312,7 +312,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
   },
   sectionLabel: {
-    fontSize: '9px',
+    fontSize: '16px',
     fontWeight: 600,
     textTransform: 'uppercase' as const,
     letterSpacing: '0.08em',
@@ -320,7 +320,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: '8px',
   },
   script: {
-    fontSize: '11px',
+    fontSize: '16px',
     fontFamily: "'SF Mono', 'Consolas', monospace",
     background: '#faf9f6',
     border: '1px solid #e0ddd4',
@@ -338,7 +338,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '8px 10px',
     border: '1px solid #e0ddd4',
     borderRadius: 6,
-    fontSize: '10px',
+    fontSize: '15px',
     fontFamily: "'SF Mono', monospace",
     background: '#faf9f6',
     color: '#0a0a0a',

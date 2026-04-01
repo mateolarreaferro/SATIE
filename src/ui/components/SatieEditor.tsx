@@ -402,7 +402,7 @@ export function SatieEditor({ value, onChange, onRun, errors, runtimeWarnings }:
         <div style={{
           padding: '6px 12px',
           color: '#8b0000',
-          fontSize: '11px',
+          fontSize: '16px',
           fontFamily: "'SF Mono', monospace",
           borderTop: '1px solid #e8e0d8',
           background: '#fdf6f0',
@@ -415,7 +415,7 @@ export function SatieEditor({ value, onChange, onRun, errors, runtimeWarnings }:
         <div style={{
           padding: '6px 12px',
           color: '#8b6914',
-          fontSize: '10px',
+          fontSize: '15px',
           fontFamily: "'SF Mono', monospace",
           borderTop: '1px solid #e8e0d8',
           background: '#fefbf0',

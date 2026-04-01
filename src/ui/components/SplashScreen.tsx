@@ -33,18 +33,18 @@ function playTone(freq: number, volume: number, attack: number, decay: number, d
   osc.stop(t + attack + decay + 0.1);
 }
 
-/** Logo reveal — soft open fifth that swells in, spatially warm */
+/** Logo reveal — soft C major chord that swells in, spatially warm */
 function soundLogoReveal() {
-  // A3 fundamental — warm and grounded
-  playTone(220, 0.06, 1.2, 2.5, 0);
-  // E4 fifth — enters slightly later, creates spaciousness
+  // C4 fundamental — warm and grounded
+  playTone(262, 0.06, 1.2, 2.5, 0);
+  // E4 third — enters slightly later, creates warmth
   playTone(330, 0.035, 1.0, 2.0, 0.4);
-  // A4 octave — barely there, adds air
-  playTone(440, 0.015, 0.8, 1.5, 0.8);
+  // G4 fifth — barely there, adds air
+  playTone(392, 0.015, 0.8, 1.5, 0.8);
 }
 
 /** Step transition — a single soft pitched tone, ascending per step */
-const STEP_NOTES = [330, 392, 440]; // E4, G4, A4
+const STEP_NOTES = [262, 330, 392]; // C4, E4, G4
 function soundStepAdvance(step: number) {
   const freq = STEP_NOTES[step] ?? 440;
   playTone(freq, 0.04, 0.05, 0.4, 0);
@@ -52,8 +52,8 @@ function soundStepAdvance(step: number) {
 
 /** Exit — gentle falling interval, like a soft exhale */
 function soundExit() {
-  playTone(440, 0.03, 0.04, 0.6, 0);
-  playTone(330, 0.025, 0.04, 0.8, 0.1);
+  playTone(392, 0.03, 0.04, 0.6, 0);  // G4
+  playTone(262, 0.025, 0.04, 0.8, 0.1); // C4
 }
 
 /** Button hover — tiny high sine blip, barely audible */
@@ -320,7 +320,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             {currentStep.title}
           </div>
           <div style={{
-            fontSize: '13px',
+            fontSize: '15px',
             fontWeight: 300,
             color: '#f4f3ee',
             opacity: 0.35,
@@ -355,7 +355,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
               background: 'none',
               border: 'none',
               color: '#f4f3ee',
-              fontSize: '12px',
+              fontSize: '16px',
               fontWeight: 400,
               cursor: 'pointer',
               fontFamily: "'Inter', system-ui, sans-serif",
@@ -376,7 +376,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
               borderRadius: 8,
               padding: '8px 24px',
               color: '#f4f3ee',
-              fontSize: '12px',
+              fontSize: '16px',
               fontWeight: 400,
               cursor: 'pointer',
               fontFamily: "'Inter', system-ui, sans-serif",
@@ -397,7 +397,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
         <div style={{
           position: 'absolute',
           bottom: 28,
-          fontSize: '10px',
+          fontSize: '15px',
           color: '#f4f3ee',
           opacity: 0.1,
           letterSpacing: '0.04em',

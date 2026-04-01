@@ -812,7 +812,7 @@ export function AIPanel({
     border: '1px solid #1a1a1a',
     borderRadius: 6,
     cursor: 'pointer',
-    fontSize: '9px',
+    fontSize: '16px',
     fontFamily: "'Inter', system-ui, sans-serif",
     fontWeight: 500,
     letterSpacing: '0.03em',
@@ -860,7 +860,7 @@ export function AIPanel({
           }}
           title="AI Provider — all configured providers are available as fallback"
           style={{
-            fontSize: '8px',
+            fontSize: '16px',
             opacity: 0.4,
             marginLeft: 'auto',
             fontFamily: "'SF Mono', monospace",
@@ -886,11 +886,11 @@ export function AIPanel({
           flex: 1,
           overflow: 'auto',
           padding: '0 14px',
-          fontSize: '12px',
+          fontSize: '16px',
         }}
       >
         {prompts.length === 0 && !status && (
-          <div style={{ opacity: 0.2, fontSize: '11px', padding: '4px 0' }}>
+          <div style={{ opacity: 0.2, fontSize: '16px', padding: '4px 0' }}>
             {target === 'script'
               ? 'describe what you want to hear'
               : 'describe the sample you need'}
@@ -901,7 +901,7 @@ export function AIPanel({
             padding: '3px 0',
             color: '#1a3a2a',
             opacity: 0.4,
-            fontSize: '11px',
+            fontSize: '16px',
             fontStyle: 'italic',
           }}>
             {p}
@@ -912,20 +912,20 @@ export function AIPanel({
             padding: '3px 0',
             color: status.startsWith('error') ? '#8b0000' : '#1a3a2a',
             opacity: 0.5,
-            fontSize: '10px',
+            fontSize: '15px',
             fontFamily: "'SF Mono', monospace",
           }}>
             {status}
           </div>
         )}
         {asr.recording && (
-          <div style={{ opacity: 0.4, fontSize: '11px', padding: '4px 0', color: '#8b0000' }}>recording...</div>
+          <div style={{ opacity: 0.4, fontSize: '16px', padding: '4px 0', color: '#8b0000' }}>recording...</div>
         )}
         {asr.transcribing && (
-          <div style={{ opacity: 0.3, fontSize: '11px', padding: '4px 0' }}>transcribing...</div>
+          <div style={{ opacity: 0.3, fontSize: '16px', padding: '4px 0' }}>transcribing...</div>
         )}
         {isLoading && (
-          <div style={{ opacity: 0.2, fontSize: '11px', padding: '4px 0' }}>...</div>
+          <div style={{ opacity: 0.2, fontSize: '16px', padding: '4px 0' }}>...</div>
         )}
       </div>
 
@@ -938,7 +938,7 @@ export function AIPanel({
         }}>
           {historyIndex >= 0 && (
             <div style={{
-              fontSize: '10px',
+              fontSize: '15px',
               color: '#1a3a2a',
               opacity: 0.5,
               fontStyle: 'italic',
@@ -964,7 +964,7 @@ export function AIPanel({
                 border: 'none',
                 cursor: history.length <= 1 || historyIndex === 0 ? 'default' : 'pointer',
                 opacity: history.length <= 1 || historyIndex === 0 ? 0.15 : 0.5,
-                fontSize: '12px',
+                fontSize: '16px',
                 color: '#1a3a2a',
                 padding: '0 4px',
               }}
@@ -972,7 +972,7 @@ export function AIPanel({
               &lt;
             </button>
             <span style={{
-              fontSize: '9px',
+              fontSize: '16px',
               opacity: 0.3,
               fontFamily: "'SF Mono', monospace",
               minWidth: '32px',
@@ -992,7 +992,7 @@ export function AIPanel({
                 border: 'none',
                 cursor: (historyIndex < 0 || historyIndex >= history.length - 1) ? 'default' : 'pointer',
                 opacity: (historyIndex < 0 || historyIndex >= history.length - 1) ? 0.15 : 0.5,
-                fontSize: '12px',
+                fontSize: '16px',
                 color: '#1a3a2a',
                 padding: '0 4px',
               }}
@@ -1015,7 +1015,7 @@ export function AIPanel({
                       background: 'none',
                       border: 'none',
                       cursor: 'pointer',
-                      fontSize: '11px',
+                      fontSize: '16px',
                       padding: '0 2px',
                       opacity: currentRating === 1 ? 1 : 0.25,
                       color: '#1a3a2a',
@@ -1034,7 +1034,7 @@ export function AIPanel({
                       background: 'none',
                       border: 'none',
                       cursor: 'pointer',
-                      fontSize: '11px',
+                      fontSize: '16px',
                       padding: '0 2px',
                       opacity: currentRating === -1 ? 1 : 0.25,
                       color: '#8b0000',
@@ -1066,7 +1066,7 @@ export function AIPanel({
             padding: '8px 10px',
             border: '1px solid #d0cdc4',
             borderRadius: 12,
-            fontSize: '12px',
+            fontSize: '16px',
             fontFamily: "'Inter', system-ui, sans-serif",
             background: '#faf9f6',
             outline: 'none',

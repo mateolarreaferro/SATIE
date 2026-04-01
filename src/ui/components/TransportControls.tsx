@@ -30,7 +30,7 @@ export function TransportControls({
       padding: '0 14px',
       height: '100%',
       fontFamily: "'SF Mono', 'Consolas', monospace",
-      fontSize: '11px',
+      fontSize: '16px',
       color: '#1a3a2a',
     }}>
       <button
@@ -64,7 +64,7 @@ export function TransportControls({
         {formatTime(currentTime)}
       </span>
 
-      <span style={{ opacity: 0.25, fontSize: '10px' }}>
+      <span style={{ opacity: 0.25, fontSize: '15px' }}>
         {trackCount}v
       </span>
 

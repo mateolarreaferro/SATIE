@@ -260,7 +260,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
               padding: '3px 6px',
               border: '1px solid #d0cdc4',
               borderRadius: 6,
-              fontSize: '10px',
+              fontSize: '15px',
               fontFamily: "'SF Mono', monospace",
               background: 'transparent',
               color: '#1a3a2a',
@@ -276,7 +276,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
               borderRadius: 6,
               cursor: 'pointer',
               padding: '2px 6px',
-              fontSize: '10px',
+              fontSize: '15px',
               color: '#1a3a2a',
               fontFamily: 'inherit',
             }}
@@ -293,7 +293,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
               borderRadius: 6,
               cursor: saving ? 'default' : 'pointer',
               padding: '2px 8px',
-              fontSize: '10px',
+              fontSize: '15px',
               fontFamily: 'inherit',
               opacity: saving || !name.trim() ? 0.4 : 1,
             }}
@@ -308,7 +308,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
               borderRadius: 6,
               cursor: 'pointer',
               padding: '2px 6px',
-              fontSize: '10px',
+              fontSize: '15px',
               color: '#8b0000',
               fontFamily: 'inherit',
             }}
@@ -316,7 +316,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
             discard
           </button>
         </div>
-        <div style={{ fontSize: '9px', opacity: 0.3, fontFamily: "'SF Mono', monospace" }}>
+        <div style={{ fontSize: '16px', opacity: 0.3, fontFamily: "'SF Mono', monospace" }}>
           {((trimEnd - trimStart) * audioBuffer.duration).toFixed(1)}s
           {' '}(drag handles to trim)
         </div>
@@ -355,7 +355,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
       </button>
       {state === 'recording' && (
         <span style={{
-          fontSize: '10px',
+          fontSize: '15px',
           fontFamily: "'SF Mono', monospace",
           color: '#8b0000',
           opacity: 0.7,
@@ -364,7 +364,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
         </span>
       )}
       {state === 'idle' && (
-        <span style={{ fontSize: '10px', opacity: 0.2, fontStyle: 'italic' }}>
+        <span style={{ fontSize: '15px', opacity: 0.2, fontStyle: 'italic' }}>
           hold to record
         </span>
       )}

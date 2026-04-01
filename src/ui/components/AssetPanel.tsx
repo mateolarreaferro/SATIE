@@ -30,7 +30,7 @@ export function AssetPanel({
     border: `1px solid ${active ? '#1a3a2a' : '#d0cdc4'}`,
     borderRadius: 6,
     cursor: 'pointer',
-    fontSize: '9px',
+    fontSize: '16px',
     fontFamily: "'Inter', system-ui, sans-serif",
     fontWeight: 500,
     letterSpacing: '0.03em',
@@ -43,7 +43,7 @@ export function AssetPanel({
       display: 'flex',
       flexDirection: 'column',
       fontFamily: "'Inter', system-ui, sans-serif",
-      fontSize: '11px',
+      fontSize: '16px',
       color: '#1a3a2a',
     }}>
       {/* Tab bar */}
@@ -61,7 +61,7 @@ export function AssetPanel({
           Trajectories
         </button>
         <span style={{
-          fontSize: '8px',
+          fontSize: '16px',
           opacity: 0.2,
           marginLeft: 'auto',
           fontFamily: "'SF Mono', monospace",

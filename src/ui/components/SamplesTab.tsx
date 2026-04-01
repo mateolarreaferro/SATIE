@@ -43,7 +43,7 @@ function CategorySection({
         }}
       >
         <span style={{
-          fontSize: '8px',
+          fontSize: '16px',
           opacity: 0.3,
           transition: 'transform 0.15s',
           transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
@@ -52,7 +52,7 @@ function CategorySection({
           v
         </span>
         <span style={{
-          fontSize: '9px',
+          fontSize: '16px',
           fontWeight: 600,
           opacity: 0.4,
           textTransform: 'uppercase',
@@ -60,14 +60,14 @@ function CategorySection({
         }}>
           {title}
         </span>
-        <span style={{ fontSize: '9px', opacity: 0.2 }}>{items.length}</span>
+        <span style={{ fontSize: '16px', opacity: 0.2 }}>{items.length}</span>
       </div>
       {!collapsed && items.map((s) => (
         <div
           key={s.name}
           style={{
             padding: '2px 0 2px 12px',
-            fontSize: '11px',
+            fontSize: '16px',
             fontFamily: "'SF Mono', 'Consolas', monospace",
             opacity: 0.6,
             display: 'flex',
@@ -75,7 +75,7 @@ function CategorySection({
             gap: '4px',
           }}
         >
-          <span style={{ opacity: 0.3, fontSize: '9px' }}>
+          <span style={{ opacity: 0.3, fontSize: '16px' }}>
             {s.category === 'recorded' ? 'o' : s.category === 'generated' ? '*' : '\u266A'}
           </span>
           <span style={{
@@ -94,7 +94,7 @@ function CategorySection({
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                fontSize: '9px',
+                fontSize: '16px',
                 opacity: 0.3,
                 padding: '0 2px',
                 color: '#1a3a2a',
@@ -112,7 +112,7 @@ function CategorySection({
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                fontSize: '9px',
+                fontSize: '16px',
                 opacity: 0.3,
                 padding: '0 2px',
                 color: '#8b0000',
@@ -190,13 +190,13 @@ export function SamplesTab({ samples, onLoadBuffer, onDelete, onPreview }: Sampl
             border: '1px solid #d0cdc4',
             borderRadius: 8,
             cursor: 'pointer',
-            fontSize: '10px',
+            fontSize: '15px',
             fontFamily: 'inherit',
           }}
         >
           {isLoading ? '...' : '+ import'}
         </button>
-        <span style={{ opacity: 0.2, fontSize: '10px' }}>
+        <span style={{ opacity: 0.2, fontSize: '15px' }}>
           {samples.length > 0 ? `${samples.length} total` : ''}
         </span>
         <input
@@ -217,7 +217,7 @@ export function SamplesTab({ samples, onLoadBuffer, onDelete, onPreview }: Sampl
         {samples.length === 0 && (
           <div style={{
             opacity: dragOver ? 0.4 : 0.15,
-            fontSize: '10px',
+            fontSize: '15px',
             fontStyle: 'italic',
             padding: '8px 0',
             textAlign: 'center',

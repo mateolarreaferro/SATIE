@@ -413,38 +413,99 @@ function NoseTriangle({ color }: { color: string }) {
   );
 }
 
-function FaceMeshCloud({ color }: { color: string }) {
+// MediaPipe face contour connections — only indices < 468 (safe for all model variants)
+const FACE_CONTOURS = [
+  [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10],
+  [33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246,33],
+  [362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398,362],
+  [61,146,91,181,84,17,314,405,321,375,291,409,270,269,267,0,37,39,40,185,61],
+  [78,95,88,178,87,14,317,402,318,324,308,415,310,311,312,13,82,81,80,191,78],
+  [46,53,52,65,55,107,66,105,63,70],
+  [276,283,282,295,285,336,296,334,293,300],
+  [168,6,197,195,5,4,1,19],
+];
+
+function buildLinePairs(): number[] {
+  const pairs: number[] = [];
+  for (const c of FACE_CONTOURS) {
+    for (let i = 0; i < c.length - 1; i++) pairs.push(c[i], c[i + 1]);
+  }
+  return pairs;
+}
+const FACE_LINE_PAIRS = buildLinePairs();
+
+/** Convert a landmark index to local xyz, centered on a reference point */
+function landmarkToLocal(
+  positions: Float32Array, idx: number, scale: number, zScale: number,
+  out: Float32Array, outOffset: number,
+  cx: number, cy: number, cz: number,
+) {
+  out[outOffset]     = -(positions[idx * 3] - cx) * scale;
+  out[outOffset + 1] = -(positions[idx * 3 + 1] - cy) * scale;
+  out[outOffset + 2] = -(positions[idx * 3 + 2] - cz) * zScale;
+}
+
+/**
+ * Face mesh visualization — clean contour wireframe only (no dot cloud).
+ * Uses <primitive> to bypass R3F reconciler for performance.
+ */
+function FaceMeshViz({ color }: { color: string }) {
   const { faceMeshRef } = useContext(ListenerSyncContext);
-  const geoRef = useRef<THREE.BufferGeometry>(null);
+
+  const lines = useMemo(() => {
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(FACE_LINE_PAIRS.length * 3), 3));
+    const lm = new THREE.LineBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.85,
+    });
+    const ls = new THREE.LineSegments(lg, lm);
+    ls.frustumCulled = false;
+    ls.renderOrder = 1;
+    return ls;
+  }, []);
+
+  useEffect(() => {
+    (lines.material as THREE.LineBasicMaterial).color.set(color);
+  }, [color, lines]);
 
   useFrame(() => {
-    const mesh = faceMeshRef.current;
-    if (!mesh || !geoRef.current) return;
-    const pos = geoRef.current.getAttribute('position');
-    if (!pos || pos.count !== mesh.positions.length / 3) return;
-    const arr = pos.array as Float32Array;
-    const scale = 0.6;
-    for (let i = 0; i < mesh.positions.length / 3; i++) {
-      arr[i * 3] = -(mesh.positions[i * 3] - 0.5) * scale;
-      arr[i * 3 + 1] = -(mesh.positions[i * 3 + 1] - 0.5) * scale;
-      arr[i * 3 + 2] = -mesh.positions[i * 3 + 2] * scale * 0.5;
+    const data = faceMeshRef.current;
+    if (!data) return;
+
+    const numLandmarks = Math.min(Math.floor(data.positions.length / 3), 468);
+    const scale = 4.0;
+    const zScale = 6.0;
+
+    // Center on nose tip (landmark 1)
+    const cx = data.positions[1 * 3];
+    const cy = data.positions[1 * 3 + 1];
+    const cz = data.positions[1 * 3 + 2];
+
+    const lAttr = lines.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const lArr = lAttr.array as Float32Array;
+    for (let i = 0; i < FACE_LINE_PAIRS.length; i++) {
+      const li = FACE_LINE_PAIRS[i];
+      if (li < numLandmarks) {
+        landmarkToLocal(data.positions, li, scale, zScale, lArr, i * 3, cx, cy, cz);
+      }
     }
-    pos.needsUpdate = true;
+    lAttr.needsUpdate = true;
+    lines.geometry.computeBoundingSphere();
   });
 
-  return (
-    <points>
-      <bufferGeometry ref={geoRef}>
-        <bufferAttribute attach="attributes-position" args={[new Float32Array(478 * 3), 3]} />
-      </bufferGeometry>
-      <pointsMaterial color={color} size={0.008} sizeAttenuation />
-    </points>
-  );
+  useEffect(() => () => {
+    lines.geometry.dispose();
+    (lines.material as THREE.Material).dispose();
+  }, [lines]);
+
+  return <primitive object={lines} />;
 }
 
 function Listener({ color, faceTrackingActive }: { color: string; faceTrackingActive: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
-  const { listenerPosRef, listenerForwardRef } = useContext(ListenerSyncContext);
+  const { listenerPosRef, listenerForwardRef, faceMeshRef } = useContext(ListenerSyncContext);
 
   useFrame(() => {
     if (!groupRef.current) return;
@@ -453,17 +514,68 @@ function Listener({ color, faceTrackingActive }: { color: string; faceTrackingAc
       listenerPosRef.current.y + 0.02,
       listenerPosRef.current.z,
     );
-    const fwd = listenerForwardRef.current;
-    groupRef.current.rotation.y = Math.atan2(-fwd.x, -fwd.z);
+
+    if (faceTrackingActive && faceMeshRef.current) {
+      // Apply tracked yaw/pitch directly to the group — this IS the rotation visualization
+      const { yaw, pitch } = faceMeshRef.current;
+      groupRef.current.rotation.order = 'YXZ';
+      groupRef.current.rotation.y = yaw;
+      groupRef.current.rotation.x = pitch;
+    } else {
+      const fwd = listenerForwardRef.current;
+      groupRef.current.rotation.order = 'YXZ';
+      groupRef.current.rotation.y = Math.atan2(-fwd.x, -fwd.z);
+      groupRef.current.rotation.x = 0;
+    }
   });
 
   return (
     <group ref={groupRef} position={[0, 0.02, 0]}>
       {faceTrackingActive ? (
-        <FaceMeshCloud color={color} />
+        <FaceMeshViz color={color} />
       ) : (
         <NoseTriangle color={color} />
       )}
+    </group>
+  );
+}
+
+// Hearing cone — shows HRTF listening direction
+function HearingCone({ color }: { color: string }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const { listenerPosRef, listenerForwardRef } = useContext(ListenerSyncContext);
+
+  const coneGeo = useMemo(() => {
+    // Cone: tip at origin, opens toward -Z (the "forward" direction)
+    const geo = new THREE.ConeGeometry(0.45, 1.2, 16, 1, true);
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, 0, -0.6);
+    return geo;
+  }, []);
+
+  const _defaultDir = useMemo(() => new THREE.Vector3(0, 0, -1), []);
+  const _target = useMemo(() => new THREE.Vector3(), []);
+  const _quat = useMemo(() => new THREE.Quaternion(), []);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    const pos = listenerPosRef.current;
+    groupRef.current.position.set(pos.x, pos.y + 0.02, pos.z);
+
+    const fwd = listenerForwardRef.current;
+    _target.set(fwd.x, fwd.y, fwd.z);
+    if (_target.lengthSq() > 0.001) {
+      _target.normalize();
+      _quat.setFromUnitVectors(_defaultDir, _target);
+      groupRef.current.quaternion.copy(_quat);
+    }
+  });
+
+  return (
+    <group ref={groupRef}>
+      <mesh geometry={coneGeo}>
+        <meshBasicMaterial color={color} transparent opacity={0.035} side={THREE.DoubleSide} depthWrite={false} />
+      </mesh>
     </group>
   );
 }
@@ -712,6 +824,7 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
         />
       )}
       <Listener color={listenerColor} faceTrackingActive={listenerSync.externalTrackingActive} />
+      <HearingCone color={listenerColor} />
       <AudioSourcePool tracksRef={tracksRef} />
       <FlyControls />
       <AxisGizmo />
@@ -735,11 +848,13 @@ function CanvasResizer({ containerRef }: { containerRef: React.RefObject<HTMLDiv
     const observer = new ResizeObserver(() => {
       const el = containerRef.current;
       if (!el) return;
-      const { clientWidth, clientHeight } = el;
-      if (clientWidth > 0 && clientHeight > 0) {
-        gl.setSize(clientWidth, clientHeight);
+      const rect = el.getBoundingClientRect();
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      if (w > 0 && h > 0) {
+        gl.setSize(w, h, false);
         if ('aspect' in camera) {
-          (camera as THREE.PerspectiveCamera).aspect = clientWidth / clientHeight;
+          (camera as THREE.PerspectiveCamera).aspect = w / h;
           (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
         }
       }
@@ -827,7 +942,7 @@ function HeadingIndicator({ forwardRef, color, faceTrackingActive }: {
       <canvas ref={canvasRef} width={36} height={36} style={{ width: 36, height: 36 }} />
       {faceTrackingActive && (
         <div style={{
-          fontSize: 8,
+          fontSize: 12,
           fontFamily: "'SF Mono', monospace",
           color,
           opacity: 0.5,
@@ -912,13 +1027,13 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
       <Canvas
         camera={{ position: [4, 6, 8], fov: 55 }}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+        resize={{ scroll: false, debounce: 0, offsetSize: true }}
         gl={{ alpha: true, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.setClearColor(bgColor, 1);
         }}
       >
         <BgColorUpdater color={bgColor} />
-        <CanvasResizer containerRef={containerRef} />
         <CameraResetContext.Provider value={cameraResetRef}>
           <CameraZoomContext.Provider value={cameraZoomRef}>
             <CameraFitContext.Provider value={cameraFitRef}>
@@ -935,8 +1050,8 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
           onClick={() => setGridVisible(v => !v)}
           title={gridVisible ? 'Hide grid' : 'Show grid'}
           style={{
-            width: 20,
-            height: 20,
+            width: 28,
+            height: 28,
             borderRadius: 4,
             background: gridVisible ? uiColor : 'none',
             border: `1.5px solid ${uiColor}40`,
@@ -948,7 +1063,7 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
             opacity: gridVisible ? 1 : 0.7,
           }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={gridVisible ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={gridVisible ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round">
             <line x1="3" y1="3" x2="3" y2="21" />
             <line x1="9" y1="3" x2="9" y2="21" />
             <line x1="15" y1="3" x2="15" y2="21" />
@@ -966,8 +1081,8 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
           }}
           title="Reset listener to origin"
           style={{
-            width: 20,
-            height: 20,
+            width: 28,
+            height: 28,
             borderRadius: 4,
             background: 'none',
             border: `1.5px solid ${uiColor}40`,
@@ -977,7 +1092,7 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
             justifyContent: 'center',
             padding: 0,
             color: uiColor,
-            fontSize: '11px',
+            fontSize: '16px',
             fontFamily: "'SF Mono', monospace",
             lineHeight: 1,
             opacity: 0.7,
@@ -985,38 +1100,74 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
         >
           +
         </button>
-        {/* Webcam face tracking — only optional toggle */}
-        <button
-          onClick={faceTracking.toggle}
-          title={faceTracking.enabled ? 'Disable face tracking' : faceTracking.loading ? 'Loading...' : 'Enable face tracking (webcam)'}
-          disabled={faceTracking.loading}
-          style={{
-            width: 20,
-            height: 20,
-            borderRadius: 4,
-            background: faceTracking.enabled ? uiColor : 'none',
-            border: `1.5px solid ${uiColor}40`,
-            cursor: faceTracking.loading ? 'wait' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 0,
-            opacity: faceTracking.enabled ? 1 : faceTracking.loading ? 0.4 : 0.7,
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={faceTracking.enabled ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            {/* Camera/eye icon */}
-            <circle cx="12" cy="10" r="3" />
-            <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
-          </svg>
-        </button>
+        {/* Webcam face tracking toggle + error display */}
+        <div style={{ position: 'relative' }}>
+          {faceTracking.error && (
+            <div style={{
+              position: 'absolute',
+              bottom: 26,
+              right: 0,
+              background: '#8b0000',
+              color: '#fff',
+              fontSize: 12,
+              fontFamily: "'SF Mono', monospace",
+              padding: '3px 6px',
+              borderRadius: 4,
+              whiteSpace: 'nowrap',
+              maxWidth: 200,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}>
+              {faceTracking.error}
+            </div>
+          )}
+          {faceTracking.loading && (
+            <div style={{
+              position: 'absolute',
+              bottom: 26,
+              right: 0,
+              background: uiColor,
+              color: bgColor,
+              fontSize: 12,
+              fontFamily: "'SF Mono', monospace",
+              padding: '3px 6px',
+              borderRadius: 4,
+              whiteSpace: 'nowrap',
+            }}>
+              Loading model...
+            </div>
+          )}
+          <button
+            onClick={faceTracking.toggle}
+            title={faceTracking.enabled ? 'Disable face tracking' : faceTracking.loading ? 'Loading...' : 'Enable face tracking (webcam)'}
+            disabled={faceTracking.loading}
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 4,
+              background: faceTracking.error ? '#8b0000' : faceTracking.enabled ? uiColor : 'none',
+              border: `1.5px solid ${faceTracking.error ? '#8b0000' : uiColor + '40'}`,
+              cursor: faceTracking.loading ? 'wait' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              opacity: faceTracking.enabled ? 1 : faceTracking.loading ? 0.4 : 0.7,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={faceTracking.enabled || faceTracking.error ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="10" r="3" />
+              <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
+            </svg>
+          </button>
+        </div>
         {onBgColorChange && (
           <div>
             <div
               onClick={() => setShowPicker(!showPicker)}
               style={{
-                width: 20,
-                height: 20,
+                width: 28,
+                height: 28,
                 borderRadius: 4,
                 background: bgColor,
                 border: `1.5px solid ${uiColor}40`,

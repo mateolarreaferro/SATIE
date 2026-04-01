@@ -104,7 +104,7 @@ export function TrajectoriesTab({ onGenerateTrajectory, generatingTrajectory }: 
         {generatingTrajectory && (
           <div style={{
             padding: '6px 0',
-            fontSize: '10px',
+            fontSize: '15px',
             fontFamily: "'SF Mono', monospace",
             opacity: 0.4,
             fontStyle: 'italic',
@@ -117,7 +117,7 @@ export function TrajectoriesTab({ onGenerateTrajectory, generatingTrajectory }: 
       {/* Hint */}
       <div style={{
         padding: '4px 0 2px',
-        fontSize: '9px',
+        fontSize: '16px',
         opacity: 0.15,
         fontStyle: 'italic',
         flexShrink: 0,
@@ -156,7 +156,7 @@ function Section({
         }}
       >
         <span style={{
-          fontSize: '8px',
+          fontSize: '16px',
           opacity: 0.3,
           transition: 'transform 0.15s',
           transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
@@ -165,7 +165,7 @@ function Section({
           v
         </span>
         <span style={{
-          fontSize: '9px',
+          fontSize: '16px',
           fontWeight: 600,
           opacity: 0.4,
           textTransform: 'uppercase',
@@ -173,7 +173,7 @@ function Section({
         }}>
           {title}
         </span>
-        <span style={{ fontSize: '9px', opacity: 0.2 }}>{items.length}</span>
+        <span style={{ fontSize: '16px', opacity: 0.2 }}>{items.length}</span>
       </div>
       {!collapsed && items.map((t) => (
         <div
@@ -188,7 +188,7 @@ function Section({
           <TrajectoryPreview name={t.name} size={24} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
-              fontSize: '11px',
+              fontSize: '16px',
               fontFamily: "'SF Mono', 'Consolas', monospace",
               opacity: 0.6,
               overflow: 'hidden',
@@ -199,7 +199,7 @@ function Section({
             </div>
             {t.description && (
               <div style={{
-                fontSize: '9px',
+                fontSize: '16px',
                 opacity: 0.25,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -217,7 +217,7 @@ function Section({
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                fontSize: '9px',
+                fontSize: '16px',
                 opacity: 0.3,
                 padding: '0 2px',
                 color: '#8b0000',

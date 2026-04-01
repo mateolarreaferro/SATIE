@@ -19,7 +19,7 @@ function loadLandmarker(): Promise<FaceLandmarker> {
       baseOptions: {
         modelAssetPath:
           'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-        delegate: 'CPU',
+        delegate: 'GPU',
       },
       runningMode: 'VIDEO',
       numFaces: 1,
@@ -98,7 +98,7 @@ export function useFaceTracking(
       setEnabled(true);
 
       let last = 0;
-      const step = 1000 / 15; // 15 fps
+      const step = 1000 / 24; // 24 fps
 
       const loop = () => {
         if (!videoRef.current || !lmRef.current) return;
@@ -110,8 +110,8 @@ export function useFaceTracking(
             if (res.faceLandmarks?.[0]) {
               const lm = res.faceLandmarks[0];
               const { yaw, pitch } = estimateYawPitch(lm);
-              syaw.current += (yaw - syaw.current) * 0.18;
-              spitch.current += (pitch - spitch.current) * 0.18;
+              syaw.current += (yaw - syaw.current) * 0.1;
+              spitch.current += (pitch - spitch.current) * 0.1;
 
               const y = syaw.current;
               const p = spitch.current;
@@ -137,6 +137,7 @@ export function useFaceTracking(
       };
       rafRef.current = requestAnimationFrame(loop);
     } catch (e: any) {
+      console.warn('[FaceTracking] Failed to start:', e);
       setLoading(false);
       setError(e.message || 'Camera access denied');
       _landmarkerPromise = null; // allow retry

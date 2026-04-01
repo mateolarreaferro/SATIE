@@ -37,7 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div style={{
           padding: '16px',
-          fontSize: '11px',
+          fontSize: '16px',
           fontFamily: "'SF Mono', monospace",
           color: '#8b0000',
           display: 'flex',
@@ -51,7 +51,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <div style={{ fontWeight: 600 }}>
             {this.props.name ? `${this.props.name} crashed` : 'Something went wrong'}
           </div>
-          <div style={{ fontSize: '9px', opacity: 0.6, maxWidth: 200, textAlign: 'center', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '16px', opacity: 0.6, maxWidth: 200, textAlign: 'center', wordBreak: 'break-word' }}>
             {this.state.error?.message}
           </div>
           <button
@@ -62,7 +62,7 @@ export class ErrorBoundary extends Component<Props, State> {
               border: '1px solid #8b0000',
               borderRadius: 6,
               cursor: 'pointer',
-              fontSize: '10px',
+              fontSize: '15px',
               color: '#8b0000',
               fontFamily: "'Inter', system-ui, sans-serif",
               marginTop: '4px',

@@ -292,7 +292,7 @@ const navStyle: React.CSSProperties = {
 
 const navBtnStyle = (active: boolean): React.CSSProperties => ({
   padding: '3px 8px',
-  fontSize: '10px',
+  fontSize: '15px',
   fontFamily: "'Inter', system-ui, sans-serif",
   background: active ? '#1a3a2a' : 'transparent',
   color: active ? '#faf9f6' : '#1a3a2a',
@@ -306,7 +306,7 @@ const contentStyle: React.CSSProperties = {
   flex: 1,
   overflow: 'auto',
   padding: '12px 16px',
-  fontSize: '12px',
+  fontSize: '16px',
   fontFamily: "'Inter', system-ui, sans-serif",
   color: '#1a1a1a',
   lineHeight: 1.6,
@@ -376,7 +376,7 @@ function MarkdownRenderer({ content }: { content: string }) {
           borderRadius: 8,
           padding: '10px 12px',
           margin: '8px 0',
-          fontSize: '11px',
+          fontSize: '16px',
           fontFamily: "'SF Mono', 'Fira Code', monospace",
           lineHeight: 1.5,
           overflow: 'auto',
@@ -402,7 +402,7 @@ function MarkdownRenderer({ content }: { content: string }) {
     // Bold text: **text**
     if (line.startsWith('**') && line.endsWith('**')) {
       elements.push(
-        <p key={i} style={{ fontWeight: 600, margin: '10px 0 4px', fontSize: '12px' }}>
+        <p key={i} style={{ fontWeight: 600, margin: '10px 0 4px', fontSize: '16px' }}>
           {line.slice(2, -2)}
         </p>
       );
@@ -413,7 +413,7 @@ function MarkdownRenderer({ content }: { content: string }) {
     // Regular paragraph
     if (line.trim()) {
       elements.push(
-        <p key={i} style={{ margin: '4px 0', fontSize: '12px' }}>
+        <p key={i} style={{ margin: '4px 0', fontSize: '16px' }}>
           <InlineMarkdown text={line} />
         </p>
       );
@@ -438,7 +438,7 @@ function InlineMarkdown({ text }: { text: string }) {
               background: '#f0efe8',
               padding: '1px 5px',
               borderRadius: 3,
-              fontSize: '11px',
+              fontSize: '16px',
               fontFamily: "'SF Mono', monospace",
             }}>
               {part.slice(1, -1)}
@@ -470,7 +470,7 @@ function SimpleTable({ lines }: { lines: string[] }) {
       borderCollapse: 'collapse',
       width: '100%',
       margin: '8px 0',
-      fontSize: '11px',
+      fontSize: '16px',
     }}>
       <thead>
         <tr>
@@ -481,7 +481,7 @@ function SimpleTable({ lines }: { lines: string[] }) {
               borderBottom: '1.5px solid #d0cdc4',
               fontWeight: 600,
               color: '#1a3a2a',
-              fontSize: '10px',
+              fontSize: '15px',
             }}>
               <InlineMarkdown text={h} />
             </th>
@@ -495,7 +495,7 @@ function SimpleTable({ lines }: { lines: string[] }) {
               <td key={ci} style={{
                 padding: '3px 8px',
                 borderBottom: '1px solid #e8e0d8',
-                fontSize: '11px',
+                fontSize: '16px',
               }}>
                 <InlineMarkdown text={cell} />
               </td>

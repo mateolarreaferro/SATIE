@@ -22,13 +22,12 @@ button:active {
   transform: scale(0.95);
 }
 
-/* Dashboard sketch cards */
+/* Dashboard sketch cards — no transform transition (animated via rAF) */
 .sketch-card {
-  transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+  transition: box-shadow 0.2s, border-color 0.2s;
 }
 
 .sketch-card:hover {
-  border-color: #0a0a0a !important;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1) !important;
 }
 
@@ -142,5 +141,77 @@ input:focus {
 
 /* Volume slider */
 input[type="range"]:hover {
+  opacity: 0.6 !important;
+}
+
+/* Credits buttons */
+.credits-btn {
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s !important;
+}
+
+.credits-btn:hover {
+  transform: translateY(-1px) scale(1.05);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.25) !important;
+}
+
+.credits-btn:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Header links */
+.header-link {
+  transition: opacity 0.15s, transform 0.15s !important;
+}
+
+.header-link:hover {
+  opacity: 0.6 !important;
+  transform: translateY(-0.5px);
+}
+
+/* Template buttons */
+.template-btn:hover {
+  border-color: #1a3a2a !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Gallery cards — no transform transition (animated via rAF) */
+.gallery-card {
+  transition: box-shadow 0.2s;
+}
+
+.gallery-card:hover {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Theme toggle buttons */
+.theme-toggle-btn {
+  transition: all 0.2s, background 0.2s, color 0.2s !important;
+}
+
+.theme-toggle-btn:hover {
+  opacity: 0.6 !important;
+}
+
+.theme-toggle-btn:active {
+  transform: scale(0.92);
+}
+
+/* Settings icon button */
+.settings-icon-btn {
+  transition: opacity 0.15s, transform 0.15s !important;
+}
+
+.settings-icon-btn:hover {
+  opacity: 0.7 !important;
+  transform: scale(1.1);
+}
+
+/* Sign out link */
+.signout-btn {
+  transition: opacity 0.15s !important;
+}
+
+.signout-btn:hover {
   opacity: 0.6 !important;
 }
