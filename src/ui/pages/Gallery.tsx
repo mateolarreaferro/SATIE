@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../../lib/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { getPublicSketches } from '../../lib/sketches';
 import { useSFX } from '../hooks/useSFX';
-import { useDayNightCycle, type ThemeMode, type Theme } from '../hooks/useDayNightCycle';
+import { useDayNightCycle, type Theme } from '../hooks/useDayNightCycle';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { RiverCanvas } from '../components/RiverCanvas';
+import { Header } from '../components/Header';
 import type { Sketch } from '../../lib/supabase';
 
 // ── Physics (shared logic with Dashboard) ──
@@ -297,7 +297,6 @@ function GalleryCard({ sketch, body, index, draggingRef, onClick, sfx, formatDat
 // ── Gallery page ──
 
 export function Gallery() {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const sfx = useSFX();
   useBackgroundMusic('/Satie-Theme.wav', 0.08);
@@ -333,66 +332,7 @@ export function Gallery() {
       position: 'relative',
     }}>
       <RiverCanvas mode={mode} />
-      {/* Header */}
-      <header style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '16px 32px',
-        borderBottom: `1px solid ${theme.border}`,
-        flexShrink: 0,
-      }}>
-        {/* Left — theme toggle */}
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 2 }}>
-            {(['light', 'fade', 'dark'] as ThemeMode[]).map(m => (
-              <button
-                key={m}
-                className="theme-toggle-btn"
-                onClick={() => { sfx.click(); setMode(m); }}
-                onMouseEnter={sfx.hover}
-                style={{
-                  padding: '2px 7px',
-                  fontSize: '16px',
-                  fontFamily: "'Inter', system-ui, sans-serif",
-                  fontWeight: mode === m ? 600 : 400,
-                  background: mode === m ? theme.invertedBg : 'transparent',
-                  color: mode === m ? theme.invertedText : theme.text,
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  opacity: mode === m ? 1 : 0.25,
-                  transition: 'all 0.2s',
-                  letterSpacing: '0.02em',
-                }}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Center — logo + explore */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
-          <Link to="/" className="header-link" onMouseEnter={sfx.hover} onClick={sfx.click} style={{ textDecoration: 'none', color: theme.text, fontSize: '24px', fontWeight: 700, letterSpacing: '0.06em' }}>
-            satie
-          </Link>
-          <span style={{ fontSize: '16px', fontWeight: 400, opacity: mode === 'fade' ? 0.45 : 0.25 }}>explore</span>
-        </div>
-
-        {/* Right — nav link */}
-        <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
-          {user ? (
-            <Link to="/" className="header-link" onMouseEnter={sfx.hover} onClick={sfx.click} style={{ fontSize: '16px', color: theme.text, opacity: mode === 'fade' ? 0.45 : 0.25, textDecoration: 'none', fontWeight: 400 }}>
-              dashboard
-            </Link>
-          ) : (
-            <Link to="/" className="header-link" onMouseEnter={sfx.hover} onClick={sfx.click} style={{ fontSize: '16px', color: theme.text, opacity: mode === 'fade' ? 0.45 : 0.25, textDecoration: 'none', fontWeight: 400 }}>
-              sign in
-            </Link>
-          )}
-        </div>
-      </header>
+      <Header theme={theme} mode={mode} setMode={setMode} />
 
       {/* Floating cards canvas */}
       <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>

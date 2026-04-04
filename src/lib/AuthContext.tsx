@@ -13,6 +13,16 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+/** Claim free signup credits (idempotent — no-ops if already claimed) */
+async function claimFreeCredits(accessToken: string) {
+  try {
+    await fetch('/api/stripe/claim-free-credits', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+  } catch { /* endpoint may not be deployed yet */ }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -29,6 +39,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (_event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
+        // Claim free credits for new users (fire-and-forget, idempotent)
+        if (session?.access_token) {
+          claimFreeCredits(session.access_token);
+        }
       }
     );
 

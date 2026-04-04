@@ -131,13 +131,11 @@ export function SketchView() {
     <div style={styles.container}>
       {/* Header */}
       <header style={styles.header}>
-        <Link to="/explore" style={{ textDecoration: 'none', color: '#0a0a0a' }}>
-          <div style={{ fontSize: '16px', fontWeight: 700, letterSpacing: '0.04em' }}>
-            satie
-          </div>
+        <Link to="/" style={{ textDecoration: 'none', color: '#0a0a0a', fontSize: '22px', fontWeight: 700, letterSpacing: '0.06em' }}>
+          satie
         </Link>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {user && (
             <button
               onClick={handleLike}
@@ -145,26 +143,64 @@ export function SketchView() {
                 ...styles.actionBtn,
                 color: liked ? '#8b0000' : '#0a0a0a',
                 borderColor: liked ? '#8b0000' : '#0a0a0a',
+                display: 'flex', alignItems: 'center', gap: 5,
               }}
             >
-              {liked ? 'Liked' : 'Like'}{likeCount > 0 ? ` (${likeCount})` : ''}
+              {/* Heart icon */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill={liked ? '#8b0000' : 'none'} stroke={liked ? '#8b0000' : '#0a0a0a'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              </svg>
+              {likeCount > 0 ? likeCount : ''}
             </button>
           )}
           {!user && likeCount > 0 && (
-            <span style={{ fontSize: '16px', opacity: 0.35 }}>{likeCount} likes</span>
+            <span style={{ fontSize: '15px', opacity: 0.35, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+              </svg>
+              {likeCount}
+            </span>
           )}
           {user && (
-            <button onClick={handleFork} style={styles.actionBtn}>
+            <button onClick={handleFork} style={{ ...styles.actionBtn, display: 'flex', alignItems: 'center', gap: 5 }}>
+              {/* Fork/git-branch icon */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="6" y1="3" x2="6" y2="15" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+              </svg>
               Fork{(sketch.fork_count ?? 0) > 0 ? ` (${sketch.fork_count})` : ''}
             </button>
           )}
           {user && sketch.user_id === user.id && (
-            <button onClick={() => navigate(`/editor/${sketch.id}`)} style={styles.actionBtn}>
+            <button onClick={() => navigate(`/editor/${sketch.id}`)} style={{ ...styles.actionBtn, display: 'flex', alignItems: 'center', gap: 5 }}>
+              {/* Edit/pencil icon */}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
               Edit
             </button>
           )}
-          <button onClick={handlePlay} style={styles.playBtn}>
-            {uiState.isPlaying ? 'Stop' : 'Play'}
+          <button onClick={handlePlay} style={{ ...styles.playBtn, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {uiState.isPlaying ? (
+              <>
+                {/* Stop/square icon */}
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="#faf9f6" stroke="none">
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                </svg>
+                Stop
+              </>
+            ) : (
+              <>
+                {/* Play/triangle icon */}
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="#faf9f6" stroke="none">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Play
+              </>
+            )}
           </button>
         </div>
       </header>

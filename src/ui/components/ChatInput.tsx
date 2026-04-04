@@ -51,7 +51,7 @@ export function ChatInput({ onSend, disabled, theme }: ChatInputProps) {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="What would you like to hear?"
+          placeholder="a forest at dawn with birds circling overhead..."
           disabled={disabled}
           style={{
             flex: 1,

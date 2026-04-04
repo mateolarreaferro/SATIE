@@ -10,12 +10,13 @@ let ctx: AudioContext | null = null;
 let source: AudioBufferSourceNode | null = null;
 let gain: GainNode | null = null;
 let started = false;
+let killed = false; // true after explicit stopBackgroundMusic() — prevents restart
 let audioData: ArrayBuffer | null = null;
 let activeCount = 0; // number of mounted components using the music
 let fetchingFor: string | null = null;
 
 function tryStart(volume: number) {
-  if (started || !audioData) return;
+  if (started || !audioData || killed) return;
 
   const c = new AudioContext();
   if (c.state === 'suspended') {
@@ -69,6 +70,13 @@ function stopMusic() {
   fetchingFor = null;
 }
 
+/** Imperatively stop background music (e.g. when user starts generating). Permanent — won't restart. */
+export function stopBackgroundMusic() {
+  killed = true;
+  stopMusic();
+  activeCount = 0;
+}
+
 /**
  * Hook: call from any page that should have background music.
  * Music continues seamlessly when navigating between pages that both call this hook.
@@ -93,6 +101,7 @@ export function useBackgroundMusic(src: string, volume = 0.08) {
     }
 
     function onGesture() {
+      if (killed) return;
       if (started) {
         if (ctx?.state === 'suspended') ctx.resume();
         return;

@@ -82,16 +82,23 @@ export function UserProfile() {
     <div style={styles.container}>
       {/* Header */}
       <header style={styles.header}>
-        <Link to="/explore" style={{ textDecoration: 'none', color: '#0a0a0a' }}>
-          <div style={{ fontSize: '16px', fontWeight: 700, letterSpacing: '0.04em' }}>satie</div>
+        <Link to="/" style={{ textDecoration: 'none', color: '#0a0a0a', fontSize: '22px', fontWeight: 700, letterSpacing: '0.06em' }}>
+          satie
         </Link>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Link to="/explore" style={{ fontSize: '16px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Link to="/explore" style={{ fontSize: '15px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="#0a0a0a" stroke="none" />
+            </svg>
             explore
           </Link>
           {user && (
-            <Link to="/" style={{ fontSize: '16px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none' }}>
-              dashboard
+            <Link to="/sketches" style={{ fontSize: '15px', color: '#0a0a0a', opacity: 0.35, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              sketches
             </Link>
           )}
         </div>

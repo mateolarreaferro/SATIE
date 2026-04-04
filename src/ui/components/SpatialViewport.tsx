@@ -13,6 +13,19 @@ const CameraResetContext = createContext<React.MutableRefObject<(() => void) | n
 const CameraZoomContext = createContext<React.MutableRefObject<((dir: number) => void) | null>>({ current: null });
 const CameraFitContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
 const OverlayModeContext = createContext<boolean>(false);
+/** Whether the viewport background is dark — voices should use lighter colors */
+const DarkBgContext = createContext<boolean>(false);
+
+const DEFAULT_VOICE_COLOR = '#1a3a2a';
+const LIGHT_BG_VOICE_COLORS = ['#7cb8a4', '#8ec4b0', '#a0d0bc', '#92c8b4', '#86c0aa'];
+const DARK_BG_VOICE_COLORS = ['#c8ece0', '#d4f0e8', '#e0f4ee', '#bce4d6', '#b0dccc'];
+
+/** Remap the default dark voice color to lighter alternatives based on background */
+function remapColor(trackColor: string, isDarkBg: boolean, seed: number): string {
+  if (trackColor.toLowerCase() !== DEFAULT_VOICE_COLOR) return trackColor;
+  const palette = isDarkBg ? DARK_BG_VOICE_COLORS : LIGHT_BG_VOICE_COLORS;
+  return palette[Math.abs(Math.round(seed * 100)) % palette.length];
+}
 
 interface ListenerSync {
   onMove?: (x: number, y: number, z: number) => void;
@@ -84,6 +97,7 @@ function useAudioSourceFrame(
 ) {
   const labelTexRef = useRef<THREE.CanvasTexture | null>(null);
   const prevLabel = useRef<string>('');
+  const isDarkBg = useContext(DarkBgContext);
 
   useFrame(() => {
     const track = trackRef.current;
@@ -97,9 +111,10 @@ function useAudioSourceFrame(
     }
 
     if (matRef.current) {
-      matRef.current.color.set(track.color);
-      matRef.current.emissive.set(track.color);
-      matRef.current.opacity = track.alpha * 0.8;
+      const displayColor = remapColor(track.color, isDarkBg, track.seed);
+      matRef.current.color.set(displayColor);
+      matRef.current.emissive.set(displayColor);
+      matRef.current.opacity = track.alpha * 0.85;
     }
 
     if (labelRef.current) {
@@ -139,7 +154,7 @@ function useAudioSourceFrame(
 
         // Background pill
         const r = H * 0.38;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.52)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
         ctx.beginPath();
         ctx.moveTo(r, 0);
         ctx.lineTo(W - r, 0);
@@ -185,14 +200,14 @@ function SphereGeo({ meshRef, matRef }: {
 }) {
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[1, 24, 24]} />
+      <sphereGeometry args={[1, 32, 32]} />
       <meshStandardMaterial
         ref={matRef}
-        emissiveIntensity={0.3}
+        emissiveIntensity={0.6}
         transparent
-        opacity={0.8}
-        roughness={0.6}
-        wireframe
+        opacity={0.85}
+        roughness={0.2}
+        metalness={0.3}
       />
     </mesh>
   );
@@ -207,11 +222,11 @@ function CubeGeo({ meshRef, matRef }: {
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial
         ref={matRef}
-        emissiveIntensity={0.3}
+        emissiveIntensity={0.6}
         transparent
-        opacity={0.8}
-        roughness={0.6}
-        wireframe
+        opacity={0.85}
+        roughness={0.2}
+        metalness={0.3}
       />
     </mesh>
   );
@@ -270,17 +285,19 @@ function AudioSourceTrailOnly({ trackRef }: { trackRef: React.RefObject<TrackSta
   const labelRef = useRef<THREE.Sprite>(null);
   const trailRef = useRef<any>(null);
   const overlayMode = useContext(OverlayModeContext);
+  const isDarkBg = useContext(DarkBgContext);
 
   useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
 
   useFrame(() => {
     const track = trackRef.current;
     if (!track || !trailRef.current) return;
+    const displayColor = remapColor(track.color, isDarkBg, track.seed);
     const mat = trailRef.current.material as any;
     if (mat?.uniforms?.color) {
-      mat.uniforms.color.value.set(track.color);
+      mat.uniforms.color.value.set(displayColor);
     } else if (mat?.color) {
-      mat.color.set(track.color);
+      mat.color.set(displayColor);
     }
   });
 
@@ -291,14 +308,14 @@ function AudioSourceTrailOnly({ trackRef }: { trackRef: React.RefObject<TrackSta
     <>
       <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
         <mesh ref={meshRef}>
-          <sphereGeometry args={[1, 24, 24]} />
+          <sphereGeometry args={[1, 32, 32]} />
           <meshStandardMaterial
             ref={matRef}
-            emissiveIntensity={0.3}
+            emissiveIntensity={0.6}
             transparent
-            opacity={0.8}
-            roughness={0.6}
-            wireframe
+            opacity={0.85}
+            roughness={0.2}
+            metalness={0.3}
           />
         </mesh>
       </Trail>
@@ -315,17 +332,19 @@ function AudioSourceTrailMesh({ trackRef, shape }: { trackRef: React.RefObject<T
   const labelRef = useRef<THREE.Sprite>(null);
   const trailRef = useRef<any>(null);
   const overlayMode = useContext(OverlayModeContext);
+  const isDarkBg = useContext(DarkBgContext);
 
   useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
 
   useFrame(() => {
     const track = trackRef.current;
     if (!track || !trailRef.current) return;
+    const displayColor = remapColor(track.color, isDarkBg, track.seed);
     const mat = trailRef.current.material as any;
     if (mat?.uniforms?.color) {
-      mat.uniforms.color.value.set(track.color);
+      mat.uniforms.color.value.set(displayColor);
     } else if (mat?.color) {
-      mat.color.set(track.color);
+      mat.color.set(displayColor);
     }
   });
 
@@ -338,15 +357,15 @@ function AudioSourceTrailMesh({ trackRef, shape }: { trackRef: React.RefObject<T
         <mesh ref={meshRef}>
           {shape === 'cube'
             ? <boxGeometry args={[1, 1, 1]} />
-            : <sphereGeometry args={[1, 24, 24]} />
+            : <sphereGeometry args={[1, 32, 32]} />
           }
           <meshStandardMaterial
             ref={matRef}
-            emissiveIntensity={0.3}
+            emissiveIntensity={0.6}
             transparent
-            opacity={0.8}
-            roughness={0.6}
-            wireframe
+            opacity={0.85}
+            roughness={0.2}
+            metalness={0.3}
           />
         </mesh>
       </Trail>
@@ -644,51 +663,82 @@ function HearingCone({ color }: { color: string }) {
 }
 
 // Overlay fly controls — WASD + right-click when no text input is focused
+/** FPS controls for overlay: click anywhere to toggle mouse-look, WASD to move.
+ *  Camera IS the listener — spatial audio follows your perspective.
+ *  Dispatches 'satie-mouselook' CustomEvent so the Chat UI can show the lock state. */
 function OverlayFlyControls() {
   const { camera } = useThree();
-  const controlsRef = useRef<OrbitControlsImpl>(null);
+  const listenerSync = useContext(ListenerSyncContext);
+  const listenerSyncRef = useRef(listenerSync);
+  listenerSyncRef.current = listenerSync;
   const keysDown = useRef(new Set<string>());
-  const rightMouseDown = useRef(false);
-  const flySpeed = 5;
+  const mouseLocked = useRef(false);
+  const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+  const flySpeed = 6;
+  const lookSensitivity = 0.003;
 
   const isInputFocused = useCallback(() => {
     const el = document.activeElement;
-    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ||
+           el?.closest('header') != null || el?.closest('nav') != null;
   }, []);
 
+  const setLocked = useCallback((v: boolean) => {
+    mouseLocked.current = v;
+    window.dispatchEvent(new CustomEvent('satie-mouselook', { detail: v }));
+  }, []);
+
+  // Initialize euler from camera
+  useEffect(() => {
+    euler.current.setFromQuaternion(camera.quaternion, 'YXZ');
+  }, [camera]);
+
   const onKeyDown = useCallback((e: KeyboardEvent) => {
-    const key = e.key.toLowerCase();
     if (isInputFocused()) return;
+    const key = e.key.toLowerCase();
+    // ESC unlocks mouse look
+    if (key === 'escape' && mouseLocked.current) {
+      setLocked(false);
+      return;
+    }
     keysDown.current.add(key);
-    if (['w', 'a', 's', 'd', 'q', 'e'].includes(key)) {
+    if (['w', 'a', 's', 'd', 'q', 'e', ' '].includes(key)) {
       e.preventDefault();
     }
-  }, [isInputFocused]);
+  }, [isInputFocused, setLocked]);
 
   const onKeyUp = useCallback((e: KeyboardEvent) => {
     keysDown.current.delete(e.key.toLowerCase());
   }, []);
 
-  const onMouseDown = useCallback((e: MouseEvent) => {
-    if (e.button === 2) rightMouseDown.current = true;
-  }, []);
+  const onClick = useCallback((e: MouseEvent) => {
+    // Don't toggle if clicking on interactive UI elements
+    const target = e.target as HTMLElement;
+    if (target.closest('header') || target.closest('button') || target.closest('a') || target.closest('input') || target.closest('details')) return;
+    setLocked(!mouseLocked.current);
+  }, [setLocked]);
 
-  const onMouseUp = useCallback((e: MouseEvent) => {
-    if (e.button === 2) rightMouseDown.current = false;
-  }, []);
+  const onMouseMove = useCallback((e: MouseEvent) => {
+    if (!mouseLocked.current) return;
+    euler.current.y -= e.movementX * lookSensitivity;
+    euler.current.x -= e.movementY * lookSensitivity;
+    euler.current.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.current.x));
+    camera.quaternion.setFromEuler(euler.current);
+  }, [camera]);
 
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('click', onClick);
+    window.addEventListener('mousemove', onMouseMove);
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('click', onClick);
+      window.removeEventListener('mousemove', onMouseMove);
+      setLocked(false);
     };
-  }, [onKeyDown, onKeyUp, onMouseDown, onMouseUp]);
+  }, [onKeyDown, onKeyUp, onClick, onMouseMove, setLocked]);
 
   const _forward = useMemo(() => new THREE.Vector3(), []);
   const _right = useMemo(() => new THREE.Vector3(), []);
@@ -700,43 +750,41 @@ function OverlayFlyControls() {
       keysDown.current.clear();
       return;
     }
-    const active = rightMouseDown.current || keysDown.current.size > 0;
-    if (!active) return;
 
+    // Movement
     const keys = keysDown.current;
-    const speed = delta * flySpeed;
-    camera.getWorldDirection(_forward);
-    _right.crossVectors(_forward, _up).normalize();
-    _move.set(0, 0, 0);
+    if (keys.size > 0) {
+      const speed = delta * flySpeed;
+      camera.getWorldDirection(_forward);
+      _right.crossVectors(_forward, _up).normalize();
+      _move.set(0, 0, 0);
 
-    if (keys.has('w') || keys.has('arrowup')) _move.addScaledVector(_forward, speed);
-    if (keys.has('s') || keys.has('arrowdown')) _move.addScaledVector(_forward, -speed);
-    if (keys.has('a') || keys.has('arrowleft')) _move.addScaledVector(_right, -speed);
-    if (keys.has('d') || keys.has('arrowright')) _move.addScaledVector(_right, speed);
-    if (keys.has('e')) _move.y += speed;
-    if (keys.has('q')) _move.y -= speed;
+      if (keys.has('w') || keys.has('arrowup')) _move.addScaledVector(_forward, speed);
+      if (keys.has('s') || keys.has('arrowdown')) _move.addScaledVector(_forward, -speed);
+      if (keys.has('a') || keys.has('arrowleft')) _move.addScaledVector(_right, -speed);
+      if (keys.has('d') || keys.has('arrowright')) _move.addScaledVector(_right, speed);
+      if (keys.has('e') || keys.has(' ')) _move.y += speed;
+      if (keys.has('q')) _move.y -= speed;
 
-    if (_move.lengthSq() > 0) {
-      camera.position.add(_move);
-      if (controlsRef.current) {
-        controlsRef.current.target.add(_move);
+      if (_move.lengthSq() > 0) {
+        camera.position.add(_move);
       }
+    }
+
+    // Always sync audio listener to camera (camera IS the listener)
+    const ls = listenerSyncRef.current;
+    ls.listenerPosRef.current.copy(camera.position);
+    if (ls.onMove) {
+      ls.onMove(camera.position.x, camera.position.y, camera.position.z);
+    }
+    camera.getWorldDirection(_forward);
+    ls.listenerForwardRef.current.set(_forward.x, _forward.y, _forward.z);
+    if (ls.onRotate) {
+      ls.onRotate(_forward.x, _forward.y, _forward.z, 0, 1, 0);
     }
   });
 
-  return (
-    <OrbitControls
-      ref={controlsRef}
-      makeDefault
-      enableDamping
-      dampingFactor={0.05}
-      mouseButtons={{
-        LEFT: undefined as any,
-        MIDDLE: THREE.MOUSE.PAN,
-        RIGHT: THREE.MOUSE.ROTATE,
-      }}
-    />
-  );
+  return null;
 }
 
 // Unity-style fly camera: WASD when viewport focused
@@ -969,11 +1017,22 @@ function contrastColor(hex: string): string {
 
 const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, showGrid, overlayMode }: { tracksRef: React.RefObject<TrackState[]>; bgColor: string; listenerSync: ListenerSync; showGrid: boolean; overlayMode?: boolean }) {
   const listenerColor = useMemo(() => contrastColor(bgColor), [bgColor]);
+  // Determine if bg is dark for voice color remapping
+  const isDarkBg = useMemo(() => {
+    if (overlayMode) return false; // overlay uses page bg (light by default)
+    const hex = bgColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return (r * 0.299 + g * 0.587 + b * 0.114) < 128;
+  }, [bgColor, overlayMode]);
   return (
     <OverlayModeContext.Provider value={!!overlayMode}>
+      <DarkBgContext.Provider value={isDarkBg}>
       <ListenerSyncContext.Provider value={listenerSync}>
-        <ambientLight intensity={overlayMode ? 1 : 0.5} />
-        <directionalLight position={[10, 15, 10]} intensity={overlayMode ? 0.8 : 0.3} />
+        <ambientLight intensity={overlayMode ? 0.6 : 0.5} />
+        <directionalLight position={[10, 15, 10]} intensity={overlayMode ? 1.2 : 0.3} />
+        {overlayMode && <directionalLight position={[-8, 10, -5]} intensity={0.4} />}
         {/* Normal grid for editor; subtle grid for overlay to indicate 3D space */}
         {overlayMode ? (
           <Grid
@@ -1002,17 +1061,16 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
         <AudioSourcePool tracksRef={tracksRef} />
         {overlayMode ? <OverlayFlyControls /> : <FlyControls />}
         {!overlayMode && <AxisGizmo />}
-        {!overlayMode && (
-          <EffectComposer>
-            <Bloom
-              luminanceThreshold={0.4}
-              luminanceSmoothing={0.9}
-              intensity={0.6}
-              mipmapBlur
-            />
-          </EffectComposer>
-        )}
+        <EffectComposer>
+          <Bloom
+            luminanceThreshold={overlayMode ? 0.3 : 0.4}
+            luminanceSmoothing={0.9}
+            intensity={overlayMode ? 0.8 : 0.6}
+            mipmapBlur
+          />
+        </EffectComposer>
       </ListenerSyncContext.Provider>
+      </DarkBgContext.Provider>
     </OverlayModeContext.Provider>
   );
 });
