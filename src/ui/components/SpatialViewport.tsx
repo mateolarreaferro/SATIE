@@ -115,7 +115,9 @@ function useAudioSourceFrame(
     if (matRef.current) {
       const displayColor = remapColor(track.color, isDarkBg, track.seed);
       matRef.current.color.set(displayColor);
-      matRef.current.emissive.set(displayColor);
+      if ((matRef.current as any).emissive) {
+        (matRef.current as any).emissive.set(displayColor);
+      }
       matRef.current.opacity = track.alpha * 0.85;
     }
 

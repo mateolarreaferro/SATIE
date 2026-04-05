@@ -1,7 +1,6 @@
 /**
  * 3D Community Sample Knowledge Graph.
- * Theme-aware — adapts to light/fade/dark mode.
- * Emissive glowing nodes, fog depth, jewel-tone colors.
+ * Theme-aware with breathing animations, hover effects, and always-visible labels.
  */
 import { useRef, useState, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
@@ -10,20 +9,14 @@ import * as THREE from 'three';
 import type { GraphNode, GraphEdge } from '../../lib/graphLayout';
 import type { Theme } from '../hooks/useDayNightCycle';
 
-// ── Color palettes per mode ──
-const PALETTE_DARK = [
-  '#7eb8da', '#a8d5a2', '#f0b27a', '#c5a3d9', '#f4a6a0',
-  '#82d8d5', '#e8c76a', '#89c4b8', '#d4a0b9', '#a0bce0',
-  '#c9d4a0', '#e0a07e', '#8fc5e0', '#b8d48a', '#d4b89a',
+// Vibrant palette that reads well on both light and dark backgrounds
+const PALETTE = [
+  '#4a90d9', '#e07c54', '#6cc477', '#c965d4', '#d4c45a',
+  '#54c4c4', '#e06b8f', '#7b8fe0', '#d49a4a', '#5bc49a',
+  '#c75b5b', '#8a6dd6', '#5da5e0', '#d68a5a', '#5bb5d4',
 ];
 
-const PALETTE_LIGHT = [
-  '#3a7ca5', '#5a9e54', '#c4813a', '#8a5bab', '#c4625a',
-  '#3a9e9a', '#b89a2a', '#4a8a7a', '#a45e80', '#5a7cb0',
-  '#8a9e50', '#b06a3a', '#4a8ab0', '#7aa040', '#a08a5a',
-];
-
-const HIGHLIGHT_COLOR = '#58a6ff';
+const HIGHLIGHT = '#3b82f6';
 
 interface SampleGraphProps {
   nodes: GraphNode[];
@@ -39,27 +32,26 @@ function hexToInt(hex: string): number {
 }
 
 export function SampleGraph({ nodes, edges, onSelect, selectedId, highlightIds, theme }: SampleGraphProps) {
-  const bgColor = useMemo(() => hexToInt(theme.bg), [theme.bg]);
   const isDark = theme.mode === 'dark';
+  const fogColor = hexToInt(theme.bg);
 
   return (
     <Canvas
-      camera={{ position: [0, 0, 35], fov: 55 }}
+      camera={{ position: [0, 0, 30], fov: 50 }}
       style={{ width: '100%', height: '100%' }}
-      gl={{ antialias: true, alpha: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: isDark ? 1.2 : 0.9 }}
+      gl={{ antialias: true, alpha: true }}
       onCreated={({ gl, scene }) => {
-        gl.setClearColor(0x000000, 0); // transparent background
-        scene.fog = new THREE.FogExp2(bgColor, isDark ? 0.012 : 0.008);
+        gl.setClearColor(0x000000, 0);
+        scene.fog = new THREE.FogExp2(fogColor, 0.006);
       }}
     >
-      {/* Lighting adapts to mode */}
-      <ambientLight intensity={isDark ? 0.4 : 0.7} />
-      <directionalLight position={[80, 150, 100]} intensity={isDark ? 0.5 : 0.4} color="#ffffff" />
-      <directionalLight position={[-80, -40, -80]} intensity={isDark ? 0.25 : 0.15} color={isDark ? '#8888cc' : '#aaaadd'} />
+      <ambientLight intensity={isDark ? 0.5 : 0.8} />
+      <directionalLight position={[60, 100, 80]} intensity={isDark ? 0.6 : 0.5} />
+      <directionalLight position={[-40, -30, -60]} intensity={0.2} color={isDark ? '#aaaaff' : '#ccccff'} />
 
-      <SceneUpdater bgColor={bgColor} fogDensity={isDark ? 0.012 : 0.008} />
+      <FogUpdater fogColor={fogColor} />
 
-      <GraphScene
+      <GraphContent
         nodes={nodes}
         edges={edges}
         onSelect={onSelect}
@@ -67,57 +59,48 @@ export function SampleGraph({ nodes, edges, onSelect, selectedId, highlightIds, 
         highlightIds={highlightIds}
         theme={theme}
       />
+
       <OrbitControls
         enableDamping
-        dampingFactor={0.08}
+        dampingFactor={0.06}
         autoRotate
-        autoRotateSpeed={0.15}
-        minDistance={5}
-        maxDistance={80}
+        autoRotateSpeed={0.12}
+        minDistance={8}
+        maxDistance={60}
       />
     </Canvas>
   );
 }
 
-/** Updates scene fog when theme changes */
-function SceneUpdater({ bgColor, fogDensity }: { bgColor: number; fogDensity: number }) {
+function FogUpdater({ fogColor }: { fogColor: number }) {
   useFrame(({ scene }) => {
     if (scene.fog instanceof THREE.FogExp2) {
-      scene.fog.color.set(bgColor);
-      scene.fog.density = fogDensity;
+      scene.fog.color.set(fogColor);
     }
   });
   return null;
 }
 
-// ── Assign colors based on first tag + mode ──
-function getNodeColor(node: GraphNode, isDark: boolean): string {
-  const palette = isDark ? PALETTE_DARK : PALETTE_LIGHT;
-  if (!node.tags || node.tags.length === 0) return palette[0];
-  let hash = 0;
-  for (let i = 0; i < node.tags[0].length; i++) {
-    hash = ((hash << 5) - hash + node.tags[0].charCodeAt(i)) | 0;
-  }
-  return palette[Math.abs(hash) % palette.length];
+function getColor(node: GraphNode): string {
+  if (!node.tags?.length) return PALETTE[0];
+  let h = 0;
+  for (let i = 0; i < node.tags[0].length; i++) h = ((h << 5) - h + node.tags[0].charCodeAt(i)) | 0;
+  return PALETTE[Math.abs(h) % PALETTE.length];
 }
 
-// ── Graph scene ──
+// ── Main scene ──
 
-function GraphScene({ nodes, edges, onSelect, selectedId, highlightIds, theme }: SampleGraphProps) {
+function GraphContent({ nodes, edges, onSelect, selectedId, highlightIds, theme }: SampleGraphProps) {
   const isDark = theme.mode === 'dark';
 
   const neighborMap = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    for (const node of nodes) map.set(node.id, new Set());
-    for (const edge of edges) {
-      const srcId = nodes[edge.source]?.id;
-      const tgtId = nodes[edge.target]?.id;
-      if (srcId && tgtId) {
-        map.get(srcId)?.add(tgtId);
-        map.get(tgtId)?.add(srcId);
-      }
+    const m = new Map<string, Set<string>>();
+    for (const n of nodes) m.set(n.id, new Set());
+    for (const e of edges) {
+      const s = nodes[e.source]?.id, t = nodes[e.target]?.id;
+      if (s && t) { m.get(s)?.add(t); m.get(t)?.add(s); }
     }
-    return map;
+    return m;
   }, [nodes, edges]);
 
   const selectedNeighbors = useMemo(() => {
@@ -127,174 +110,218 @@ function GraphScene({ nodes, edges, onSelect, selectedId, highlightIds, theme }:
 
   return (
     <group>
-      <GraphEdges
-        nodes={nodes}
-        edges={edges}
-        selectedId={selectedId}
-        selectedNeighbors={selectedNeighbors}
-        isDark={isDark}
-      />
-
-      {nodes.map(node => (
-        <GraphNodeMesh
-          key={node.id}
-          node={node}
-          color={getNodeColor(node, isDark)}
-          isSelected={selectedId === node.id}
-          isNeighbor={selectedNeighbors?.has(node.id) ?? false}
-          isHighlighted={highlightIds ? highlightIds.has(node.id) : true}
+      <Edges nodes={nodes} edges={edges} selectedId={selectedId} selectedNeighbors={selectedNeighbors} isDark={isDark} />
+      {nodes.map(n => (
+        <Node
+          key={n.id}
+          node={n}
+          color={getColor(n)}
+          isSelected={selectedId === n.id}
+          isNeighbor={selectedNeighbors?.has(n.id) ?? false}
+          isHighlighted={highlightIds ? highlightIds.has(n.id) : true}
           hasSelection={selectedId !== null}
           isDark={isDark}
-          labelColor={theme.text}
-          onClick={() => onSelect(node.id)}
+          textColor={theme.text}
+          onClick={() => onSelect(n.id)}
         />
       ))}
     </group>
   );
 }
 
-// ── Single node ──
+// ── Node with breathing + hover ──
 
-function GraphNodeMesh({ node, color, isSelected, isNeighbor, isHighlighted, hasSelection, isDark, labelColor, onClick }: {
-  node: GraphNode;
-  color: string;
-  isSelected: boolean;
-  isNeighbor: boolean;
-  isHighlighted: boolean;
-  hasSelection: boolean;
-  isDark: boolean;
-  labelColor: string;
-  onClick: () => void;
+function Node({ node, color, isSelected, isNeighbor, isHighlighted, hasSelection, isDark, textColor, onClick }: {
+  node: GraphNode; color: string;
+  isSelected: boolean; isNeighbor: boolean; isHighlighted: boolean; hasSelection: boolean;
+  isDark: boolean; textColor: string; onClick: () => void;
 }) {
+  const groupRef = useRef<THREE.Group>(null);
   const meshRef = useRef<THREE.Mesh>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
   const [hovered, setHovered] = useState(false);
+  const phaseRef = useRef(Math.random() * Math.PI * 2); // unique breathing phase
 
-  const radius = useMemo(() => {
-    return Math.max(0.3, Math.min(1.8, 0.3 + Math.log2(node.downloadCount + 1) * 0.3));
-  }, [node.downloadCount]);
+  const baseRadius = Math.max(0.4, Math.min(2.0, 0.4 + Math.log2(node.downloadCount + 1) * 0.35));
 
-  const dimmed = hasSelection && !isSelected && !isNeighbor;
-  const searchDimmed = !isHighlighted;
+  const dimmed = (hasSelection && !isSelected && !isNeighbor) || !isHighlighted;
   const active = isSelected || hovered;
 
-  const emissiveIntensity = active ? (isDark ? 0.6 : 0.4)
-    : isNeighbor ? (isDark ? 0.3 : 0.2)
-    : (dimmed || searchDimmed) ? 0.03
-    : (isDark ? 0.2 : 0.1);
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    const mesh = meshRef.current;
+    const mat = matRef.current;
+    if (!mesh || !mat) return;
 
-  const opacity = (dimmed || searchDimmed) ? (isDark ? 0.1 : 0.15) : 1;
-  const displayColor = isSelected ? HIGHLIGHT_COLOR : color;
+    // Breathing: subtle scale pulse
+    const breathe = 1 + Math.sin(t * 1.2 + phaseRef.current) * 0.06;
+    const hoverScale = hovered ? 1.25 : 1;
+    const targetScale = baseRadius * breathe * hoverScale;
+    const s = mesh.scale.x;
+    mesh.scale.setScalar(s + (targetScale - s) * 0.12);
 
-  const showLabel = hovered || isSelected || isNeighbor || (node.downloadCount >= 5 && !dimmed && !searchDimmed);
+    // Gentle float (Y drift)
+    if (groupRef.current) {
+      groupRef.current.position.y = node.y + Math.sin(t * 0.4 + phaseRef.current) * 0.15;
+    }
 
-  useFrame(() => {
-    if (!meshRef.current) return;
-    const targetScale = hovered ? 1.3 : 1;
-    const s = meshRef.current.scale.x;
-    meshRef.current.scale.setScalar(s + (targetScale - s) * 0.15);
+    // Material animation
+    const targetOpacity = dimmed ? 0.15 : 1;
+    mat.opacity += (targetOpacity - mat.opacity) * 0.1;
+
+    const targetEmissive = active ? 0.5 : isNeighbor ? 0.25 : dimmed ? 0.02 : 0.12;
+    mat.emissiveIntensity += (targetEmissive - mat.emissiveIntensity) * 0.1;
+
+    if (isSelected) {
+      mat.color.lerp(new THREE.Color(HIGHLIGHT), 0.15);
+      mat.emissive.lerp(new THREE.Color(HIGHLIGHT), 0.15);
+    } else {
+      mat.color.lerp(new THREE.Color(color), 0.08);
+      mat.emissive.lerp(new THREE.Color(color), 0.08);
+    }
   });
 
   return (
-    <group position={[node.x, node.y, node.z]}>
+    <group ref={groupRef} position={[node.x, node.y, node.z]}>
       <mesh
         ref={meshRef}
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
-        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
+        scale={baseRadius}
+        onClick={e => { e.stopPropagation(); onClick(); }}
+        onPointerOver={e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = 'pointer'; }}
         onPointerOut={() => { setHovered(false); document.body.style.cursor = 'auto'; }}
       >
-        <sphereGeometry args={[radius, 16, 12]} />
+        <sphereGeometry args={[1, 24, 16]} />
         <meshStandardMaterial
-          color={displayColor}
-          emissive={displayColor}
-          emissiveIntensity={emissiveIntensity}
-          roughness={isDark ? 0.4 : 0.6}
-          metalness={isDark ? 0.1 : 0.05}
+          ref={matRef}
+          color={color}
+          emissive={color}
+          emissiveIntensity={0.12}
+          roughness={isDark ? 0.35 : 0.5}
+          metalness={0.05}
           transparent
-          opacity={opacity}
+          opacity={1}
         />
       </mesh>
 
-      {showLabel && (
-        <Html
-          center
-          position={[0, radius + 0.5, 0]}
-          style={{ pointerEvents: 'none', userSelect: 'none' }}
-          distanceFactor={12}
-        >
+      {/* Always show label */}
+      <Html
+        center
+        position={[0, baseRadius * 1.3 + 0.4, 0]}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}
+        distanceFactor={10}
+      >
+        <div style={{
+          color: isSelected ? HIGHLIGHT : textColor,
+          fontSize: active ? 13 : 11,
+          fontFamily: "'Inter', -apple-system, system-ui, sans-serif",
+          fontWeight: isSelected ? 600 : 500,
+          whiteSpace: 'nowrap',
+          textShadow: isDark
+            ? '0 1px 8px rgba(0,0,0,0.8), 0 0 2px rgba(0,0,0,0.5)'
+            : '0 1px 6px rgba(255,255,255,0.9), 0 0 2px rgba(255,255,255,0.7)',
+          opacity: dimmed ? 0.2 : (active ? 1 : 0.7),
+          transition: 'opacity 0.3s, font-size 0.2s',
+          letterSpacing: '0.01em',
+        }}>
+          {node.name}
+        </div>
+        {/* Tags on hover */}
+        {hovered && node.tags.length > 0 && (
           <div style={{
-            color: isSelected ? HIGHLIGHT_COLOR : labelColor,
-            fontSize: 11,
-            fontFamily: "'Inter', -apple-system, system-ui, sans-serif",
-            fontWeight: isSelected ? 600 : 400,
-            whiteSpace: 'nowrap',
-            textShadow: isDark
-              ? '0 0 6px rgba(0,0,0,0.9), 0 0 12px rgba(0,0,0,0.5)'
-              : '0 0 6px rgba(255,255,255,0.9), 0 0 12px rgba(255,255,255,0.5)',
-            opacity: dimmed ? 0.3 : 0.9,
+            marginTop: 2,
+            display: 'flex',
+            gap: 3,
+            justifyContent: 'center',
           }}>
-            {node.name}
+            {node.tags.slice(0, 3).map(tag => (
+              <span key={tag} style={{
+                fontSize: 9,
+                padding: '1px 5px',
+                borderRadius: 4,
+                background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.06)',
+                color: textColor,
+                opacity: 0.6,
+              }}>
+                {tag}
+              </span>
+            ))}
           </div>
-        </Html>
-      )}
+        )}
+      </Html>
     </group>
   );
 }
 
-// ── Edges ──
+// ── Edges with animated opacity ──
 
-function GraphEdges({ nodes, edges, selectedId, selectedNeighbors, isDark }: {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  selectedId: string | null;
-  selectedNeighbors: Set<string> | null;
-  isDark: boolean;
+function Edges({ nodes, edges, selectedId, selectedNeighbors, isDark }: {
+  nodes: GraphNode[]; edges: GraphEdge[];
+  selectedId: string | null; selectedNeighbors: Set<string> | null; isDark: boolean;
 }) {
+  const lineRef = useRef<THREE.LineSegments>(null);
+
   const geometry = useMemo(() => {
-    const positions: number[] = [];
-    const colors: number[] = [];
+    const pos: number[] = [];
+    const col: number[] = [];
 
-    const baseAlpha = isDark ? 0.04 : 0.08;
-    const selectedAlpha = isDark ? 0.3 : 0.25;
-    const fadedAlpha = isDark ? 0.005 : 0.02;
+    // Edge base color: dark text on light bg, light on dark
+    const baseR = isDark ? 1 : 0, baseG = isDark ? 1 : 0, baseB = isDark ? 1 : 0;
 
-    for (const edge of edges) {
-      const a = nodes[edge.source];
-      const b = nodes[edge.target];
+    for (const e of edges) {
+      const a = nodes[e.source], b = nodes[e.target];
       if (!a || !b) continue;
+      pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
 
-      positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
-
-      let r: number, g: number, bv: number, alpha: number;
+      let r: number, g: number, bv: number;
 
       if (selectedId) {
-        const srcId = a.id;
-        const tgtId = b.id;
-        const connectedToSelected = srcId === selectedId || tgtId === selectedId;
-        const betweenNeighbors = selectedNeighbors?.has(srcId) && selectedNeighbors?.has(tgtId);
-
-        if (connectedToSelected) {
-          r = 0.345; g = 0.651; bv = 1.0; alpha = selectedAlpha;
-        } else if (betweenNeighbors) {
-          r = isDark ? 1 : 0; g = isDark ? 1 : 0; bv = isDark ? 1 : 0; alpha = 0.03;
+        const connected = a.id === selectedId || b.id === selectedId;
+        const neighborEdge = selectedNeighbors?.has(a.id) && selectedNeighbors?.has(b.id);
+        if (connected) {
+          // Highlight blue
+          r = 0.23; g = 0.51; bv = 0.96;
+        } else if (neighborEdge) {
+          r = baseR * 0.1; g = baseG * 0.1; bv = baseB * 0.1;
         } else {
-          r = isDark ? 1 : 0; g = isDark ? 1 : 0; bv = isDark ? 1 : 0; alpha = fadedAlpha;
+          r = baseR * 0.02; g = baseG * 0.02; bv = baseB * 0.02;
         }
       } else {
-        r = isDark ? 1 : 0; g = isDark ? 1 : 0; bv = isDark ? 1 : 0; alpha = baseAlpha;
+        // Default: subtle but visible
+        const alpha = isDark ? 0.08 : 0.12;
+        r = baseR * alpha; g = baseG * alpha; bv = baseB * alpha;
       }
 
-      colors.push(r * alpha, g * alpha, bv * alpha);
-      colors.push(r * alpha, g * alpha, bv * alpha);
+      col.push(r, g, bv, r, g, bv);
     }
 
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     return geo;
   }, [nodes, edges, selectedId, selectedNeighbors, isDark]);
 
+  // Animate edge positions to follow node breathing
+  useFrame(({ clock }) => {
+    if (!lineRef.current) return;
+    const posAttr = lineRef.current.geometry.getAttribute('position');
+    if (!posAttr) return;
+    const t = clock.getElapsedTime();
+    let idx = 0;
+    for (const e of edges) {
+      const a = nodes[e.source], b = nodes[e.target];
+      if (!a || !b) continue;
+      // Match the Y float of the nodes
+      const ayOffset = Math.sin(t * 0.4 + a.id.charCodeAt(0)) * 0.15;
+      const byOffset = Math.sin(t * 0.4 + b.id.charCodeAt(0)) * 0.15;
+      posAttr.setY(idx, a.y + ayOffset);
+      posAttr.setY(idx + 1, b.y + byOffset);
+      idx += 2;
+    }
+    posAttr.needsUpdate = true;
+  });
+
   return (
-    <lineSegments geometry={geometry}>
+    <lineSegments ref={lineRef} geometry={geometry}>
       <lineBasicMaterial vertexColors transparent opacity={1} />
     </lineSegments>
   );
