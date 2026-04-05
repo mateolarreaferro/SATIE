@@ -18,7 +18,9 @@ import type { Statement } from '../../engine/core/Statement';
 import { WanderType } from '../../engine/core/Statement';
 import { registerTrajectoryFromLUT, getTrajectory } from '../../engine/spatial/Trajectories';
 import { cacheTrajectory } from '../../lib/trajectoryCache';
-import { downloadCommunitySampleByName } from '../../lib/communitySamples';
+import { downloadCommunitySampleByName, getPopularSamples, type CommunitySample } from '../../lib/communitySamples';
+import { findCommunityMatch } from '../../lib/communitySearch';
+import { getPreferCommunitySamples } from '../../lib/userSettings';
 import { generateTrajectoryFromPrompt, executeTrajectoryCode, postProcessTrajectory, type TrajectoryGenParams } from '../../engine/spatial/TrajectoryGen';
 import { encodeWAV } from '../../engine/export/WAVEncoder';
 import { captureCanvasThumbnail, uploadThumbnail } from '../../lib/thumbnailCapture';
@@ -253,6 +255,8 @@ export function Editor() {
     setListenerPosition,
     setListenerOrientation,
     setOnMissingBuffer,
+    setOnSearchCommunity,
+    setPreferCommunity,
   } = useSatieEngine();
 
   const sfx = useSFX();
@@ -271,6 +275,7 @@ export function Editor() {
   const [isPublic, setIsPublic] = useState(false);
   const [sampleEntries, setSampleEntries] = useState<SampleEntry[]>([]);
   const [generatingTrajectory, setGeneratingTrajectory] = useState<string | null>(null);
+  const [communitySampleNames, setCommunitySampleNames] = useState<string[]>([]);
   const [spaceBgColor, setSpaceBgColor] = useState(() => {
     // Per-sketch color, keyed by sketch ID; fall back to default
     if (sketchId) {
@@ -297,15 +302,26 @@ export function Editor() {
   /** Raw ArrayBuffers for samples loaded this session — used for uploading on save. */
   const sampleBuffers = useRef<Map<string, ArrayBuffer>>(new Map());
 
-  // Wire community sample resolution for lazy loading
+  // Fetch community sample names for editor autocomplete
+  useEffect(() => {
+    getPopularSamples(100)
+      .then(samples => setCommunitySampleNames(samples.map(s => s.name)))
+      .catch(() => {});
+  }, []);
+
+  // Wire community sample resolution for lazy loading + community-first gen
   useEffect(() => {
     setOnMissingBuffer(async (clipName: string) => {
-      // Try community samples for clips with community/ prefix
       const name = clipName.startsWith('community/') ? clipName.slice(10) : clipName;
       return downloadCommunitySampleByName(name);
     });
-    return () => setOnMissingBuffer(null);
-  }, [setOnMissingBuffer]);
+    setOnSearchCommunity((prompt: string) => findCommunityMatch(prompt));
+    setPreferCommunity(getPreferCommunitySamples());
+    return () => {
+      setOnMissingBuffer(null);
+      setOnSearchCommunity(null);
+    };
+  }, [setOnMissingBuffer, setOnSearchCommunity, setPreferCommunity]);
 
   // Load sketch from DB if we have an ID, then load its samples
   useEffect(() => {
@@ -731,6 +747,7 @@ export function Editor() {
                 onRun={handleRun}
                 errors={uiState.errors}
                 runtimeWarnings={uiState.runtimeWarnings}
+                communitySamples={communitySampleNames}
               />
             </div>
             <div style={{

@@ -101,6 +101,24 @@ export async function searchCommunity(
 }
 
 /**
+ * Search community samples by a gen prompt and return the best match's audio data.
+ * Used by the engine to substitute community samples for ElevenLabs generation.
+ */
+export async function findCommunityMatch(prompt: string): Promise<ArrayBuffer | null> {
+  // Extract keywords from the gen prompt
+  const words = prompt.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  if (words.length === 0) return null;
+
+  const results = await searchCommunity(prompt, words, 3);
+  if (results.length === 0) return null;
+
+  // Use the top result
+  const best = results[0];
+  const { downloadCommunitySample } = await import('./communitySamples');
+  return downloadCommunitySample(best);
+}
+
+/**
  * Format community samples for inclusion in AI system prompt.
  */
 export function formatCommunitySamplesForPrompt(samples: CommunitySample[]): string {

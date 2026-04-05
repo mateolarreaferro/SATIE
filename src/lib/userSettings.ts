@@ -15,6 +15,17 @@ const LS_ANTHROPIC = 'satie-anthropic-key';
 const LS_ELEVENLABS = 'satie-elevenlabs-key';
 const LS_OPENAI = 'satie-openai-key';
 const LS_GEMINI = 'satie-gemini-key';
+const LS_PREFER_COMMUNITY = 'satie-prefer-community-samples';
+
+/** Check if community-first mode is enabled. Fast sync read from localStorage. */
+export function getPreferCommunitySamples(): boolean {
+  return localStorage.getItem(LS_PREFER_COMMUNITY) === 'true';
+}
+
+/** Toggle community-first mode. */
+export function setPreferCommunitySamples(value: boolean): void {
+  localStorage.setItem(LS_PREFER_COMMUNITY, value ? 'true' : 'false');
+}
 
 /** Load settings: tries Supabase first (logged in), falls back to localStorage. */
 export async function loadSettings(userId: string | null): Promise<UserSettings> {

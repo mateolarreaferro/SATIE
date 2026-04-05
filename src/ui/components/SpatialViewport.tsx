@@ -7,6 +7,8 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import type { TrackState } from '../../engine';
 import { useHeadTracking } from '../hooks/useHeadTracking';
 import { useFaceTracking, type FaceMeshData } from '../hooks/useFaceTracking';
+import { resolveTrackIcon, type IconName } from '../utils/iconMap';
+import { getIconTexture, getIconTextureAsync } from '../utils/iconTexture';
 
 const ViewportFocusContext = createContext<{ focused: boolean }>({ focused: false });
 const CameraResetContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
@@ -382,11 +384,206 @@ function AudioSourceTrailMesh({ trackRef, shape }: { trackRef: React.RefObject<T
   );
 }
 
+// ── Voice with semantic icon sprite (replaces sphere) ───────
+
+function AudioSourceIcon({ trackRef, iconName }: { trackRef: React.RefObject<TrackState | null>; iconName: IconName }) {
+  const iconRef = useRef<THREE.Sprite>(null);
+  const labelRef = useRef<THREE.Sprite>(null);
+  const labelTexRef = useRef<THREE.CanvasTexture | null>(null);
+  const prevLabel = useRef<string>('');
+  const prevColor = useRef<string>('');
+  const isDarkBg = useContext(DarkBgContext);
+  const loadedIcon = useRef<boolean>(false);
+
+  useFrame(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    const displayColor = remapColor(track.color, isDarkBg, track.seed);
+
+    // Position + scale the icon sprite
+    if (iconRef.current) {
+      iconRef.current.position.set(track.position.x, track.position.y, track.position.z);
+      const baseScale = 0.25 + track.volume * 0.35;
+      const sizeMultiplier = track.statement.visualSize ?? 1;
+      const s = baseScale * sizeMultiplier;
+      iconRef.current.scale.set(s, s, 1);
+
+      // Load or recolor texture when color changes
+      if (displayColor !== prevColor.current || !loadedIcon.current) {
+        prevColor.current = displayColor;
+        loadedIcon.current = true;
+        getIconTextureAsync(iconName, displayColor, 128).then((tex) => {
+          if (tex && iconRef.current) {
+            const mat = iconRef.current.material as THREE.SpriteMaterial;
+            mat.map = tex;
+            mat.needsUpdate = true;
+          }
+        });
+      }
+    }
+
+    // Label (same logic as useAudioSourceFrame)
+    if (labelRef.current) {
+      const yOff = 0.45;
+      labelRef.current.position.set(track.position.x, track.position.y + yOff, track.position.z);
+
+      const raw = track.statement.clip.split('/').pop() ?? '';
+      const label = raw
+        .replace(/_\d+$/g, '')
+        .replace(/_\d+$/g, '')
+        .replace(/_/g, ' ')
+        .trim();
+
+      if (label !== prevLabel.current) {
+        prevLabel.current = label;
+        if (labelTexRef.current) labelTexRef.current.dispose();
+
+        const SCALE = 3;
+        const H = 48 * SCALE;
+        const FONT_SIZE = 22 * SCALE;
+        const PADDING_X = 18 * SCALE;
+
+        const offscreen = document.createElement('canvas');
+        const offCtx = offscreen.getContext('2d')!;
+        offCtx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+        const textW = offCtx.measureText(label).width;
+
+        const W = textW + PADDING_X * 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = W;
+        canvas.height = H;
+        const ctx = canvas.getContext('2d')!;
+
+        const r = H * 0.42;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(W - r, 0);
+        ctx.quadraticCurveTo(W, 0, W, r);
+        ctx.lineTo(W, H - r);
+        ctx.quadraticCurveTo(W, H, W - r, H);
+        ctx.lineTo(r, H);
+        ctx.quadraticCurveTo(0, H, 0, H - r);
+        ctx.lineTo(0, r);
+        ctx.quadraticCurveTo(0, 0, r, 0);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, W / 2, H / 2);
+
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.minFilter = THREE.LinearFilter;
+        tex.generateMipmaps = false;
+        labelTexRef.current = tex;
+
+        const worldH = 0.28;
+        const worldW = worldH * (W / H);
+        labelRef.current.scale.set(worldW, worldH, 1);
+
+        (labelRef.current.material as THREE.SpriteMaterial).map = tex;
+        (labelRef.current.material as THREE.SpriteMaterial).needsUpdate = true;
+      }
+    }
+  });
+
+  return (
+    <>
+      <sprite ref={iconRef} renderOrder={998}>
+        <spriteMaterial transparent depthTest={false} toneMapped={false} />
+      </sprite>
+      <LabelSprite labelRef={labelRef} />
+    </>
+  );
+}
+
+// ── Voice with trail + semantic icon ────────────────────────
+
+function AudioSourceTrailIcon({ trackRef, iconName }: { trackRef: React.RefObject<TrackState | null>; iconName: IconName }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const iconRef = useRef<THREE.Sprite>(null);
+  const labelRef = useRef<THREE.Sprite>(null);
+  const trailRef = useRef<any>(null);
+  const overlayMode = useContext(OverlayModeContext);
+  const isDarkBg = useContext(DarkBgContext);
+  const prevColor = useRef<string>('');
+  const loadedIcon = useRef<boolean>(false);
+
+  // Reuse standard frame logic for the trail anchor mesh + label
+  useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
+
+  useFrame(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    const displayColor = remapColor(track.color, isDarkBg, track.seed);
+
+    // Trail color
+    if (trailRef.current) {
+      const tMat = trailRef.current.material as any;
+      if (tMat?.uniforms?.color) tMat.uniforms.color.value.set(displayColor);
+      else if (tMat?.color) tMat.color.set(displayColor);
+    }
+
+    // Icon sprite follows mesh position
+    if (iconRef.current && meshRef.current) {
+      iconRef.current.position.copy(meshRef.current.position);
+      const baseScale = 0.3 + track.volume * 0.35;
+      const sizeMultiplier = track.statement.visualSize ?? 1;
+      const s = baseScale * sizeMultiplier;
+      iconRef.current.scale.set(s, s, 1);
+
+      if (displayColor !== prevColor.current || !loadedIcon.current) {
+        prevColor.current = displayColor;
+        loadedIcon.current = true;
+        getIconTextureAsync(iconName, displayColor, 128).then((tex) => {
+          if (tex && iconRef.current) {
+            const mat = iconRef.current.material as THREE.SpriteMaterial;
+            mat.map = tex;
+            mat.needsUpdate = true;
+          }
+        });
+      }
+    }
+  });
+
+  const trailWidth = overlayMode ? 6 : 2.5;
+  const trailLength = overlayMode ? 140 : 80;
+
+  return (
+    <>
+      <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
+        {/* Hidden tiny mesh as trail anchor — the icon sprite is the visible element */}
+        <mesh ref={meshRef}>
+          <sphereGeometry args={[1, 8, 8]} />
+          <meshBasicMaterial ref={matRef as any} transparent opacity={0} />
+        </mesh>
+      </Trail>
+      <sprite ref={iconRef} renderOrder={998}>
+        <spriteMaterial transparent depthTest={false} toneMapped={false} />
+      </sprite>
+      <LabelSprite labelRef={labelRef} />
+    </>
+  );
+}
+
 // ── Pool ─────────────────────────────────────────────────────
 
 const MAX_VOICES = 128;
 
+interface SlotInfo {
+  count: number;
+  kinds: VisualKind[];
+  icons: (IconName | null)[];
+}
+
 function AudioSourcePool({ tracksRef }: { tracksRef: React.RefObject<TrackState[]> }) {
+  const overlayMode = useContext(OverlayModeContext);
   const trackRefs = useMemo(() => {
     const refs: React.RefObject<TrackState | null>[] = [];
     for (let i = 0; i < MAX_VOICES; i++) {
@@ -395,7 +592,7 @@ function AudioSourcePool({ tracksRef }: { tracksRef: React.RefObject<TrackState[
     return refs;
   }, []);
 
-  const [slotInfo, setSlotInfo] = useState<{ count: number; kinds: VisualKind[] }>({ count: 0, kinds: [] });
+  const [slotInfo, setSlotInfo] = useState<SlotInfo>({ count: 0, kinds: [], icons: [] });
 
   useFrame(() => {
     const tracks = tracksRef.current ?? [];
@@ -408,11 +605,21 @@ function AudioSourcePool({ tracksRef }: { tracksRef: React.RefObject<TrackState[
       (trackRefs[i] as { current: TrackState | null }).current = null;
     }
 
-    // Only re-render when count or visual kinds change
+    // Resolve icons for each track
+    const icons: (IconName | null)[] = [];
+    for (let i = 0; i < count; i++) {
+      icons.push(resolveTrackIcon(tracks[i].statement));
+    }
+
+    // Only re-render when count, visual kinds, or icons change
     let needsUpdate = count !== slotInfo.count;
     if (!needsUpdate) {
       for (let i = 0; i < count; i++) {
         if (resolveVisualKind(tracks[i].statement.visual) !== slotInfo.kinds[i]) {
+          needsUpdate = true;
+          break;
+        }
+        if (icons[i] !== slotInfo.icons[i]) {
           needsUpdate = true;
           break;
         }
@@ -424,7 +631,7 @@ function AudioSourcePool({ tracksRef }: { tracksRef: React.RefObject<TrackState[
       for (let i = 0; i < count; i++) {
         kinds.push(resolveVisualKind(tracks[i].statement.visual));
       }
-      setSlotInfo({ count, kinds });
+      setSlotInfo({ count, kinds, icons });
     }
   });
 
@@ -432,6 +639,18 @@ function AudioSourcePool({ tracksRef }: { tracksRef: React.RefObject<TrackState[
     <>
       {trackRefs.slice(0, slotInfo.count).map((ref, i) => {
         const kind = slotInfo.kinds[i];
+        const icon = slotInfo.icons[i];
+
+        // If we have a semantic icon, use icon components
+        if (icon) {
+          const hasTrail = kind === 'trail' || kind === 'trail+sphere' || kind === 'trail+cube';
+          if (hasTrail) {
+            return <AudioSourceTrailIcon key={i} trackRef={ref} iconName={icon} />;
+          }
+          return <AudioSourceIcon key={i} trackRef={ref} iconName={icon} />;
+        }
+
+        // Fallback to standard visuals
         switch (kind) {
           case 'none':         return <AudioSourceNone key={i} trackRef={ref} />;
           case 'sphere':       return <AudioSourceMesh key={i} trackRef={ref} shape="sphere" />;

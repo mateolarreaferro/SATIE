@@ -14,6 +14,7 @@ interface CommunityUploadDialogProps {
   userId: string;
   onClose: () => void;
   onUploaded: () => void;
+  queueRemaining?: number;
 }
 
 // ── Shared preview AudioContext ──
@@ -30,6 +31,7 @@ export function CommunityUploadDialog({
   userId,
   onClose,
   onUploaded,
+  queueRemaining = 0,
 }: CommunityUploadDialogProps) {
   const [name, setName] = useState(
     fileName.replace(/\.[^.]+$/, '').replace(/[_\-]/g, ' '),
@@ -321,17 +323,28 @@ export function CommunityUploadDialog({
       }}>
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontFamily: "'Inter', sans-serif", color: '#0a0a0a' }}>
-            Share to Community
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h2 style={{ margin: 0, fontSize: 18, fontFamily: "'Inter', sans-serif", color: '#0a0a0a' }}>
+              Share to Community
+            </h2>
+            {queueRemaining > 0 && (
+              <span style={{
+                fontSize: 12, color: '#888', fontFamily: "'Inter', sans-serif",
+                padding: '2px 8px', background: '#e8e7e2', borderRadius: 8,
+              }}>
+                +{queueRemaining} more
+              </span>
+            )}
+          </div>
           <button
             onClick={onClose}
             style={{
               background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
               color: '#666', padding: '4px 8px', borderRadius: 6,
             }}
+            title={queueRemaining > 0 ? 'Skip this file' : 'Close'}
           >
-            &times;
+            {queueRemaining > 0 ? '→' : '×'}
           </button>
         </div>
 

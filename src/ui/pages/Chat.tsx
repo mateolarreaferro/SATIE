@@ -16,6 +16,8 @@ import { ChatInput } from '../components/ChatInput';
 import { Header } from '../components/Header';
 import type { Sketch, Profile } from '../../lib/supabase';
 import { downloadCommunitySampleByName } from '../../lib/communitySamples';
+import { findCommunityMatch } from '../../lib/communitySearch';
+import { getPreferCommunitySamples } from '../../lib/userSettings';
 
 const SUGGESTIONS = [
   { title: 'Forest at dawn', desc: 'birds calling, wind through leaves, a distant stream', icon: (c: string) => (
@@ -33,7 +35,7 @@ export function Chat() {
   const navigate = useNavigate();
   const { user, signInWithGitHub, signInWithGoogle } = useAuth();
   const { mode, theme, setMode } = useDayNightCycle();
-  const { uiState, tracksRef, loadScript, play, stop, setListenerPosition, setListenerOrientation, setOnMissingBuffer } = useSatieEngine();
+  const { uiState, tracksRef, loadScript, play, stop, setListenerPosition, setListenerOrientation, setOnMissingBuffer, setOnSearchCommunity, setPreferCommunity } = useSatieEngine();
   const sfx = useSFX();
 
   // Background music — plays until first prompt is sent
@@ -51,14 +53,19 @@ export function Chat() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
 
-  // Wire community sample resolution for lazy loading
+  // Wire community sample resolution for lazy loading + community-first gen
   useEffect(() => {
     setOnMissingBuffer(async (clipName: string) => {
       const name = clipName.startsWith('community/') ? clipName.slice(10) : clipName;
       return downloadCommunitySampleByName(name);
     });
-    return () => setOnMissingBuffer(null);
-  }, [setOnMissingBuffer]);
+    setOnSearchCommunity((prompt: string) => findCommunityMatch(prompt));
+    setPreferCommunity(getPreferCommunitySamples());
+    return () => {
+      setOnMissingBuffer(null);
+      setOnSearchCommunity(null);
+    };
+  }, [setOnMissingBuffer, setOnSearchCommunity, setPreferCommunity]);
 
   // Track whether there are active tracks for conditional viewport mount
   useEffect(() => {

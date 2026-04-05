@@ -522,6 +522,17 @@ describe('SatieParser', () => {
       expect(s.visual).toContain('sphere');
       expect(s.visual).toContain('trail');
     });
+
+    it('parses semantic icon in visual tokens', () => {
+      const s = parseOne('loop rain\n  visual cloud trail');
+      expect(s.visual).toContain('cloud');
+      expect(s.visual).toContain('trail');
+    });
+
+    it('parses semantic icon without trail', () => {
+      const s = parseOne('loop rain\n  visual lightning');
+      expect(s.visual).toContain('lightning');
+    });
   });
 
   // ──────────────────────────────────────────────

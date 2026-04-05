@@ -270,7 +270,7 @@ EFFECTS (use only when requested or musically relevant):
 COLOR & VISUALS:
   color #FF5733 | color red | color red 200 green 100 blue 50
   alpha 0.5
-  visual sphere | visual trail | visual trail+sphere | visual trail+cube
+  visual sphere | visual trail | visual cloud trail | visual lightning | visual bird trail
 
 AUDIO GENERATION:
   loop gen descriptive prompt                       # inline gen
@@ -295,7 +295,7 @@ TRAJECTORY GEN BLOCKS:
 - Prefer ranges and count multipliers over copy-pasting statements
 - Think about musical relationships: bass is low pitch, high voices are high pitch
 - Think about spatial relationships: spread voices apart, use movement for life
-- ALWAYS add visual: voices with movement (walk/fly/spiral/orbit/lorenz/gen) → "visual trail", static voices → "visual sphere"
+- ALWAYS add visual with a semantic icon name matching the sound. Moving voices get trail too. Examples: "visual cloud-rain trail", "visual bird trail", "visual fire", "visual waves", "visual lightning trail". Available icon names: lightning, bird, fire, wind, cloud-rain, cloud-snow, cloud-lightning, waves, drop, sun, moon, star, campfire, tree, leaf, flower, mountains, flame, meteor, planet, globe, tent, city, buildings, factory, siren, bell, guitar, piano-keys, music-note, music-notes, vinyl-record, speaker-high, microphone-stage, waveform, radio, dog, cat, fish, horse, butterfly, paw-print, person-simple-walk, footprints, car, train, boat, rocket, robot, alien, ghost, skull, heartbeat, brain, eye, clock, gear, bomb, snowflake, rainbow, wave-sine, church, sword, shield, diamond, crown. Fall back to "visual sphere" or "visual trail" only if no icon fits.
 
 ${audioLibrary}
 ${topExamples.length > 0 ? `
@@ -389,7 +389,7 @@ CRITICAL SYNTAX RULES (NO COLONS, NO QUOTES, NO EQUALS):
 - Color: color red gobetween(0and255 as incubic in 20) green 0to255 blue 100
 - Alpha: alpha 0.5 OR color #FF0000 alpha gobetween(0and1 in 5)
 - Effects: delay wet 0.9 time 0.5 feedback 0.5 [pingpong] | reverb wet 0.8 size 0.9 damping 0.5 | filter mode lowpass cutoff 3000 resonance 1 | distortion mode tanh drive 2 | eq low 3 mid -2 high 1
-- Visual: visual trail OR visual sphere OR visual trail cube
+- Visual: visual cloud-rain trail | visual bird trail | visual fire | visual sphere | visual trail
 - Ranges: 0.5to1.0 (NO SPACES around 'to')
 - Timing: start 5, end 30 fade 2, fadein 1, fadeout 2
 - Comments: # inline comment OR comment ... endcomment block

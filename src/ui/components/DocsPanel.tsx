@@ -82,7 +82,7 @@ Properties are indented below their statement:
 | \`fade_out\` | seconds | Fade-out time |
 | \`color\` | #hex / name / r g b | Visual color |
 | \`alpha\` | 0–1 | Visual opacity |
-| \`visual\` | sphere/cube/trail/none | 3D visual type |
+| \`visual\` | sphere/cube/trail/none/cloud/bird/... | 3D visual — or semantic icon |
 | \`background\` | #hex / name / 0-255 | Viewport background color |
 
 **Flags** (no value needed):

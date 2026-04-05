@@ -31,7 +31,7 @@ export function CommunityTab({ onLoadBuffer }: CommunityTabProps) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [dragOver, setDragOver] = useState(false);
-  const [uploadFile, setUploadFile] = useState<{ buffer: AudioBuffer; name: string } | null>(null);
+  const [uploadQueue, setUploadQueue] = useState<{ buffer: AudioBuffer; name: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [adding, setAdding] = useState<string | null>(null);
   const preview = useSamplePreview();
@@ -69,33 +69,46 @@ export function CommunityTab({ onLoadBuffer }: CommunityTabProps) {
     preview.play(sample.id, buffer);
   }, [preview, previewBuffers]);
 
-  // Drag-and-drop / file upload for sharing
-  const processAudioFile = useCallback(async (file: File) => {
-    if (!ACCEPTED_AUDIO.test(file.name) || !user) return;
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const ctx = getDecodeCtx();
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
-      const nameWithoutExt = file.name.replace(/\.[^.]+$/, '').replace(/[_\-]/g, ' ');
-      setUploadFile({ buffer: audioBuffer, name: nameWithoutExt });
-    } catch (e) {
-      console.error('[CommunityTab] Failed to decode audio:', e);
+  // Drag-and-drop / file upload for sharing — supports multiple files
+  const processAudioFiles = useCallback(async (files: FileList | File[]) => {
+    if (!user) return;
+    const ctx = getDecodeCtx();
+    const newItems: { buffer: AudioBuffer; name: string }[] = [];
+
+    for (const file of Array.from(files)) {
+      if (!ACCEPTED_AUDIO.test(file.name)) continue;
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        const nameWithoutExt = file.name.replace(/\.[^.]+$/, '').replace(/[_\-]/g, ' ');
+        newItems.push({ buffer: audioBuffer, name: nameWithoutExt });
+      } catch (e) {
+        console.error(`[CommunityTab] Failed to decode ${file.name}:`, e);
+      }
+    }
+
+    if (newItems.length > 0) {
+      setUploadQueue(prev => [...prev, ...newItems]);
     }
   }, [user]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file) processAudioFile(file);
-  }, [processAudioFile]);
+    if (e.dataTransfer.files.length > 0) processAudioFiles(e.dataTransfer.files);
+  }, [processAudioFiles]);
 
   const handleUploadComplete = useCallback(() => {
-    setUploadFile(null);
-    // Refresh list
+    setUploadQueue(prev => prev.slice(1));
     setLoading(true);
     getPopularSamples(30).then(setSamples).finally(() => setLoading(false));
   }, []);
+
+  const handleUploadSkip = useCallback(() => {
+    setUploadQueue(prev => prev.slice(1));
+  }, []);
+
+  const currentUpload = uploadQueue[0] ?? null;
 
   const handleAdd = useCallback(async (sample: CommunitySample) => {
     setAdding(sample.id);
@@ -137,10 +150,10 @@ export function CommunityTab({ onLoadBuffer }: CommunityTabProps) {
         ref={fileInputRef}
         type="file"
         accept=".wav,.mp3,.ogg,.flac,.m4a,.webm"
+        multiple
         style={{ display: 'none' }}
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) processAudioFile(file);
+          if (e.target.files && e.target.files.length > 0) processAudioFiles(e.target.files);
           if (fileInputRef.current) fileInputRef.current.value = '';
         }}
       />
@@ -262,14 +275,16 @@ export function CommunityTab({ onLoadBuffer }: CommunityTabProps) {
         ))}
       </div>
 
-      {/* Upload dialog */}
-      {uploadFile && user && (
+      {/* Upload dialog — queue, one at a time */}
+      {currentUpload && user && (
         <CommunityUploadDialog
-          audioBuffer={uploadFile.buffer}
-          fileName={uploadFile.name}
+          key={currentUpload.name + uploadQueue.length}
+          audioBuffer={currentUpload.buffer}
+          fileName={currentUpload.name}
           userId={user.id}
-          onClose={() => setUploadFile(null)}
+          onClose={handleUploadSkip}
           onUploaded={handleUploadComplete}
+          queueRemaining={uploadQueue.length - 1}
         />
       )}
     </div>

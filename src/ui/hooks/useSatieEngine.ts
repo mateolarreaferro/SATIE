@@ -94,6 +94,18 @@ export function useSatieEngine() {
     }
   }, []);
 
+  const setOnSearchCommunity = useCallback((cb: ((prompt: string) => Promise<ArrayBuffer | null>) | null) => {
+    if (engineRef.current) {
+      engineRef.current.onSearchCommunity = cb;
+    }
+  }, []);
+
+  const setPreferCommunity = useCallback((value: boolean) => {
+    if (engineRef.current) {
+      engineRef.current.preferCommunitySamples = value;
+    }
+  }, []);
+
   return {
     engine: engineRef,
     uiState,
@@ -109,5 +121,7 @@ export function useSatieEngine() {
     setListenerPosition,
     setListenerOrientation,
     setOnMissingBuffer,
+    setOnSearchCommunity,
+    setPreferCommunity,
   };
 }

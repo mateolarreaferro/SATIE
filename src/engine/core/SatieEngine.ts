@@ -135,6 +135,15 @@ export class SatieEngine {
   /** Callback for resolving missing audio buffers (e.g. community samples). */
   onMissingBuffer: ((clipName: string) => Promise<ArrayBuffer | null>) | null = null;
 
+  /**
+   * Callback to search community samples by a gen prompt (e.g. "gentle rain").
+   * Returns an ArrayBuffer if a matching community sample is found.
+   */
+  onSearchCommunity: ((prompt: string) => Promise<ArrayBuffer | null>) | null = null;
+
+  /** When true, try community samples before calling ElevenLabs for gen statements. */
+  preferCommunitySamples = false;
+
   constructor() {
     this.ctx = new AudioContext();
     this.clock = new SatieDSPClock(this.ctx);
@@ -610,8 +619,12 @@ export class SatieEngine {
 
     if (!buffer) {
       if (stmt.isGenerated && stmt.genPrompt) {
-        // Trigger async generation, then retry playback
-        this.generateAndRetrigger(key, stmt, clipPath);
+        // Community-first: try finding a matching community sample before generating
+        if (this.preferCommunitySamples && this.onSearchCommunity) {
+          this.communityThenGenerate(key, stmt, clipPath);
+        } else {
+          this.generateAndRetrigger(key, stmt, clipPath);
+        }
         return;
       }
       // Try resolving via onMissingBuffer callback (e.g. community samples)
@@ -730,16 +743,37 @@ export class SatieEngine {
         effectivePrompt = `${basePrompt}, ${variations[(count - 2) % variations.length]}`;
       }
 
-      const opts = this.sampleGenOptions(stmt);
-      console.log(`[SatieEngine] Pre-generating audio: "${effectivePrompt}" → ${clipPath}`);
-      generateAudio(this.ctx, effectivePrompt, clipPath, stmt.kind === 'loop', opts)
-        .then((audioBuffer) => {
-          this.audioBuffers.set(clipPath, audioBuffer);
-        })
-        .catch((e: any) => {
-          this.addRuntimeWarning(`Audio generation failed: ${e.message}`);
-        });
+      // Community-first: try community samples before calling ElevenLabs
+      if (this.preferCommunitySamples && this.onSearchCommunity) {
+        const searchPrompt = effectivePrompt;
+        this.onSearchCommunity(searchPrompt)
+          .then(async (communityData) => {
+            if (communityData) {
+              console.log(`[SatieEngine] Community match for "${searchPrompt}" → ${clipPath}`);
+              const ab = await this.ctx.decodeAudioData(communityData.slice(0));
+              this.audioBuffers.set(clipPath, ab);
+            } else {
+              // No match — fall back to ElevenLabs
+              return this.fallbackGenerate(effectivePrompt, clipPath, stmt);
+            }
+          })
+          .catch(() => this.fallbackGenerate(effectivePrompt, clipPath, stmt));
+      } else {
+        this.fallbackGenerate(effectivePrompt, clipPath, stmt);
+      }
     }
+  }
+
+  private fallbackGenerate(prompt: string, clipPath: string, stmt: Statement): void {
+    const opts = this.sampleGenOptions(stmt);
+    console.log(`[SatieEngine] Generating audio: "${prompt}" → ${clipPath}`);
+    generateAudio(this.ctx, prompt, clipPath, stmt.kind === 'loop', opts)
+      .then((audioBuffer) => {
+        this.audioBuffers.set(clipPath, audioBuffer);
+      })
+      .catch((e: any) => {
+        this.addRuntimeWarning(`Audio generation failed: ${e.message}`);
+      });
   }
 
   private async generateAndRetrigger(key: string, stmt: Statement, clipPath: string): Promise<void> {
@@ -774,6 +808,24 @@ export class SatieEngine {
     } catch (e: any) {
       this.addRuntimeWarning(`Audio generation failed for "${stmt.genPrompt}": ${e.message}`);
     }
+  }
+
+  private async communityThenGenerate(key: string, stmt: Statement, clipPath: string): Promise<void> {
+    try {
+      const data = await this.onSearchCommunity!(stmt.genPrompt!);
+      if (data) {
+        console.log(`[SatieEngine] Community match for gen "${stmt.genPrompt}" → ${clipPath}`);
+        const audioBuffer = await this.ctx.decodeAudioData(data.slice(0));
+        this.audioBuffers.set(clipPath, audioBuffer);
+        if (this._isPlaying && this.tracks.has(key)) {
+          this.retriggerAudio(key, stmt);
+        }
+        return;
+      }
+    } catch { /* community search failed, fall through */ }
+
+    // No community match — fall back to ElevenLabs generation
+    this.generateAndRetrigger(key, stmt, clipPath);
   }
 
   private async resolveAndRetrigger(key: string, stmt: Statement, clipPath: string): Promise<void> {

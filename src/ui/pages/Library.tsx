@@ -2,7 +2,7 @@
  * Community Sample Library page — browse, search, preview, and download shared audio samples.
  * Route: /library
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useDayNightCycle } from '../hooks/useDayNightCycle';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { useSFX } from '../hooks/useSFX';
@@ -11,6 +11,8 @@ import { useAuth } from '../../lib/AuthContext';
 import { RiverCanvas } from '../components/RiverCanvas';
 import { Header } from '../components/Header';
 import { CommunityUploadDialog } from '../components/CommunityUploadDialog';
+import { SampleGraph } from '../components/SampleGraph';
+import { buildGraph, computeLayout } from '../../lib/graphLayout';
 import {
   getPopularSamples,
   getRecentSamples,
@@ -22,6 +24,7 @@ import {
 } from '../../lib/communitySamples';
 
 type SortMode = 'popular' | 'recent';
+type ViewMode = 'grid' | 'graph';
 
 /** Shared AudioContext for decoding dropped files */
 let _decodeCtx: AudioContext | null = null;
@@ -47,11 +50,12 @@ export function Library() {
   const [popularTags, setPopularTags] = useState<{ tag: string; count: number }[]>([]);
   const [selectedSample, setSelectedSample] = useState<CommunitySample | null>(null);
   const [previewBuffers, setPreviewBuffers] = useState<Map<string, ArrayBuffer>>(new Map());
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Drag-and-drop upload state
   const [dragOver, setDragOver] = useState(false);
-  const [uploadFile, setUploadFile] = useState<{ buffer: AudioBuffer; name: string } | null>(null);
+  const [uploadQueue, setUploadQueue] = useState<{ buffer: AudioBuffer; name: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load initial data
@@ -122,27 +126,34 @@ export function Library() {
     return s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
   };
 
-  // Process dropped or selected audio files
-  const processAudioFile = useCallback(async (file: File) => {
-    if (!ACCEPTED_AUDIO.test(file.name)) return;
-    if (!user) return; // require auth
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const ctx = getDecodeCtx();
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
-      const nameWithoutExt = file.name.replace(/\.[^.]+$/, '').replace(/[_\-]/g, ' ');
-      setUploadFile({ buffer: audioBuffer, name: nameWithoutExt });
-    } catch (e) {
-      console.error('[Library] Failed to decode audio file:', e);
+  // Process dropped or selected audio files — queues multiple
+  const processAudioFiles = useCallback(async (files: FileList | File[]) => {
+    if (!user) return;
+    const ctx = getDecodeCtx();
+    const newItems: { buffer: AudioBuffer; name: string }[] = [];
+
+    for (const file of Array.from(files)) {
+      if (!ACCEPTED_AUDIO.test(file.name)) continue;
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        const nameWithoutExt = file.name.replace(/\.[^.]+$/, '').replace(/[_\-]/g, ' ');
+        newItems.push({ buffer: audioBuffer, name: nameWithoutExt });
+      } catch (e) {
+        console.error(`[Library] Failed to decode ${file.name}:`, e);
+      }
+    }
+
+    if (newItems.length > 0) {
+      setUploadQueue(prev => [...prev, ...newItems]);
     }
   }, [user]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    const files = e.dataTransfer.files;
-    if (files.length > 0) processAudioFile(files[0]);
-  }, [processAudioFile]);
+    if (e.dataTransfer.files.length > 0) processAudioFiles(e.dataTransfer.files);
+  }, [processAudioFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -154,16 +165,41 @@ export function Library() {
   }, []);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processAudioFile(file);
+    if (e.target.files && e.target.files.length > 0) processAudioFiles(e.target.files);
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [processAudioFile]);
+  }, [processAudioFiles]);
 
+  // Advance to next file in queue (or close if done)
   const handleUploadComplete = useCallback(() => {
-    setUploadFile(null);
-    // Refresh the list
+    setUploadQueue(prev => prev.slice(1));
     doSearch(searchQuery, activeTags, sort);
   }, [doSearch, searchQuery, activeTags, sort]);
+
+  const handleUploadSkip = useCallback(() => {
+    setUploadQueue(prev => prev.slice(1));
+  }, []);
+
+  const currentUpload = uploadQueue[0] ?? null;
+
+  // Graph data — compute layout from samples (memoized)
+  const graphData = useMemo(() => {
+    if (viewMode !== 'graph' || samples.length === 0) return null;
+    const graphSamples = samples.map(s => ({
+      id: s.id,
+      name: s.name,
+      tags: s.tags,
+      downloadCount: s.download_count,
+      embedding: null, // embeddings loaded separately if available
+    }));
+    const graph = buildGraph(graphSamples, 0.6);
+    computeLayout(graph, 200);
+    return graph;
+  }, [samples, viewMode]);
+
+  const handleGraphSelect = useCallback((nodeId: string) => {
+    const sample = samples.find(s => s.id === nodeId);
+    setSelectedSample(prev => prev?.id === nodeId ? null : sample ?? null);
+  }, [samples]);
 
   return (
     <div style={{
@@ -179,6 +215,21 @@ export function Library() {
       position: 'relative',
     }}>
       <RiverCanvas mode={mode} />
+
+      {/* Graph background — fullscreen behind the UI */}
+      {viewMode === 'graph' && graphData && graphData.nodes.length > 0 && (
+        <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+          <SampleGraph
+            nodes={graphData.nodes}
+            edges={graphData.edges}
+            onSelect={handleGraphSelect}
+            selectedId={selectedSample?.id ?? null}
+            highlightIds={null}
+            theme={theme}
+          />
+        </div>
+      )}
+
       <Header theme={theme} mode={mode} setMode={setMode} />
 
       {/* Hidden file input for click-to-upload */}
@@ -186,31 +237,36 @@ export function Library() {
         ref={fileInputRef}
         type="file"
         accept=".wav,.mp3,.ogg,.flac,.m4a,.webm"
+        multiple
         style={{ display: 'none' }}
         onChange={handleFileSelect}
       />
 
-      {/* Content */}
+      {/* Content — floats above graph in graph mode */}
       <div style={{
         flex: 1,
-        overflow: 'auto',
+        overflow: viewMode === 'graph' ? 'hidden' : 'auto',
         padding: '24px 32px',
         position: 'relative',
         zIndex: 1,
+        pointerEvents: viewMode === 'graph' ? 'none' : 'auto',
       }}>
         {/* Title + search bar */}
-        <div style={{ maxWidth: 900, margin: '0 auto' }}>
+        <div style={{ maxWidth: 900, margin: '0 auto', pointerEvents: 'auto' }}>
           <h1 style={{
             fontSize: 28,
             fontWeight: 700,
+            display: viewMode === 'graph' ? 'none' : undefined,
             margin: '0 0 6px',
             letterSpacing: '0.02em',
           }}>
             community library
           </h1>
-          <p style={{ fontSize: 14, opacity: 0.4, margin: '0 0 20px' }}>
-            Shared audio samples from the Satie community. All CC0 public domain.
-          </p>
+          {viewMode !== 'graph' && (
+            <p style={{ fontSize: 14, opacity: 0.4, margin: '0 0 20px' }}>
+              Shared audio samples from the Satie community. All CC0 public domain.
+            </p>
+          )}
 
           {/* Search */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
@@ -254,10 +310,52 @@ export function Library() {
                 </button>
               ))}
             </div>
+
+            {/* View mode toggle */}
+            <div style={{ display: 'flex', gap: 2 }}>
+              {(['grid', 'graph'] as ViewMode[]).map(v => (
+                <button
+                  key={v}
+                  onClick={() => { sfx.click(); setViewMode(v); }}
+                  onMouseEnter={sfx.hover}
+                  title={v === 'grid' ? 'Grid view' : 'Knowledge graph'}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    border: `1px solid ${theme.border}`,
+                    background: viewMode === v ? theme.invertedBg : 'transparent',
+                    color: viewMode === v ? theme.invertedText : theme.text,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  {v === 'grid' ? (
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <rect x="1" y="1" width="5" height="5" rx="1" />
+                      <rect x="8" y="1" width="5" height="5" rx="1" />
+                      <rect x="1" y="8" width="5" height="5" rx="1" />
+                      <rect x="8" y="8" width="5" height="5" rx="1" />
+                    </svg>
+                  ) : (
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <circle cx="7" cy="3" r="1.5" />
+                      <circle cx="3" cy="10" r="1.5" />
+                      <circle cx="11" cy="10" r="1.5" />
+                      <circle cx="11" cy="5" r="1.5" />
+                      <line x1="7" y1="4.5" x2="3" y2="8.5" />
+                      <line x1="7" y1="4.5" x2="11" y2="8.5" />
+                      <line x1="11" y1="6.5" x2="11" y2="8.5" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Tag filters */}
-          {popularTags.length > 0 && (
+          {/* Tag filters — grid mode only */}
+          {popularTags.length > 0 && viewMode === 'grid' && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
               {popularTags.map(({ tag, count }) => {
                 const isActive = activeTags.includes(tag);
@@ -287,14 +385,14 @@ export function Library() {
           )}
 
           {/* Loading */}
-          {loading && (
+          {loading && viewMode === 'grid' && (
             <div style={{ textAlign: 'center', padding: 40, opacity: 0.4, fontSize: 15 }}>
               loading...
             </div>
           )}
 
           {/* Empty state */}
-          {!loading && samples.length === 0 && (
+          {!loading && samples.length === 0 && viewMode === 'grid' && (
             <div style={{ textAlign: 'center', padding: 60, opacity: 0.4, fontSize: 15 }}>
               {searchQuery || activeTags.length > 0
                 ? 'No samples match your search. Try different keywords or tags.'
@@ -302,8 +400,8 @@ export function Library() {
             </div>
           )}
 
-          {/* Drop zone — centered, above the grid */}
-          {user && (
+          {/* Drop zone — grid mode only */}
+          {user && viewMode === 'grid' && (
             <DropZoneCard
               dragOver={dragOver}
               theme={theme}
@@ -315,31 +413,33 @@ export function Library() {
             />
           )}
 
-          {/* Sample grid */}
-          {!loading && (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-              gap: 12,
-            }}>
-              {samples.map(sample => (
-                <SampleCard
-                  key={sample.id}
-                  sample={sample}
-                  theme={theme}
-                  sfx={sfx}
-                  isSelected={selectedSample?.id === sample.id}
-                  isPlaying={preview.playingId === sample.id}
-                  onSelect={() => {
-                    sfx.click();
-                    setSelectedSample(selectedSample?.id === sample.id ? null : sample);
-                  }}
-                  onPreview={() => handlePreview(sample)}
-                  formatDuration={formatDuration}
-                />
-              ))}
-            </div>
-          )}
+          {viewMode === 'grid' ? (
+            /* ── Grid view ── */
+            !loading && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                gap: 12,
+              }}>
+                {samples.map(sample => (
+                  <SampleCard
+                    key={sample.id}
+                    sample={sample}
+                    theme={theme}
+                    sfx={sfx}
+                    isSelected={selectedSample?.id === sample.id}
+                    isPlaying={preview.playingId === sample.id}
+                    onSelect={() => {
+                      sfx.click();
+                      setSelectedSample(selectedSample?.id === sample.id ? null : sample);
+                    }}
+                    onPreview={() => handlePreview(sample)}
+                    formatDuration={formatDuration}
+                  />
+                ))}
+              </div>
+            )
+          ) : null /* graph renders as fullscreen background */}
         </div>
       </div>
 
@@ -355,14 +455,16 @@ export function Library() {
         />
       )}
 
-      {/* Upload dialog */}
-      {uploadFile && user && (
+      {/* Upload dialog — shows one at a time, queue advances on publish/skip */}
+      {currentUpload && user && (
         <CommunityUploadDialog
-          audioBuffer={uploadFile.buffer}
-          fileName={uploadFile.name}
+          key={currentUpload.name + uploadQueue.length}
+          audioBuffer={currentUpload.buffer}
+          fileName={currentUpload.name}
           userId={user.id}
-          onClose={() => setUploadFile(null)}
+          onClose={handleUploadSkip}
           onUploaded={handleUploadComplete}
+          queueRemaining={uploadQueue.length - 1}
         />
       )}
     </div>

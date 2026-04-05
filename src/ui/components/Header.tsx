@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
-import { loadSettings, saveKey as saveSettingsKey } from '../../lib/userSettings';
+import { loadSettings, saveKey as saveSettingsKey, getPreferCommunitySamples, setPreferCommunitySamples } from '../../lib/userSettings';
 import { useSFX } from '../hooks/useSFX';
 import { FeedbackDashboard } from './FeedbackDashboard';
 import type { Theme, ThemeMode } from '../hooks/useDayNightCycle';
@@ -107,6 +107,12 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
   const [balanceCents, setBalanceCents] = useState<number | null>(null);
   const [advancedTab, setAdvancedTab] = useState<'keys' | 'learning'>('keys');
   const [addingCredits, setAddingCredits] = useState(false);
+  const [preferCommunity, setPreferCommunityLocal] = useState(() => getPreferCommunitySamples());
+
+  const setPreferCommunityState = useCallback((value: boolean) => {
+    setPreferCommunityLocal(value);
+    setPreferCommunitySamples(value);
+  }, []);
 
   const userName = user?.user_metadata?.user_name || user?.email?.split('@')[0] || '';
 
@@ -470,6 +476,32 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
               ) : (
                 <div style={{ fontSize: '15px', opacity: 0.4, lineHeight: 1.4 }}>
                   Sign in to add credits for AI and audio generation.
+                </div>
+              )}
+
+              {/* Community-first toggle */}
+              {user && (
+                <div style={{ marginTop: 10 }}>
+                  <label style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                    fontSize: '15px',
+                    opacity: 0.5,
+                    fontFamily: "'Inter', system-ui, sans-serif",
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={preferCommunity}
+                      onChange={(e) => {
+                        sfx.click();
+                        setPreferCommunityState(e.target.checked);
+                      }}
+                      style={{ accentColor: '#1a3a2a' }}
+                    />
+                    Prefer community samples over AI generation
+                  </label>
                 </div>
               )}
 
