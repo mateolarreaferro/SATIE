@@ -4,7 +4,6 @@ import { useAuth } from '../../lib/AuthContext';
 import { getUserSketches, createSketch, deleteSketch, updateSketch } from '../../lib/sketches';
 import { TEMPLATES } from '../../lib/templates';
 import type { Sketch } from '../../lib/supabase';
-import { SplashScreen } from '../components/SplashScreen';
 import { Header } from '../components/Header';
 import { useSFX } from '../hooks/useSFX';
 import { useDayNightCycle, type Theme } from '../hooks/useDayNightCycle';
@@ -482,14 +481,6 @@ export function Dashboard() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const [sketches, setSketches] = useState<Sketch[]>([]);
   const [loadingSketches, setLoadingSketches] = useState(false);
-  const [showSplash, setShowSplash] = useState(() => {
-    if (localStorage.getItem('satie-onboarding-done')) return false;
-    return true;
-  });
-  const handleSplashComplete = useCallback(() => {
-    setShowSplash(false);
-    localStorage.setItem('satie-onboarding-done', '1');
-  }, []);
 
   // Physics simulation for sketch cards
   const { bodies, dragging: draggingRef } = usePhysics(sketches.length, canvasRef);
@@ -566,7 +557,6 @@ export function Dashboard() {
 
   return (
     <>
-      {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
 
       <div style={{ ...styles.container, background: theme.bg, color: theme.text, transition: 'background 1.5s ease, color 1.5s ease', position: 'relative' }}>
         <RiverCanvas mode={mode} />
