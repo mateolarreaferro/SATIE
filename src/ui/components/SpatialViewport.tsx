@@ -8,7 +8,7 @@ import type { TrackState } from '../../engine';
 import { useHeadTracking } from '../hooks/useHeadTracking';
 import { useFaceTracking, type FaceMeshData } from '../hooks/useFaceTracking';
 import { resolveTrackIcon, type IconName } from '../utils/iconMap';
-import { getIconTexture, getIconTextureAsync } from '../utils/iconTexture';
+import { getIconTextureAsync } from '../utils/iconTexture';
 
 const ViewportFocusContext = createContext<{ focused: boolean }>({ focused: false });
 const CameraResetContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
