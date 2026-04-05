@@ -11,6 +11,7 @@ const Gallery = lazy(() => import('./ui/pages/Gallery').then(m => ({ default: m.
 const SketchView = lazy(() => import('./ui/pages/SketchView').then(m => ({ default: m.SketchView })));
 const Embed = lazy(() => import('./ui/pages/Embed').then(m => ({ default: m.Embed })));
 const UserProfile = lazy(() => import('./ui/pages/UserProfile').then(m => ({ default: m.UserProfile })));
+const Library = lazy(() => import('./ui/pages/Library').then(m => ({ default: m.Library })));
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/explore" element={<Gallery />} />
             <Route path="/s/:id" element={<SketchView />} />
             <Route path="/embed/:id" element={<Embed />} />
+            <Route path="/library" element={<Library />} />
             <Route path="/u/:username" element={<UserProfile />} />
           </Routes>
         </Suspense>

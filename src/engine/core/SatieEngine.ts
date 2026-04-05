@@ -132,6 +132,9 @@ export class SatieEngine {
   private _mutedIndices: Set<number> = new Set();
   private _soloedIndices: Set<number> = new Set();
 
+  /** Callback for resolving missing audio buffers (e.g. community samples). */
+  onMissingBuffer: ((clipName: string) => Promise<ArrayBuffer | null>) | null = null;
+
   constructor() {
     this.ctx = new AudioContext();
     this.clock = new SatieDSPClock(this.ctx);
@@ -611,6 +614,11 @@ export class SatieEngine {
         this.generateAndRetrigger(key, stmt, clipPath);
         return;
       }
+      // Try resolving via onMissingBuffer callback (e.g. community samples)
+      if (this.onMissingBuffer) {
+        this.resolveAndRetrigger(key, stmt, clipPath);
+        return;
+      }
       this.addRuntimeWarning(`Audio not loaded: ${stmt.clip}`);
       return;
     }
@@ -765,6 +773,25 @@ export class SatieEngine {
       }
     } catch (e: any) {
       this.addRuntimeWarning(`Audio generation failed for "${stmt.genPrompt}": ${e.message}`);
+    }
+  }
+
+  private async resolveAndRetrigger(key: string, stmt: Statement, clipPath: string): Promise<void> {
+    if (!this.onMissingBuffer) return;
+    try {
+      const data = await this.onMissingBuffer(stmt.clip);
+      if (!data) {
+        this.addRuntimeWarning(`Audio not found: ${stmt.clip}`);
+        return;
+      }
+      const audioBuffer = await this.ctx.decodeAudioData(data.slice(0)); // slice to avoid detach
+      this.audioBuffers.set(clipPath, audioBuffer);
+      // Retry playback if still playing
+      if (this._isPlaying && this.tracks.has(key)) {
+        this.retriggerAudio(key, stmt);
+      }
+    } catch (e: any) {
+      this.addRuntimeWarning(`Failed to resolve audio "${stmt.clip}": ${e.message}`);
     }
   }
 

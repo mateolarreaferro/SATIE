@@ -18,6 +18,7 @@ import type { Statement } from '../../engine/core/Statement';
 import { WanderType } from '../../engine/core/Statement';
 import { registerTrajectoryFromLUT, getTrajectory } from '../../engine/spatial/Trajectories';
 import { cacheTrajectory } from '../../lib/trajectoryCache';
+import { downloadCommunitySampleByName } from '../../lib/communitySamples';
 import { generateTrajectoryFromPrompt, executeTrajectoryCode, postProcessTrajectory, type TrajectoryGenParams } from '../../engine/spatial/TrajectoryGen';
 import { encodeWAV } from '../../engine/export/WAVEncoder';
 import { captureCanvasThumbnail, uploadThumbnail } from '../../lib/thumbnailCapture';
@@ -251,6 +252,7 @@ export function Editor() {
     toggleSolo,
     setListenerPosition,
     setListenerOrientation,
+    setOnMissingBuffer,
   } = useSatieEngine();
 
   const sfx = useSFX();
@@ -294,6 +296,16 @@ export function Editor() {
   const autosaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   /** Raw ArrayBuffers for samples loaded this session — used for uploading on save. */
   const sampleBuffers = useRef<Map<string, ArrayBuffer>>(new Map());
+
+  // Wire community sample resolution for lazy loading
+  useEffect(() => {
+    setOnMissingBuffer(async (clipName: string) => {
+      // Try community samples for clips with community/ prefix
+      const name = clipName.startsWith('community/') ? clipName.slice(10) : clipName;
+      return downloadCommunitySampleByName(name);
+    });
+    return () => setOnMissingBuffer(null);
+  }, [setOnMissingBuffer]);
 
   // Load sketch from DB if we have an ID, then load its samples
   useEffect(() => {

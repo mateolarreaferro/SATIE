@@ -23,12 +23,27 @@ async function claimFreeCredits(accessToken: string) {
   } catch { /* endpoint may not be deployed yet */ }
 }
 
+const isLocalDev = false; // disabled to test real auth on localhost
+
+const devUser = {
+  id: 'dev-local-user',
+  email: 'dev@localhost',
+  user_metadata: { full_name: 'Local Dev', avatar_url: '' },
+} as unknown as User;
+
+const devSession = {
+  access_token: 'dev-token',
+  user: devUser,
+} as unknown as Session;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(isLocalDev ? devUser : null);
+  const [session, setSession] = useState<Session | null>(isLocalDev ? devSession : null);
+  const [loading, setLoading] = useState(isLocalDev ? false : true);
 
   useEffect(() => {
+    if (isLocalDev) return;
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);

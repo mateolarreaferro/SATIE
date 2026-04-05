@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface SplashScreenProps {
   onComplete: () => void;
+  /** When false, skip the onboarding steps and only show the logo splash */
+  showTutorial?: boolean;
 }
 
 // ─── Sound design ───────────────────────────────────────────────────────────
@@ -172,7 +174,7 @@ const STEPS = [
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function SplashScreen({ onComplete }: SplashScreenProps) {
+export function SplashScreen({ onComplete, showTutorial = true }: SplashScreenProps) {
   // 0 = logo-in, 1 = logo-hold, 2 = onboarding steps, 3 = fade-out
   const [phase, setPhase] = useState(0);
   const [step, setStep] = useState(0);
@@ -186,8 +188,18 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
       soundLogoReveal();
     }, 300);
     const t1 = setTimeout(() => setPhase(1), 1800);
-    const t2 = setTimeout(() => setPhase(2), 3200);
-    return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); };
+    if (showTutorial) {
+      // Show onboarding steps after logo
+      const t2 = setTimeout(() => setPhase(2), 3200);
+      return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); };
+    } else {
+      // Skip tutorial — fade out after logo hold
+      const t2 = setTimeout(() => {
+        setPhase(3);
+        setTimeout(onComplete, 900);
+      }, 3200);
+      return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2); };
+    }
   }, []);
 
   // Play step sound when entering onboarding

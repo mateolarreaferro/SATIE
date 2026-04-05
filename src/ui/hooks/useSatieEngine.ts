@@ -88,6 +88,12 @@ export function useSatieEngine() {
     engineRef.current?.setListenerOrientation(fx, fy, fz, ux, uy, uz);
   }, []);
 
+  const setOnMissingBuffer = useCallback((cb: ((clipName: string) => Promise<ArrayBuffer | null>) | null) => {
+    if (engineRef.current) {
+      engineRef.current.onMissingBuffer = cb;
+    }
+  }, []);
+
   return {
     engine: engineRef,
     uiState,
@@ -102,5 +108,6 @@ export function useSatieEngine() {
     toggleSolo,
     setListenerPosition,
     setListenerOrientation,
+    setOnMissingBuffer,
   };
 }

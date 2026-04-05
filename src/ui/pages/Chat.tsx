@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { createSketch, getPublicSketches } from '../../lib/sketches';
 import { getProfile } from '../../lib/profiles';
-import { generateCode } from '../../lib/aiGenerate';
+import { generateCodeAdaptive } from '../../lib/aiGenerate';
 import { createProvider } from '../../lib/aiProvider';
 import { useDayNightCycle } from '../hooks/useDayNightCycle';
 import { useSFX } from '../hooks/useSFX';
@@ -15,6 +15,7 @@ import { ChatMessage, type ChatMessageData } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { Header } from '../components/Header';
 import type { Sketch, Profile } from '../../lib/supabase';
+import { downloadCommunitySampleByName } from '../../lib/communitySamples';
 
 const SUGGESTIONS = [
   { title: 'Forest at dawn', desc: 'birds calling, wind through leaves, a distant stream', icon: (c: string) => (
@@ -32,7 +33,7 @@ export function Chat() {
   const navigate = useNavigate();
   const { user, signInWithGitHub, signInWithGoogle } = useAuth();
   const { mode, theme, setMode } = useDayNightCycle();
-  const { uiState, tracksRef, loadScript, play, stop, setListenerPosition, setListenerOrientation } = useSatieEngine();
+  const { uiState, tracksRef, loadScript, play, stop, setListenerPosition, setListenerOrientation, setOnMissingBuffer } = useSatieEngine();
   const sfx = useSFX();
 
   // Background music — plays until first prompt is sent
@@ -49,6 +50,15 @@ export function Chat() {
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
+
+  // Wire community sample resolution for lazy loading
+  useEffect(() => {
+    setOnMissingBuffer(async (clipName: string) => {
+      const name = clipName.startsWith('community/') ? clipName.slice(10) : clipName;
+      return downloadCommunitySampleByName(name);
+    });
+    return () => setOnMissingBuffer(null);
+  }, [setOnMissingBuffer]);
 
   // Track whether there are active tracks for conditional viewport mount
   useEffect(() => {
@@ -164,7 +174,7 @@ export function Chat() {
           content: m.role === 'assistant' ? (m.script ?? m.content) : m.content,
         }));
 
-      const result = await generateCode(
+      const result = await generateCodeAdaptive(
         prompt,
         currentScript ?? undefined,
         [], // no loaded samples in chat mode — AI uses gen blocks

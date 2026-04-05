@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { SamplesTab, type SampleEntry } from './SamplesTab';
 import { TrajectoriesTab } from './TrajectoriesTab';
+import { CommunityTab } from './CommunityTab';
 
-export type AssetTab = 'samples' | 'trajectories';
+export type AssetTab = 'samples' | 'trajectories' | 'community';
 
 interface AssetPanelProps {
   samples: SampleEntry[];
@@ -60,6 +61,9 @@ export function AssetPanel({
         <button onClick={() => setTab('trajectories')} style={tabBtnStyle(tab === 'trajectories')}>
           Trajectories
         </button>
+        <button onClick={() => setTab('community')} style={tabBtnStyle(tab === 'community')}>
+          Community
+        </button>
         <span style={{
           fontSize: '16px',
           opacity: 0.2,
@@ -79,11 +83,13 @@ export function AssetPanel({
             onDelete={onDeleteSample}
             onPreview={onPreviewSample}
           />
-        ) : (
+        ) : tab === 'trajectories' ? (
           <TrajectoriesTab
             onGenerateTrajectory={onGenerateTrajectory}
             generatingTrajectory={generatingTrajectory}
           />
+        ) : (
+          <CommunityTab onLoadBuffer={onLoadBuffer} />
         )}
       </div>
     </div>

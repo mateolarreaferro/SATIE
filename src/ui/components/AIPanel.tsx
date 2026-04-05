@@ -11,7 +11,14 @@ import {
   updateFeedback,
   createFeedbackEntry,
 } from '../../lib/feedbackStore';
-import { generateCode, generateSampleSpec } from '../../lib/aiGenerate';
+import {
+  generateCode,
+  generateSampleSpec,
+  generateEnsemble,
+  refineScript,
+  generateCodeAdaptive,
+  type RefinementProgress,
+} from '../../lib/aiGenerate';
 
 export type AITarget = 'script' | 'sample' | 'trajectory';
 
@@ -137,6 +144,10 @@ export function AIPanel({
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Ensemble & refinement modes
+  const [ensembleMode, setEnsembleMode] = useState(false);
+  const [isRefining, setIsRefining] = useState(false);
+
   // Generation history (Option A: linear stack)
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = current/new
@@ -244,29 +255,44 @@ export function AIPanel({
             { role: 'assistant', content: h.result },
           ]);
 
-        const result = await generateCode(
-          prompt,
-          currentScript,
-          loadedSamples,
-          recentHistory,
-        );
+        let resultCode: string;
+        let resultError: string | null = null;
 
-        if (/\b(loop|oneshot)\b/.test(result.code)) {
-          onGenerate(result.code);
+        if (ensembleMode) {
+          // Ensemble: generate 3 candidates, pick the best
+          setStatus('generating 3 candidates...');
+          const ensemble = await generateEnsemble(
+            prompt, currentScript, loadedSamples, recentHistory, 3,
+          );
+          resultCode = ensemble.best.code;
+          resultError = ensemble.best.error;
+          const validCount = ensemble.candidates.filter(c => c.score.parseValid).length;
+          setStatus(`best of ${validCount}/${ensemble.candidates.length} — score ${(ensemble.best.score.total * 100).toFixed(0)}%`);
+        } else {
+          // Adaptive: uses RLHF-enhanced system prompts
+          const result = await generateCodeAdaptive(
+            prompt, currentScript, loadedSamples, recentHistory,
+          );
+          resultCode = result.code;
+          resultError = result.error;
         }
 
-        if (result.error) {
-          setStatus(`warning: ${result.error}`);
+        if (/\b(loop|oneshot)\b/.test(resultCode)) {
+          onGenerate(resultCode);
+        }
+
+        if (resultError) {
+          setStatus(`warning: ${resultError}`);
         }
 
         // Save feedback entry for RLHF
-        const fb = createFeedbackEntry(prompt, result.code, 'script');
+        const fb = createFeedbackEntry(prompt, resultCode, 'script');
         saveFeedback(fb);
-        onFeedbackCreated?.(fb.id, result.code);
+        onFeedbackCreated?.(fb.id, resultCode);
 
         const entry: HistoryEntry = {
           prompt,
-          result: result.code,
+          result: resultCode,
           timestamp: Date.now(),
           target: 'script',
           feedbackId: fb.id,
@@ -318,6 +344,51 @@ export function AIPanel({
     setFeedbackRatings(prev => new Map(prev).set(entry.feedbackId!, newRating));
     updateFeedback(entry.feedbackId, { rating: newRating });
   }, [history, historyIndex, feedbackRatings]);
+
+  // Refinement handler — polishes the current script
+  const handleRefine = useCallback(async () => {
+    if (!currentScript || isRefining) return;
+    const lastPrompt = history.length > 0 ? history[history.length - 1].prompt : 'spatial composition';
+    setIsRefining(true);
+    setStatus('refining...');
+
+    try {
+      const result = await refineScript(
+        currentScript,
+        lastPrompt,
+        loadedSamples,
+        3,
+        (progress: RefinementProgress) => {
+          setStatus(`refining ${progress.round}/${progress.totalRounds} — ${(progress.currentScore * 100).toFixed(0)}%`);
+        },
+      );
+
+      if (result.improvements.length > 0) {
+        onGenerate(result.code);
+        setStatus(`refined: ${result.improvements.length} improvement${result.improvements.length > 1 ? 's' : ''} — ${(result.score.total * 100).toFixed(0)}%`);
+
+        const fb = createFeedbackEntry(`refine: ${lastPrompt}`, result.code, 'script');
+        saveFeedback(fb);
+        onFeedbackCreated?.(fb.id, result.code);
+
+        const entry: HistoryEntry = {
+          prompt: `refine: ${lastPrompt}`,
+          result: result.code,
+          timestamp: Date.now(),
+          target: 'script',
+          feedbackId: fb.id,
+        };
+        setHistory(prev => [...prev, entry]);
+        setHistoryIndex(-1);
+      } else {
+        setStatus('already well-composed — no improvements found');
+      }
+    } catch (e: any) {
+      setStatus(`refine error: ${e.message}`);
+    } finally {
+      setIsRefining(false);
+    }
+  }, [currentScript, loadedSamples, history, isRefining, onGenerate, onFeedbackCreated]);
 
   const targetBtnStyle = (active: boolean): React.CSSProperties => ({
     padding: '2px 8px',
@@ -392,6 +463,55 @@ export function AIPanel({
           <option value="gemini">Gemini</option>
         </select>
       </div>
+
+      {/* Ensemble toggle + Refine button (script mode only) */}
+      {target === 'script' && (
+        <div style={{
+          display: 'flex',
+          gap: '6px',
+          padding: '0 14px 6px',
+          alignItems: 'center',
+          flexShrink: 0,
+        }}>
+          <button
+            onClick={() => setEnsembleMode(!ensembleMode)}
+            title="Ensemble mode: generate 3 candidates and pick the best"
+            style={{
+              padding: '1px 7px',
+              background: ensembleMode ? '#1a3a2a' : 'none',
+              color: ensembleMode ? '#fff' : '#1a3a2a',
+              border: `1px solid ${ensembleMode ? '#1a3a2a' : '#d0cdc4'}`,
+              borderRadius: 5,
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontFamily: "'SF Mono', monospace",
+              opacity: ensembleMode ? 1 : 0.5,
+              transition: 'all 0.15s',
+            }}
+          >
+            ensemble
+          </button>
+          <button
+            onClick={handleRefine}
+            disabled={!currentScript || isRefining || isLoading}
+            title="Iteratively refine the current script (3 rounds)"
+            style={{
+              padding: '1px 7px',
+              background: 'none',
+              color: '#1a3a2a',
+              border: '1px solid #d0cdc4',
+              borderRadius: 5,
+              cursor: (!currentScript || isRefining || isLoading) ? 'default' : 'pointer',
+              fontSize: '12px',
+              fontFamily: "'SF Mono', monospace",
+              opacity: (!currentScript || isRefining || isLoading) ? 0.2 : 0.5,
+              transition: 'all 0.15s',
+            }}
+          >
+            {isRefining ? 'refining...' : 'refine'}
+          </button>
+        </div>
+      )}
 
       {/* Prompt log — only shows user prompts, no code output */}
       <div

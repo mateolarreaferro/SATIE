@@ -133,8 +133,8 @@ function useAudioSourceFrame(
         prevLabel.current = label;
         if (labelTexRef.current) labelTexRef.current.dispose();
 
-        // Render at 2× resolution for crisp text on retina displays
-        const SCALE = 2;
+        // Render at 3× resolution for crisp text on retina displays
+        const SCALE = 3;
         const H = 48 * SCALE;
         const FONT_SIZE = 22 * SCALE;
         const PADDING_X = 18 * SCALE;
@@ -153,8 +153,8 @@ function useAudioSourceFrame(
         const ctx = canvas.getContext('2d')!;
 
         // Background pill
-        const r = H * 0.38;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        const r = H * 0.42;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
         ctx.beginPath();
         ctx.moveTo(r, 0);
         ctx.lineTo(W - r, 0);
@@ -200,14 +200,16 @@ function SphereGeo({ meshRef, matRef }: {
 }) {
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[1, 32, 32]} />
-      <meshStandardMaterial
-        ref={matRef}
-        emissiveIntensity={0.6}
+      <sphereGeometry args={[1, 48, 48]} />
+      <meshPhysicalMaterial
+        ref={matRef as any}
+        emissiveIntensity={0.4}
         transparent
-        opacity={0.85}
-        roughness={0.2}
-        metalness={0.3}
+        opacity={0.92}
+        roughness={0.15}
+        metalness={0.1}
+        clearcoat={0.8}
+        clearcoatRoughness={0.1}
       />
     </mesh>
   );
@@ -220,13 +222,15 @@ function CubeGeo({ meshRef, matRef }: {
   return (
     <mesh ref={meshRef}>
       <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial
-        ref={matRef}
-        emissiveIntensity={0.6}
+      <meshPhysicalMaterial
+        ref={matRef as any}
+        emissiveIntensity={0.4}
         transparent
-        opacity={0.85}
-        roughness={0.2}
-        metalness={0.3}
+        opacity={0.92}
+        roughness={0.15}
+        metalness={0.1}
+        clearcoat={0.8}
+        clearcoatRoughness={0.1}
       />
     </mesh>
   );
@@ -234,8 +238,8 @@ function CubeGeo({ meshRef, matRef }: {
 
 function LabelSprite({ labelRef }: { labelRef: React.RefObject<THREE.Sprite | null> }) {
   return (
-    <sprite ref={labelRef} scale={[2.0, 0.28, 1]}>
-      <spriteMaterial transparent depthTest={false} />
+    <sprite ref={labelRef} scale={[2.0, 0.28, 1]} renderOrder={999}>
+      <spriteMaterial transparent depthTest={false} toneMapped={false} />
     </sprite>
   );
 }
@@ -308,14 +312,16 @@ function AudioSourceTrailOnly({ trackRef }: { trackRef: React.RefObject<TrackSta
     <>
       <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
         <mesh ref={meshRef}>
-          <sphereGeometry args={[1, 32, 32]} />
-          <meshStandardMaterial
-            ref={matRef}
-            emissiveIntensity={0.6}
+          <sphereGeometry args={[1, 48, 48]} />
+          <meshPhysicalMaterial
+            ref={matRef as any}
+            emissiveIntensity={0.4}
             transparent
-            opacity={0.85}
-            roughness={0.2}
-            metalness={0.3}
+            opacity={0.92}
+            roughness={0.15}
+            metalness={0.1}
+            clearcoat={0.8}
+            clearcoatRoughness={0.1}
           />
         </mesh>
       </Trail>
@@ -357,15 +363,17 @@ function AudioSourceTrailMesh({ trackRef, shape }: { trackRef: React.RefObject<T
         <mesh ref={meshRef}>
           {shape === 'cube'
             ? <boxGeometry args={[1, 1, 1]} />
-            : <sphereGeometry args={[1, 32, 32]} />
+            : <sphereGeometry args={[1, 48, 48]} />
           }
-          <meshStandardMaterial
-            ref={matRef}
-            emissiveIntensity={0.6}
+          <meshPhysicalMaterial
+            ref={matRef as any}
+            emissiveIntensity={0.4}
             transparent
-            opacity={0.85}
-            roughness={0.2}
-            metalness={0.3}
+            opacity={0.92}
+            roughness={0.15}
+            metalness={0.1}
+            clearcoat={0.8}
+            clearcoatRoughness={0.1}
           />
         </mesh>
       </Trail>
@@ -1030,9 +1038,10 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
     <OverlayModeContext.Provider value={!!overlayMode}>
       <DarkBgContext.Provider value={isDarkBg}>
       <ListenerSyncContext.Provider value={listenerSync}>
-        <ambientLight intensity={overlayMode ? 0.6 : 0.5} />
-        <directionalLight position={[10, 15, 10]} intensity={overlayMode ? 1.2 : 0.3} />
-        {overlayMode && <directionalLight position={[-8, 10, -5]} intensity={0.4} />}
+        <ambientLight intensity={overlayMode ? 0.8 : 0.5} />
+        <directionalLight position={[10, 15, 10]} intensity={overlayMode ? 1.5 : 0.3} />
+        {overlayMode && <directionalLight position={[-8, 5, -5]} intensity={0.6} />}
+        {overlayMode && <directionalLight position={[0, -5, 8]} intensity={0.3} />}
         {/* Normal grid for editor; subtle grid for overlay to indicate 3D space */}
         {overlayMode ? (
           <Grid
@@ -1061,14 +1070,16 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
         <AudioSourcePool tracksRef={tracksRef} />
         {overlayMode ? <OverlayFlyControls /> : <FlyControls />}
         {!overlayMode && <AxisGizmo />}
-        <EffectComposer>
-          <Bloom
-            luminanceThreshold={overlayMode ? 0.3 : 0.4}
-            luminanceSmoothing={0.9}
-            intensity={overlayMode ? 0.8 : 0.6}
-            mipmapBlur
-          />
-        </EffectComposer>
+        {!overlayMode && (
+          <EffectComposer>
+            <Bloom
+              luminanceThreshold={0.4}
+              luminanceSmoothing={0.9}
+              intensity={0.6}
+              mipmapBlur
+            />
+          </EffectComposer>
+        )}
       </ListenerSyncContext.Provider>
       </DarkBgContext.Provider>
     </OverlayModeContext.Provider>
@@ -1266,6 +1277,7 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
         }
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         resize={{ scroll: false, debounce: 0, offsetSize: true }}
+        dpr={[1, 2]}
         gl={{ alpha: true, antialias: true, toneMapping: THREE.ACESFilmicToneMapping, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.setClearColor(overlayMode ? 0x000000 : bgColor, overlayMode ? 0 : 1);

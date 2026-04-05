@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { loadSettings, saveKey as saveSettingsKey } from '../../lib/userSettings';
 import { useSFX } from '../hooks/useSFX';
+import { FeedbackDashboard } from './FeedbackDashboard';
 import type { Theme, ThemeMode } from '../hooks/useDayNightCycle';
 
 interface ApiKeys {
@@ -104,6 +105,7 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [keys, setKeys] = useState<ApiKeys>({ anthropic_key: '', elevenlabs_key: '', openai_key: '', gemini_key: '' });
   const [balanceCents, setBalanceCents] = useState<number | null>(null);
+  const [advancedTab, setAdvancedTab] = useState<'keys' | 'learning'>('keys');
   const [addingCredits, setAddingCredits] = useState(false);
 
   const userName = user?.user_metadata?.user_name || user?.email?.split('@')[0] || '';
@@ -113,6 +115,7 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
   const activePage = path === '/' ? 'create'
     : path === '/sketches' ? 'sketches'
     : path.startsWith('/explore') ? 'explore'
+    : path.startsWith('/library') ? 'library'
     : null;
 
   // Load API keys
@@ -171,6 +174,13 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
   const tabs: { key: string; label: string; to: string; icon: (color: string) => React.ReactNode }[] = [
     { key: 'create', label: 'create', to: '/', icon: (c) => Icons.sparkle(c, 13) },
     { key: 'explore', label: 'explore', to: '/explore', icon: (c) => Icons.compass(c, 13) },
+    { key: 'library', label: 'library', to: '/library', icon: (c) => (
+      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </svg>
+    ) },
   ];
 
   return (
@@ -463,45 +473,114 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
                 </div>
               )}
 
-              {/* API keys — far right */}
-              <details style={{ cursor: 'pointer', flexShrink: 0, marginLeft: 'auto' }}>
-                <summary style={{
-                  fontSize: '16px',
+              {/* Advanced — far right */}
+              <div style={{ flexShrink: 0, marginLeft: 'auto', maxWidth: 420 }}>
+                <div style={{
+                  fontSize: '11px',
                   fontWeight: 500,
                   opacity: 0.2,
-                  userSelect: 'none',
-                  marginBottom: 8,
+                  textTransform: 'uppercase' as const,
+                  letterSpacing: '0.1em',
                   fontFamily: "'Inter', system-ui, sans-serif",
                   textAlign: 'right',
-                  listStyle: 'none',
+                  marginBottom: 8,
+                  color: theme.text,
+                }}>
+                  Advanced
+                </div>
+
+                {/* Tab bar */}
+                <div style={{
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
+                  gap: 4,
+                  marginBottom: 12,
                   justifyContent: 'flex-end',
                 }}>
-                  {Icons.key(theme.text, 13)}
-                  own API keys
-                </summary>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: '15px', opacity: 0.4, textTransform: 'uppercase' as const, letterSpacing: '0.05em', whiteSpace: 'nowrap' as const }}>Anthropic</div>
-                  <input type="password" placeholder="sk-ant-..." value={keys.anthropic_key} onChange={(e) => handleSaveKey('anthropic_key', e.target.value)} style={{ width: 180, padding: '5px 10px', border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: '16px', fontFamily: "'SF Mono', monospace", background: 'transparent', outline: 'none', color: theme.text }} />
+                  {([
+                    { key: 'keys' as const, label: 'API keys', icon: Icons.key(advancedTab === 'keys' ? '#faf9f6' : theme.text, 11) },
+                    { key: 'learning' as const, label: 'AI learning', icon: (
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={advancedTab === 'learning' ? '#faf9f6' : theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                      </svg>
+                    )},
+                  ]).map(tab => (
+                    <button
+                      key={tab.key}
+                      onClick={() => setAdvancedTab(tab.key)}
+                      style={{
+                        padding: '2px 8px',
+                        background: advancedTab === tab.key ? '#1a3a2a' : 'none',
+                        color: advancedTab === tab.key ? '#faf9f6' : '#1a3a2a',
+                        border: `1px solid ${advancedTab === tab.key ? '#1a3a2a' : '#d0cdc4'}`,
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        fontFamily: "'Inter', system-ui, sans-serif",
+                        fontWeight: 500,
+                        letterSpacing: '0.02em',
+                        transition: 'all 0.15s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                      }}
+                    >
+                      {tab.icon}
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: '15px', opacity: 0.4, textTransform: 'uppercase' as const, letterSpacing: '0.05em', whiteSpace: 'nowrap' as const }}>OpenAI</div>
-                  <input type="password" placeholder="sk-..." value={keys.openai_key} onChange={(e) => handleSaveKey('openai_key', e.target.value)} style={{ width: 180, padding: '5px 10px', border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: '16px', fontFamily: "'SF Mono', monospace", background: 'transparent', outline: 'none', color: theme.text }} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: '15px', opacity: 0.4, textTransform: 'uppercase' as const, letterSpacing: '0.05em', whiteSpace: 'nowrap' as const }}>Gemini</div>
-                  <input type="password" placeholder="AIza..." value={keys.gemini_key} onChange={(e) => handleSaveKey('gemini_key', e.target.value)} style={{ width: 180, padding: '5px 10px', border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: '16px', fontFamily: "'SF Mono', monospace", background: 'transparent', outline: 'none', color: theme.text }} />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: '15px', opacity: 0.4, textTransform: 'uppercase' as const, letterSpacing: '0.05em', whiteSpace: 'nowrap' as const }}>ElevenLabs</div>
-                  <input type="password" placeholder="sk_..." value={keys.elevenlabs_key} onChange={(e) => handleSaveKey('elevenlabs_key', e.target.value)} style={{ width: 180, padding: '5px 10px', border: `1px solid ${theme.border}`, borderRadius: 6, fontSize: '16px', fontFamily: "'SF Mono', monospace", background: 'transparent', outline: 'none', color: theme.text }} />
-                </div>
-                <div style={{ fontSize: '16px', opacity: 0.2, marginTop: 4 }}>
-                  Bypass credits — direct API calls, no limits.
-                </div>
-              </details>
+
+                {/* Tab content */}
+                {advancedTab === 'keys' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {([
+                      { label: 'Anthropic', field: 'anthropic_key' as const, placeholder: 'sk-ant-...' },
+                      { label: 'OpenAI', field: 'openai_key' as const, placeholder: 'sk-...' },
+                      { label: 'Gemini', field: 'gemini_key' as const, placeholder: 'AIza...' },
+                      { label: 'ElevenLabs', field: 'elevenlabs_key' as const, placeholder: 'sk_...' },
+                    ]).map(({ label, field, placeholder }) => (
+                      <div key={field} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{
+                          fontSize: '12px',
+                          opacity: 0.4,
+                          textTransform: 'uppercase' as const,
+                          letterSpacing: '0.05em',
+                          whiteSpace: 'nowrap' as const,
+                          width: 80,
+                          textAlign: 'right',
+                          fontFamily: "'Inter', system-ui, sans-serif",
+                        }}>
+                          {label}
+                        </div>
+                        <input
+                          type="password"
+                          placeholder={placeholder}
+                          value={keys[field]}
+                          onChange={(e) => handleSaveKey(field, e.target.value)}
+                          style={{
+                            flex: 1,
+                            padding: '4px 8px',
+                            border: `1px solid ${theme.border}`,
+                            borderRadius: 6,
+                            fontSize: '13px',
+                            fontFamily: "'SF Mono', monospace",
+                            background: 'transparent',
+                            outline: 'none',
+                            color: theme.text,
+                          }}
+                        />
+                      </div>
+                    ))}
+                    <div style={{ fontSize: '11px', opacity: 0.2, marginTop: 2, textAlign: 'right' }}>
+                      Bypass credits — direct API calls, no limits.
+                    </div>
+                  </div>
+                )}
+
+                {advancedTab === 'learning' && (
+                  <FeedbackDashboard theme={theme} />
+                )}
+              </div>
             </div>
           </div>
         </div>

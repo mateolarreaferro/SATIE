@@ -1528,14 +1528,14 @@ export function parse(script: string): Statement[] {
 
     // Close group?
     if (grp !== null && indent === grp.indent &&
-        (StmtStartRx.test(body) || body.toLowerCase().startsWith('group ') || body.toLowerCase().startsWith('endgroup'))) {
+        (StmtStartRx.test(body) || body.toLowerCase().startsWith('group ') || body.toLowerCase() === 'group' || body.toLowerCase().startsWith('endgroup'))) {
       flushGroup(outList, grp);
       grp = null;
     }
     if (grp !== null && body.toLowerCase().startsWith('endgroup')) continue;
 
     // Open group
-    if (body.toLowerCase().startsWith('group ')) {
+    if (body.toLowerCase().startsWith('group ') || body.toLowerCase() === 'group') {
       grp = { props: new Map(), children: [], indent };
       continue;
     }
