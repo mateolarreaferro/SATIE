@@ -4,6 +4,7 @@ import { useAuth } from '../../lib/AuthContext';
 import { createSketch, getPublicSketches } from '../../lib/sketches';
 import { getProfile } from '../../lib/profiles';
 import { generateCode } from '../../lib/aiGenerate';
+import { createFeedbackEntry, saveFeedback, updateFeedback } from '../../lib/feedbackStore';
 import { createProvider } from '../../lib/aiProvider';
 import { useDayNightCycle } from '../hooks/useDayNightCycle';
 import { useSFX } from '../hooks/useSFX';
@@ -172,13 +173,18 @@ export function Chat() {
     setIsGenerating(true);
 
     try {
-      // Build conversation history from recent messages (last 6 pairs)
+      // Build lightweight conversation history — only user prompts and short
+      // script summaries (NOT full scripts, which inflate tokens massively).
+      // The current script is already sent via buildEnrichedPrompt, so we only
+      // need enough history for the model to understand iterative refinement.
       const history = messages
         .filter(m => m.status !== 'error' && m.status !== 'generating')
-        .slice(-12)
+        .slice(-6)  // last 3 pairs max
         .map(m => ({
           role: m.role,
-          content: m.role === 'assistant' ? (m.script ?? m.content) : m.content,
+          content: m.role === 'assistant'
+            ? `[generated ${(m.script ?? '').split('\n').length} line script]`
+            : m.content,
         }));
 
       const result = await generateCode(
@@ -194,9 +200,13 @@ export function Chat() {
         if (!uiState.isPlaying) play();
       }
 
+      // Save to RLHF feedback store
+      const fb = createFeedbackEntry(prompt, result.code, 'script');
+      saveFeedback(fb);
+
       setMessages(prev => prev.map(m =>
         m.id === assistantId
-          ? { ...m, script: result.code, status: 'playing' as const, error: result.error ?? undefined }
+          ? { ...m, script: result.code, status: 'playing' as const, error: result.error ?? undefined, feedbackId: fb.id }
           : m
       ));
     } catch (e: any) {
@@ -220,6 +230,15 @@ export function Chat() {
       console.error('Failed to save sketch:', e);
     }
   }, [user, navigate]);
+
+  const handleRate = useCallback((messageId: string, rating: 1 | -1) => {
+    setMessages(prev => prev.map(m => {
+      if (m.id !== messageId || !m.feedbackId) return m;
+      const newRating = m.rating === rating ? 0 : rating;
+      updateFeedback(m.feedbackId, { rating: newRating });
+      return { ...m, rating: newRating };
+    }));
+  }, []);
 
   const handleStop = useCallback(() => {
     stop();
@@ -507,6 +526,7 @@ export function Chat() {
                     message={msg}
                     theme={theme}
                     onSaveAsSketch={handleSaveAsSketch}
+                    onRate={handleRate}
                   />
                 ))}
               </div>

@@ -406,7 +406,7 @@ function AudioSourceIcon({ trackRef, iconName }: { trackRef: React.RefObject<Tra
     // Position + scale the icon sprite
     if (iconRef.current) {
       iconRef.current.position.set(track.position.x, track.position.y, track.position.z);
-      const baseScale = 0.25 + track.volume * 0.35;
+      const baseScale = 0.15 + track.volume * 0.2;
       const sizeMultiplier = track.statement.visualSize ?? 1;
       const s = baseScale * sizeMultiplier;
       iconRef.current.scale.set(s, s, 1);

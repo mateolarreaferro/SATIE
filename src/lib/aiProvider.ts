@@ -43,8 +43,8 @@ export class ProxiedProvider implements AIProvider {
 
   private defaultModel(): string {
     switch (this.type) {
-      case 'anthropic': return 'claude-sonnet-4-20250514';
-      case 'openai': return 'gpt-4o';
+      case 'anthropic': return 'claude-haiku-4-5-20251001';
+      case 'openai': return 'gpt-4o-mini';
       case 'gemini': return 'gemini-2.0-flash';
     }
   }
@@ -153,6 +153,18 @@ export class AnthropicProvider implements AIProvider {
 
     if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
     const data = await response.json();
+
+    // Log token usage and cache performance
+    if (data.usage) {
+      const u = data.usage;
+      const cached = u.cache_read_input_tokens ?? 0;
+      const cacheCreated = u.cache_creation_input_tokens ?? 0;
+      const uncached = u.input_tokens - cached;
+      console.log(
+        `[Satie AI] model=${this.model} | input=${u.input_tokens} (cached=${cached}, new=${uncached}, cache_write=${cacheCreated}) | output=${u.output_tokens}`,
+      );
+    }
+
     return data.content?.[0]?.text ?? '';
   }
 

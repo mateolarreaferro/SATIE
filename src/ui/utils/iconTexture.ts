@@ -45,39 +45,42 @@ function cacheKey(icon: IconName, color: string): string {
 }
 
 /**
- * Render an icon SVG onto a canvas and return a Three.js texture.
- * The icon is rendered as a colored shape on a transparent background.
+ * Render an icon SVG onto a canvas via Image element for crisp, full-fidelity output.
+ * Injects the desired color into the SVG source before rasterizing.
  */
-function renderSvgToTexture(svgString: string, color: string, size: number): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
+function renderSvgToTexture(svgString: string, color: string, size: number): Promise<THREE.CanvasTexture> {
+  return new Promise((resolve) => {
+    // Inject fill color into SVG source (Phosphor uses fill="currentColor")
+    const coloredSvg = svgString.replace(/fill="currentColor"/g, `fill="${color}"`);
+    const blob = new Blob([coloredSvg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, size, size);
+      URL.revokeObjectURL(url);
 
-  // Parse SVG to extract path data
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(svgString, 'image/svg+xml');
-  const paths = doc.querySelectorAll('path');
-
-  // Draw paths scaled to canvas size (Phosphor icons are 256x256)
-  const scale = size / 256;
-  ctx.save();
-  ctx.scale(scale, scale);
-  ctx.fillStyle = color;
-
-  for (const pathEl of paths) {
-    const d = pathEl.getAttribute('d');
-    if (!d) continue;
-    const path2d = new Path2D(d);
-    ctx.fill(path2d);
-  }
-  ctx.restore();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  return tex;
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.minFilter = THREE.LinearMipmapLinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.anisotropy = 4;
+      tex.generateMipmaps = true;
+      resolve(tex);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // Fallback: empty transparent texture
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const tex = new THREE.CanvasTexture(canvas);
+      resolve(tex);
+    };
+    img.src = url;
+  });
 }
 
 /**
@@ -111,7 +114,7 @@ export async function getIconTextureAsync(
     const svg = await loadSvgString(icon);
     if (!svg) return null;
 
-    const tex = renderSvgToTexture(svg, color, size);
+    const tex = await renderSvgToTexture(svg, color, size);
     textureCache.set(key, tex);
     pendingLoads.delete(key);
     return tex;

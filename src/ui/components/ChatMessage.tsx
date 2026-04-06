@@ -7,15 +7,18 @@ export interface ChatMessageData {
   script?: string;
   status: 'sending' | 'generating' | 'playing' | 'done' | 'error';
   error?: string;
+  feedbackId?: string;
+  rating?: number;
 }
 
 interface ChatMessageProps {
   message: ChatMessageData;
   theme: Theme;
   onSaveAsSketch?: (script: string, prompt: string) => void;
+  onRate?: (messageId: string, rating: 1 | -1) => void;
 }
 
-export function ChatMessage({ message, theme, onSaveAsSketch }: ChatMessageProps) {
+export function ChatMessage({ message, theme, onSaveAsSketch, onRate }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
       <div style={{
@@ -155,35 +158,77 @@ export function ChatMessage({ message, theme, onSaveAsSketch }: ChatMessageProps
               </details>
             )}
 
-            {/* Save as sketch button */}
-            {message.script && onSaveAsSketch && (
-              <button
-                onClick={() => onSaveAsSketch(message.script!, message.content)}
-                style={{
-                  marginTop: 8,
-                  padding: '4px 12px',
-                  fontSize: '13px',
-                  fontFamily: "'Inter', system-ui, sans-serif",
-                  background: 'none',
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  color: theme.text,
-                  opacity: 0.6,
-                  transition: 'opacity 0.15s',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
-              >
-                {/* Save/bookmark icon */}
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-                </svg>
-                save as sketch
-              </button>
+            {/* Actions row: save + feedback */}
+            {message.script && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                {onSaveAsSketch && (
+                  <button
+                    onClick={() => onSaveAsSketch(message.script!, message.content)}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      fontFamily: "'Inter', system-ui, sans-serif",
+                      background: 'none',
+                      border: `1px solid ${theme.border}`,
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      color: theme.text,
+                      opacity: 0.6,
+                      transition: 'opacity 0.15s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 5,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                    </svg>
+                    save as sketch
+                  </button>
+                )}
+
+                {/* RLHF: Thumbs up / down */}
+                {message.feedbackId && onRate && (
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    <button
+                      onClick={() => onRate(message.id, 1)}
+                      title="Good generation"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        opacity: message.rating === 1 ? 1 : 0.25,
+                        transition: 'opacity 0.15s',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill={message.rating === 1 ? theme.text : 'none'} stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+                        <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => onRate(message.id, -1)}
+                      title="Bad generation"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '2px 4px',
+                        opacity: message.rating === -1 ? 1 : 0.25,
+                        transition: 'opacity 0.15s',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill={message.rating === -1 ? '#8b0000' : 'none'} stroke="#8b0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                        <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </>
         )}

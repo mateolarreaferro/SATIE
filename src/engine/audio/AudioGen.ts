@@ -201,11 +201,8 @@ async function fetchSoundGenerationViaProxy(
   influence: number,
   outputFormat: string,
 ): Promise<ArrayBuffer> {
-  // Get Supabase JWT for authentication
-  const { createClient } = await import('@supabase/supabase-js');
-  const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL ?? '';
-  const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY ?? '';
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  // Get Supabase JWT for authentication (use shared singleton to avoid multiple GoTrueClient instances)
+  const { supabase } = await import('../../lib/supabase');
   const { data: { session } } = await supabase.auth.getSession();
 
   if (!session?.access_token) {

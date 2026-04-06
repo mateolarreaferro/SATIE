@@ -245,13 +245,15 @@ export function AIPanel({
         setHistoryIndex(-1);
       } else {
         // Script generation mode
-        // Build lightweight conversation context from recent history (last 3 exchanges)
+        // Build lightweight conversation context — only user prompts, not full
+        // generated scripts (which can be 500-2000 tokens each and inflate cost).
+        // The current script is already sent via buildEnrichedPrompt.
         const recentHistory = history
           .filter(h => h.target === 'script')
           .slice(-3)
           .flatMap(h => [
             { role: 'user', content: h.prompt },
-            { role: 'assistant', content: h.result },
+            { role: 'assistant', content: `[generated ${h.result.split('\n').length} line script]` },
           ]);
 
         let resultCode: string;
