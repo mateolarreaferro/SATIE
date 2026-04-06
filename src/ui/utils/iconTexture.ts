@@ -85,7 +85,7 @@ function renderSvgToTexture(svgString: string, color: string, size: number): THR
  * Returns null synchronously if the SVG hasn't loaded yet — call preloadIcon first
  * or use getIconTextureAsync for guaranteed results.
  */
-export function getIconTexture(icon: IconName, color: string, size = 128): THREE.CanvasTexture | null {
+export function getIconTexture(icon: IconName, color: string, size = 256): THREE.CanvasTexture | null {
   const key = cacheKey(icon, color);
   return textureCache.get(key) ?? null;
 }
@@ -97,7 +97,7 @@ export function getIconTexture(icon: IconName, color: string, size = 128): THREE
 export async function getIconTextureAsync(
   icon: IconName,
   color: string,
-  size = 128,
+  size = 256,
 ): Promise<THREE.CanvasTexture | null> {
   const key = cacheKey(icon, color);
 
@@ -137,7 +137,7 @@ export async function recolorIcon(
   icon: IconName,
   oldColor: string,
   newColor: string,
-  size = 128,
+  size = 256,
 ): Promise<THREE.CanvasTexture | null> {
   const oldKey = cacheKey(icon, oldColor);
   const oldTex = textureCache.get(oldKey);

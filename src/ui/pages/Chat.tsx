@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { createSketch, getPublicSketches } from '../../lib/sketches';
 import { getProfile } from '../../lib/profiles';
-import { generateCodeAdaptive } from '../../lib/aiGenerate';
+import { generateCode } from '../../lib/aiGenerate';
 import { createProvider } from '../../lib/aiProvider';
 import { useDayNightCycle } from '../hooks/useDayNightCycle';
 import { useSFX } from '../hooks/useSFX';
@@ -181,7 +181,7 @@ export function Chat() {
           content: m.role === 'assistant' ? (m.script ?? m.content) : m.content,
         }));
 
-      const result = await generateCodeAdaptive(
+      const result = await generateCode(
         prompt,
         currentScript ?? undefined,
         [], // no loaded samples in chat mode — AI uses gen blocks

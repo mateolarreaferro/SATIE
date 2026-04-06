@@ -9,6 +9,7 @@ import type { Statement } from '../engine/core/Statement';
 import {
   createProvider,
   createFastProvider,
+  createSmartProvider,
   type AIProvider,
 } from './aiProvider';
 import {
@@ -141,27 +142,12 @@ export async function callAI(
 
 // ── System prompt — compositional intelligence ──────────────
 
-export function buildSystemPrompt(
-  loadedSamples: string[],
-  libraryResult: LibraryCheckResult,
-  topExamples: StoredFeedback[] = [],
-  antiPatterns: StoredFeedback[] = [],
-  communitySamples: CommunitySample[] = [],
-): string {
-  let audioLibrary: string;
-  if (loadedSamples.length > 0) {
-    audioLibrary = `AVAILABLE AUDIO FILES (use EXACT names):\n${loadedSamples.map(s => `  - ${s}`).join('\n')}\n\nUse these when available. For sounds NOT in the library, use the gen keyword.`;
-  } else {
-    audioLibrary = 'No audio files loaded. Use gen keyword to generate sounds (e.g. loop gen gentle rain on leaves).';
-  }
-
-  // Append community samples if available
-  const communitySection = formatCommunitySamplesForPrompt(communitySamples);
-  if (communitySection) {
-    audioLibrary += '\n' + communitySection;
-  }
-
-  return `You are Satie, a spatial audio composition assistant. You think like a composer and write code in the Satie DSL.
+/**
+ * Static DSL reference — identical across all calls.
+ * Separated so Anthropic's prompt caching can cache this prefix
+ * (90% discount on cached input tokens).
+ */
+export const STATIC_SYSTEM_PROMPT = `You are Satie, a spatial audio composition assistant. You think like a composer and write code in the Satie DSL.
 
 Output ONLY valid Satie code. No explanations, no markdown, no prose.
 
@@ -295,15 +281,54 @@ TRAJECTORY GEN BLOCKS:
 - Prefer ranges and count multipliers over copy-pasting statements
 - Think about musical relationships: bass is low pitch, high voices are high pitch
 - Think about spatial relationships: spread voices apart, use movement for life
-- ALWAYS add visual with a semantic icon name matching the sound. Moving voices get trail too. Examples: "visual cloud-rain trail", "visual bird trail", "visual fire", "visual waves", "visual lightning trail". Available icon names: lightning, bird, fire, wind, cloud-rain, cloud-snow, cloud-lightning, waves, drop, sun, moon, star, campfire, tree, leaf, flower, mountains, flame, meteor, planet, globe, tent, city, buildings, factory, siren, bell, guitar, piano-keys, music-note, music-notes, vinyl-record, speaker-high, microphone-stage, waveform, radio, dog, cat, fish, horse, butterfly, paw-print, person-simple-walk, footprints, car, train, boat, rocket, robot, alien, ghost, skull, heartbeat, brain, eye, clock, gear, bomb, snowflake, rainbow, wave-sine, church, sword, shield, diamond, crown. NEVER use "visual sphere" — always pick an icon. For moving voices use "visual iconname trail". For static voices use "visual iconname".
+- ALWAYS add a visual with an icon matching the sound. Moving voices: "visual iconname trail". Static voices: "visual iconname".
+  Examples: "visual cloud-rain trail", "visual bird trail", "visual fire", "visual waves trail", "visual music-note"
+  Icons: lightning, bird, fire, wind, cloud-rain, cloud-snow, cloud-lightning, waves, drop, sun, moon, star, campfire, tree, leaf, flower, mountains, flame, meteor, planet, globe, tent, city, buildings, factory, siren, bell, guitar, piano-keys, music-note, music-notes, vinyl-record, speaker-high, microphone-stage, waveform, radio, dog, cat, fish, horse, butterfly, paw-print, person-simple-walk, footprints, car, train, boat, rocket, robot, alien, ghost, skull, heartbeat, brain, eye, clock, gear, bomb, snowflake, rainbow, wave-sine, church, sword, shield, diamond, crown`;
 
-${audioLibrary}
-${topExamples.length > 0 ? `
-PROVEN PATTERNS (user-approved — follow these):
-${topExamples.map((ex, i) => `${i + 1}. "${ex.prompt}" →\n${(ex.userEditedOutput ?? ex.output).slice(0, 400)}`).join('\n\n')}` : ''}
-${antiPatterns.length > 0 ? `
-REJECTED PATTERNS (avoid):
-${antiPatterns.map((ex, i) => `${i + 1}. "${ex.prompt}" → rejected:\n${ex.output.slice(0, 200)}`).join('\n\n')}` : ''}`;
+/**
+ * Build the dynamic (per-call) portion of the system prompt.
+ * This part changes per request and is NOT cached.
+ */
+function buildDynamicPromptSection(
+  loadedSamples: string[],
+  libraryResult: LibraryCheckResult,
+  topExamples: StoredFeedback[] = [],
+  antiPatterns: StoredFeedback[] = [],
+  communitySamples: CommunitySample[] = [],
+): string {
+  let audioLibrary: string;
+  if (loadedSamples.length > 0) {
+    audioLibrary = `AVAILABLE AUDIO FILES (use EXACT names):\n${loadedSamples.map(s => `  - ${s}`).join('\n')}\n\nUse these when available. For sounds NOT in the library, use the gen keyword.`;
+  } else {
+    audioLibrary = 'No audio files loaded. Use gen keyword to generate sounds (e.g. loop gen gentle rain on leaves).';
+  }
+
+  const communitySection = formatCommunitySamplesForPrompt(communitySamples);
+  if (communitySection) {
+    audioLibrary += '\n' + communitySection;
+  }
+
+  const parts: string[] = [audioLibrary];
+
+  if (topExamples.length > 0) {
+    parts.push(`\nPROVEN PATTERNS (user-approved — follow these):\n${topExamples.map((ex, i) => `${i + 1}. "${ex.prompt}" →\n${(ex.userEditedOutput ?? ex.output).slice(0, 400)}`).join('\n\n')}`);
+  }
+  if (antiPatterns.length > 0) {
+    parts.push(`\nREJECTED PATTERNS (avoid):\n${antiPatterns.map((ex, i) => `${i + 1}. "${ex.prompt}" → rejected:\n${ex.output.slice(0, 200)}`).join('\n\n')}`);
+  }
+
+  return parts.join('\n');
+}
+
+export function buildSystemPrompt(
+  loadedSamples: string[],
+  libraryResult: LibraryCheckResult,
+  topExamples: StoredFeedback[] = [],
+  antiPatterns: StoredFeedback[] = [],
+  communitySamples: CommunitySample[] = [],
+): string {
+  const dynamic = buildDynamicPromptSection(loadedSamples, libraryResult, topExamples, antiPatterns, communitySamples);
+  return STATIC_SYSTEM_PROMPT + '\n\n' + dynamic;
 }
 
 // ── Sample generation system prompt ────────────────────────
@@ -441,7 +466,8 @@ export async function generateCode(
   loadedSamples: string[],
   conversationHistory: { role: string; content: string }[],
 ): Promise<{ code: string; error: string | null }> {
-  const provider = createProvider();
+  const hasExistingScript = !!(currentScript && currentScript.trim() && currentScript.trim() !== '# satie');
+  const provider = createSmartProvider(userPrompt, hasExistingScript);
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
   const keywords = extractSoundKeywords(userPrompt.toLowerCase());
   const [topEx, antiEx, communitySamples] = await Promise.all([

@@ -118,6 +118,23 @@ export class AnthropicProvider implements AIProvider {
   ) {}
 
   async call(options: AICallOptions): Promise<string> {
+    // Split system prompt for prompt caching: static prefix (cached at 90% discount)
+    // + dynamic suffix (per-request). The STATIC_SYSTEM_PROMPT constant is ~2500 tokens
+    // and identical across all calls — perfect for Anthropic's automatic prefix caching.
+    // We use cache_control breakpoints to explicitly mark the cache boundary.
+    const { staticPrefix, dynamicSuffix } = this.splitSystemPrompt(options.systemPrompt);
+
+    const systemBlocks: any[] = [
+      {
+        type: 'text',
+        text: staticPrefix,
+        cache_control: { type: 'ephemeral' },
+      },
+    ];
+    if (dynamicSuffix) {
+      systemBlocks.push({ type: 'text', text: dynamicSuffix });
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -129,7 +146,7 @@ export class AnthropicProvider implements AIProvider {
       body: JSON.stringify({
         model: this.model,
         max_tokens: options.maxTokens ?? 2048,
-        system: options.systemPrompt,
+        system: systemBlocks,
         messages: options.messages,
       }),
     });
@@ -137,6 +154,26 @@ export class AnthropicProvider implements AIProvider {
     if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
     const data = await response.json();
     return data.content?.[0]?.text ?? '';
+  }
+
+  /**
+   * Split system prompt at the boundary between the static DSL reference
+   * and the dynamic per-request content (samples, examples, etc.).
+   */
+  private splitSystemPrompt(prompt: string): { staticPrefix: string; dynamicSuffix: string } {
+    // The static prompt ends right before the dynamic audio library / examples section.
+    // We look for the icon list ending (last line of STATIC_SYSTEM_PROMPT) as the split marker.
+    const marker = 'wave-sine, church, sword, shield, diamond, crown';
+    const idx = prompt.indexOf(marker);
+    if (idx === -1) {
+      // Fallback: no split (e.g. repair prompt) — send as single block
+      return { staticPrefix: prompt, dynamicSuffix: '' };
+    }
+    const splitAt = idx + marker.length;
+    return {
+      staticPrefix: prompt.slice(0, splitAt),
+      dynamicSuffix: prompt.slice(splitAt).trim(),
+    };
   }
 
   fast(): AnthropicProvider {
@@ -288,6 +325,53 @@ export function createFastProvider(preferred?: AIProviderType): AIProvider {
     return (provider as any).fast();
   }
   return provider;
+}
+
+/**
+ * Classify whether a prompt needs Sonnet (complex) or Haiku (simple).
+ *
+ * Simple (Haiku): tweaks, corrections, small edits to existing scripts
+ *   e.g. "make it louder", "add reverb", "change the pitch"
+ *
+ * Complex (Sonnet): creating from scratch, multi-voice compositions, rich descriptions
+ *   e.g. "create a rainforest at night with birds and insects"
+ */
+export function isComplexPrompt(prompt: string, hasExistingScript: boolean): boolean {
+  const lower = prompt.toLowerCase().trim();
+  const wordCount = lower.split(/\s+/).length;
+
+  // Short edits to existing scripts → simple
+  if (hasExistingScript && wordCount <= 8) return false;
+
+  // Explicit simple modification keywords
+  const simplePatterns = /^(make\s+it|change|set|increase|decrease|add\s+(more\s+)?reverb|add\s+(more\s+)?delay|remove|mute|louder|quieter|slower|faster|fix|adjust|tweak|turn\s+(up|down))/;
+  if (hasExistingScript && simplePatterns.test(lower)) return false;
+
+  // Creating from scratch → complex
+  if (!hasExistingScript) return true;
+
+  // Long descriptive prompts → complex
+  if (wordCount >= 15) return true;
+
+  // Keywords suggesting a full composition
+  const complexPatterns = /\b(create|compose|build|generate|design|imagine|soundscape|scene|environment|ambient|world|landscape|forest|ocean|city|space|concert|orchestra)\b/;
+  if (complexPatterns.test(lower)) return true;
+
+  // Default: simple for existing scripts, complex for new
+  return !hasExistingScript;
+}
+
+/**
+ * Create a provider that automatically selects the right model tier
+ * based on prompt complexity. Haiku for simple edits (~$0.02/call),
+ * Sonnet for complex compositions (~$0.15/call with caching).
+ */
+export function createSmartProvider(prompt: string, hasExistingScript: boolean, preferred?: AIProviderType): AIProvider {
+  const complex = isComplexPrompt(prompt, hasExistingScript);
+  if (complex) {
+    return createProvider(preferred);
+  }
+  return createFastProvider(preferred);
 }
 
 /**

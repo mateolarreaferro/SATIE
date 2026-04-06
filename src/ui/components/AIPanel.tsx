@@ -16,7 +16,6 @@ import {
   generateSampleSpec,
   generateEnsemble,
   refineScript,
-  generateCodeAdaptive,
   type RefinementProgress,
 } from '../../lib/aiGenerate';
 
@@ -269,8 +268,7 @@ export function AIPanel({
           const validCount = ensemble.candidates.filter(c => c.score.parseValid).length;
           setStatus(`best of ${validCount}/${ensemble.candidates.length} — score ${(ensemble.best.score.total * 100).toFixed(0)}%`);
         } else {
-          // Adaptive: uses RLHF-enhanced system prompts
-          const result = await generateCodeAdaptive(
+          const result = await generateCode(
             prompt, currentScript, loadedSamples, recentHistory,
           );
           resultCode = result.code;

@@ -415,7 +415,7 @@ function AudioSourceIcon({ trackRef, iconName }: { trackRef: React.RefObject<Tra
       if (displayColor !== prevColor.current || !loadedIcon.current) {
         prevColor.current = displayColor;
         loadedIcon.current = true;
-        getIconTextureAsync(iconName, displayColor, 128).then((tex) => {
+        getIconTextureAsync(iconName, displayColor, 256).then((tex) => {
           if (tex && iconRef.current) {
             const mat = iconRef.current.material as THREE.SpriteMaterial;
             mat.map = tex;
@@ -543,7 +543,7 @@ function AudioSourceTrailIcon({ trackRef, iconName }: { trackRef: React.RefObjec
       if (displayColor !== prevColor.current || !loadedIcon.current) {
         prevColor.current = displayColor;
         loadedIcon.current = true;
-        getIconTextureAsync(iconName, displayColor, 128).then((tex) => {
+        getIconTextureAsync(iconName, displayColor, 256).then((tex) => {
           if (tex && iconRef.current) {
             const mat = iconRef.current.material as THREE.SpriteMaterial;
             mat.map = tex;
@@ -1036,7 +1036,7 @@ function FlyControls() {
 
   useEffect(() => {
     resetRef.current = () => {
-      camera.position.set(4, 6, 8);
+      camera.position.set(0, 0, 0);
       if (controlsRef.current) {
         controlsRef.current.target.set(0, 0, 0);
         controlsRef.current.update();
@@ -1493,8 +1493,8 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
 
       <Canvas
         camera={overlayMode
-          ? { position: [0, 3, 12], fov: 65 }
-          : { position: [4, 6, 8], fov: 55 }
+          ? { position: [0, 0, 0], fov: 65 }
+          : { position: [0, 0, 0], fov: 55 }
         }
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         resize={{ scroll: false, debounce: 0, offsetSize: true }}

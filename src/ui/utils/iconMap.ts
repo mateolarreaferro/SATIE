@@ -209,5 +209,9 @@ export function resolveTrackIcon(statement: {
   // 3. From clip name
   const clipName = statement.clip.split('/').pop() ?? '';
   const cleaned = clipName.replace(/_\d+$/g, '').replace(/_/g, ' ');
-  return resolveIconFromText(cleaned);
+  const fromClip = resolveIconFromText(cleaned);
+  if (fromClip) return fromClip;
+
+  // 4. Default — always return an icon
+  return 'waveform';
 }
