@@ -26,18 +26,23 @@ const DAMPING = 0.9995; // very slow decay — cards keep drifting
 const BOUNCE = 0.4;
 const COLLISION_PUSH = 0.6;
 
-/** Shared AudioContext for collision sounds — avoids creating/destroying per collision */
+/** Shared AudioContext for collision sounds — created lazily on first user gesture */
 let _collisionCtx: AudioContext | null = null;
-function getCollisionCtx(): AudioContext {
-  if (!_collisionCtx || _collisionCtx.state === 'closed') _collisionCtx = new AudioContext();
-  if (_collisionCtx.state === 'suspended') _collisionCtx.resume();
-  return _collisionCtx;
+function getCollisionCtx(): AudioContext | null {
+  try {
+    if (!_collisionCtx || _collisionCtx.state === 'closed') _collisionCtx = new AudioContext();
+    if (_collisionCtx.state === 'suspended') _collisionCtx.resume();
+    return _collisionCtx;
+  } catch {
+    return null;
+  }
 }
 
 /** Collision sound — short pitched tap, pitch varies with impact speed */
 function collisionSound(speed: number) {
   try {
     const ctx = getCollisionCtx();
+    if (!ctx) return;
     const len = Math.ceil(ctx.sampleRate * 0.03);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);

@@ -11,8 +11,8 @@ export async function likeSketch(userId: string, sketchId: string): Promise<void
     throw error;
   }
 
-  // Increment like_count on the sketch
-  await supabase.rpc('increment_like_count', { sketch_id: sketchId });
+  // Increment like_count on the sketch (non-blocking)
+  supabase.rpc('increment_like_count', { sketch_id: sketchId }).then(() => {}, () => {});
 }
 
 export async function unlikeSketch(userId: string, sketchId: string): Promise<void> {
@@ -24,8 +24,8 @@ export async function unlikeSketch(userId: string, sketchId: string): Promise<vo
 
   if (error) throw error;
 
-  // Decrement like_count on the sketch
-  await supabase.rpc('decrement_like_count', { sketch_id: sketchId });
+  // Decrement like_count on the sketch (non-blocking)
+  supabase.rpc('decrement_like_count', { sketch_id: sketchId }).then(() => {}, () => {});
 }
 
 export async function hasUserLiked(userId: string, sketchId: string): Promise<boolean> {

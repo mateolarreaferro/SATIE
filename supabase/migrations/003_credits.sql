@@ -1,15 +1,23 @@
--- Credits table — prepaid balance for AI and audio generation
-create table if not exists public.credits (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  balance_cents integer not null default 0,  -- balance in cents ($20 = 2000)
-  updated_at timestamptz default now()
+-- ============================================================
+-- 003: Credits — prepaid balance for AI and audio generation
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.credits (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  balance_cents INTEGER NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-alter table public.credits enable row level security;
+ALTER TABLE public.credits ENABLE ROW LEVEL SECURITY;
 
--- Users can read their own balance
-create policy "Users can read own credits"
-  on public.credits for select using (auth.uid() = user_id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'credits' AND policyname = 'Users can read own credits') THEN
+    CREATE POLICY "Users can read own credits"
+      ON public.credits FOR SELECT
+      USING (auth.uid() = user_id);
+  END IF;
+END $$;
 
--- Only the service role (webhook/proxy) can modify credits
--- No user-facing insert/update policies
+-- No user-facing insert/update policies — only the service role (webhook/proxy) can modify credits
+
+DO $$ BEGIN RAISE NOTICE '[003] ✓ credits table ready'; END $$;

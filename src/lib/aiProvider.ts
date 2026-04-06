@@ -22,10 +22,61 @@ export interface AICallOptions {
   temperature?: number;
 }
 
+export interface AICallCost {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  costCents: number;
+  model: string;
+  provider: AIProviderType;
+}
+
 export interface AIProvider {
   readonly name: string;
   readonly type: AIProviderType;
   call(options: AICallOptions): Promise<string>;
+}
+
+// ── Cost tracking ────────────────────────────────────────────
+
+// Pricing per million tokens (dollars)
+const PRICING: Record<string, { input: number; output: number; cachedInput: number }> = {
+  'claude-sonnet-4-20250514':  { input: 3.0,  output: 15.0, cachedInput: 0.30 },
+  'claude-haiku-4-5-20251001': { input: 0.80, output: 4.0,  cachedInput: 0.08 },
+  'gpt-4o':                    { input: 2.5,  output: 10.0, cachedInput: 1.25 },
+  'gpt-4o-mini':               { input: 0.15, output: 0.60, cachedInput: 0.075 },
+  'gemini-2.0-flash':          { input: 0.10, output: 0.40, cachedInput: 0.025 },
+  'gemini-2.0-flash-lite':     { input: 0.0,  output: 0.0,  cachedInput: 0.0 },
+};
+
+function calculateCost(model: string, provider: AIProviderType, inputTokens: number, outputTokens: number, cachedTokens: number): number {
+  const p = PRICING[model];
+  if (!p) return 0;
+  const uncachedInput = inputTokens - cachedTokens;
+  return (uncachedInput / 1e6) * p.input + (cachedTokens / 1e6) * p.cachedInput + (outputTokens / 1e6) * p.output;
+}
+
+// Session cost accumulator
+let _sessionCosts: AICallCost[] = [];
+
+export function trackCost(cost: AICallCost): void {
+  _sessionCosts.push(cost);
+  const total = getSessionCostCents();
+  console.log(
+    `[Satie Cost] ${cost.provider}/${cost.model} — $${(cost.costCents / 100).toFixed(4)} | input=${cost.inputTokens} (cached=${cost.cachedTokens}) output=${cost.outputTokens} | session total: $${(total / 100).toFixed(4)}`,
+  );
+}
+
+export function getSessionCosts(): AICallCost[] {
+  return _sessionCosts;
+}
+
+export function getSessionCostCents(): number {
+  return _sessionCosts.reduce((sum, c) => sum + c.costCents, 0);
+}
+
+export function resetSessionCosts(): void {
+  _sessionCosts = [];
 }
 
 // ── Proxied provider (uses /api/ai with Supabase JWT) ──────
@@ -93,6 +144,17 @@ export class ProxiedProvider implements AIProvider {
     if (data.warnings?.length) {
       console.warn('[Satie] Provider warnings:', data.warnings);
     }
+    // Track cost from proxy response
+    if (data.cost_cents != null) {
+      trackCost({
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        costCents: data.cost_cents,
+        model: this.model,
+        provider: (data.provider ?? this.type) as AIProviderType,
+      });
+    }
     return data.text ?? '';
   }
 
@@ -154,15 +216,18 @@ export class AnthropicProvider implements AIProvider {
     if (!response.ok) throw new Error(`Anthropic API ${response.status}`);
     const data = await response.json();
 
-    // Log token usage and cache performance
     if (data.usage) {
       const u = data.usage;
-      const cached = u.cache_read_input_tokens ?? 0;
-      const cacheCreated = u.cache_creation_input_tokens ?? 0;
-      const uncached = u.input_tokens - cached;
-      console.log(
-        `[Satie AI] model=${this.model} | input=${u.input_tokens} (cached=${cached}, new=${uncached}, cache_write=${cacheCreated}) | output=${u.output_tokens}`,
-      );
+      const cachedTokens = u.cache_read_input_tokens ?? 0;
+      const costCents = calculateCost(this.model, 'anthropic', u.input_tokens, u.output_tokens, cachedTokens) * 100;
+      trackCost({
+        inputTokens: u.input_tokens,
+        outputTokens: u.output_tokens,
+        cachedTokens,
+        costCents,
+        model: this.model,
+        provider: 'anthropic',
+      });
     }
 
     return data.content?.[0]?.text ?? '';
@@ -231,6 +296,21 @@ export class OpenAIProvider implements AIProvider {
 
     if (!response.ok) throw new Error(`OpenAI API ${response.status}`);
     const data = await response.json();
+
+    if (data.usage) {
+      const u = data.usage;
+      const cachedTokens = u.prompt_tokens_details?.cached_tokens ?? 0;
+      const costCents = calculateCost(this.model, 'openai', u.prompt_tokens, u.completion_tokens, cachedTokens) * 100;
+      trackCost({
+        inputTokens: u.prompt_tokens,
+        outputTokens: u.completion_tokens,
+        cachedTokens,
+        costCents,
+        model: this.model,
+        provider: 'openai',
+      });
+    }
+
     return data.choices?.[0]?.message?.content ?? '';
   }
 
@@ -279,6 +359,21 @@ export class GeminiProvider implements AIProvider {
 
     if (!response.ok) throw new Error(`Gemini API ${response.status}`);
     const data = await response.json();
+
+    if (data.usageMetadata) {
+      const u = data.usageMetadata;
+      const cachedTokens = u.cachedContentTokenCount ?? 0;
+      const costCents = calculateCost(this.model, 'gemini', u.promptTokenCount ?? 0, u.candidatesTokenCount ?? 0, cachedTokens) * 100;
+      trackCost({
+        inputTokens: u.promptTokenCount ?? 0,
+        outputTokens: u.candidatesTokenCount ?? 0,
+        cachedTokens,
+        costCents,
+        model: this.model,
+        provider: 'gemini',
+      });
+    }
+
     return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
   }
 

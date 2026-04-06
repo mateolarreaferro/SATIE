@@ -1,121 +1,154 @@
--- Community Sample Library — shared audio samples with tags and vector embeddings
+-- ============================================================
+-- 005: Community Sample Library — shared audio samples
+--      with tags and vector embeddings for semantic search
+-- ============================================================
 
 -- Enable pgvector for semantic search
-create extension if not exists vector with schema extensions;
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 
--- Create the storage bucket for community samples (public read, authenticated write)
-insert into storage.buckets (id, name, public)
-values ('community-samples', 'community-samples', true)
-on conflict (id) do nothing;
+-- ── Storage bucket ─────────────────────────────────────────
 
--- Storage policies: anyone can read, authenticated users can upload to their folder
-create policy "Public read community samples"
-  on storage.objects for select
-  using (bucket_id = 'community-samples');
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('community-samples', 'community-samples', true)
+ON CONFLICT (id) DO NOTHING;
 
-create policy "Auth users upload community samples"
-  on storage.objects for insert
-  with check (bucket_id = 'community-samples' and auth.uid()::text = (storage.foldername(name))[1]);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Public read community samples') THEN
+    CREATE POLICY "Public read community samples"
+      ON storage.objects FOR SELECT
+      USING (bucket_id = 'community-samples');
+  END IF;
 
-create policy "Owners delete community samples"
-  on storage.objects for delete
-  using (bucket_id = 'community-samples' and auth.uid()::text = (storage.foldername(name))[1]);
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Auth users upload community samples') THEN
+    CREATE POLICY "Auth users upload community samples"
+      ON storage.objects FOR INSERT
+      WITH CHECK (bucket_id = 'community-samples' AND auth.uid()::text = (storage.foldername(name))[1]);
+  END IF;
 
-create table if not exists public.community_samples (
-  id uuid primary key default gen_random_uuid(),
-  uploader_id uuid not null references auth.users(id) on delete cascade,
-  name text not null,
-  description text not null default '',
-  tags text[] not null default '{}',
-  storage_path text not null unique,
-  content_hash text,                           -- SHA-256 of first 64KB for dedup
-  size_bytes integer not null,
-  duration_ms integer not null,
-  waveform_peaks jsonb,                        -- ~100 peak values for mini waveform
-  embedding extensions.vector(1536),           -- text-embedding-3-small
-  download_count integer not null default 0,
-  created_at timestamptz not null default now()
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'objects' AND policyname = 'Owners delete community samples') THEN
+    CREATE POLICY "Owners delete community samples"
+      ON storage.objects FOR DELETE
+      USING (bucket_id = 'community-samples' AND auth.uid()::text = (storage.foldername(name))[1]);
+  END IF;
+END $$;
+
+DO $$ BEGIN RAISE NOTICE '[005] ✓ community-samples storage bucket ready'; END $$;
+
+-- ── Community samples table ────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.community_samples (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  uploader_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  tags TEXT[] NOT NULL DEFAULT '{}',
+  storage_path TEXT NOT NULL UNIQUE,
+  content_hash TEXT,
+  size_bytes INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  waveform_peaks JSONB,
+  embedding extensions.vector(1536),
+  download_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indexes for efficient queries
-create index idx_community_tags on public.community_samples using gin (tags);
-create index idx_community_popular on public.community_samples (download_count desc, created_at desc);
-create index idx_community_uploader on public.community_samples (uploader_id);
-create index idx_community_name on public.community_samples using gin (to_tsvector('english', name || ' ' || description));
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_community_tags
+  ON public.community_samples USING gin (tags);
 
--- Vector similarity index (ivfflat requires some rows to exist first,
--- so we create it as ivfflat with a low list count; can be retuned later)
--- Note: create this index after initial data load for best performance
--- create index idx_community_embedding on public.community_samples
---   using ivfflat (embedding extensions.vector_cosine_ops) with (lists = 50);
+CREATE INDEX IF NOT EXISTS idx_community_popular
+  ON public.community_samples (download_count DESC, created_at DESC);
 
--- RLS
-alter table public.community_samples enable row level security;
+CREATE INDEX IF NOT EXISTS idx_community_uploader
+  ON public.community_samples (uploader_id);
 
-create policy "Anyone can read community samples"
-  on public.community_samples for select using (true);
+CREATE INDEX IF NOT EXISTS idx_community_name
+  ON public.community_samples USING gin (to_tsvector('english', name || ' ' || description));
 
-create policy "Authenticated users can upload"
-  on public.community_samples for insert
-  with check (auth.uid() = uploader_id);
+DO $$ BEGIN RAISE NOTICE '[005] ✓ community_samples table + indexes ready'; END $$;
 
-create policy "Owners can update their samples"
-  on public.community_samples for update
-  using (auth.uid() = uploader_id);
+-- ── RLS ────────────────────────────────────────────────────
 
-create policy "Owners can delete their samples"
-  on public.community_samples for delete
-  using (auth.uid() = uploader_id);
+ALTER TABLE public.community_samples ENABLE ROW LEVEL SECURITY;
 
--- Atomic download counter (SECURITY DEFINER so any authenticated user can increment)
-create or replace function public.increment_community_download(sample_id uuid)
-returns void as $$
-  update public.community_samples
-  set download_count = download_count + 1
-  where id = sample_id;
-$$ language sql security definer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'community_samples' AND policyname = 'Anyone can read community samples') THEN
+    CREATE POLICY "Anyone can read community samples"
+      ON public.community_samples FOR SELECT USING (true);
+  END IF;
 
--- Full-text search function
-create or replace function public.search_community_samples(
-  query text,
-  max_results integer default 20
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'community_samples' AND policyname = 'Authenticated users can upload') THEN
+    CREATE POLICY "Authenticated users can upload"
+      ON public.community_samples FOR INSERT
+      WITH CHECK (auth.uid() = uploader_id);
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'community_samples' AND policyname = 'Owners can update their samples') THEN
+    CREATE POLICY "Owners can update their samples"
+      ON public.community_samples FOR UPDATE
+      USING (auth.uid() = uploader_id);
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'community_samples' AND policyname = 'Owners can delete their samples') THEN
+    CREATE POLICY "Owners can delete their samples"
+      ON public.community_samples FOR DELETE
+      USING (auth.uid() = uploader_id);
+  END IF;
+END $$;
+
+-- ── Functions ──────────────────────────────────────────────
+
+-- Atomic download counter
+CREATE OR REPLACE FUNCTION public.increment_community_download(sample_id UUID)
+RETURNS VOID AS $$
+  UPDATE public.community_samples
+  SET download_count = download_count + 1
+  WHERE id = sample_id;
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- Full-text search
+CREATE OR REPLACE FUNCTION public.search_community_samples(
+  query TEXT,
+  max_results INTEGER DEFAULT 20
 )
-returns setof public.community_samples as $$
-  select *
-  from public.community_samples
-  where to_tsvector('english', name || ' ' || description) @@ plainto_tsquery('english', query)
-  order by ts_rank(to_tsvector('english', name || ' ' || description), plainto_tsquery('english', query)) desc
-  limit max_results;
-$$ language sql stable security definer;
+RETURNS SETOF public.community_samples AS $$
+  SELECT *
+  FROM public.community_samples
+  WHERE to_tsvector('english', name || ' ' || description) @@ plainto_tsquery('english', query)
+  ORDER BY ts_rank(to_tsvector('english', name || ' ' || description), plainto_tsquery('english', query)) DESC
+  LIMIT max_results;
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
 
--- Vector similarity search function
-create or replace function public.search_community_by_embedding(
+-- Vector similarity search
+CREATE OR REPLACE FUNCTION public.search_community_by_embedding(
   query_embedding extensions.vector(1536),
-  match_threshold float default 0.5,
-  max_results integer default 20
+  match_threshold FLOAT DEFAULT 0.5,
+  max_results INTEGER DEFAULT 20
 )
-returns table (
-  id uuid,
-  name text,
-  description text,
-  tags text[],
-  storage_path text,
-  size_bytes integer,
-  duration_ms integer,
-  waveform_peaks jsonb,
-  download_count integer,
-  uploader_id uuid,
-  created_at timestamptz,
-  similarity float
-) as $$
-  select
+RETURNS TABLE (
+  id UUID,
+  name TEXT,
+  description TEXT,
+  tags TEXT[],
+  storage_path TEXT,
+  size_bytes INTEGER,
+  duration_ms INTEGER,
+  waveform_peaks JSONB,
+  download_count INTEGER,
+  uploader_id UUID,
+  created_at TIMESTAMPTZ,
+  similarity FLOAT
+) AS $$
+  SELECT
     cs.id, cs.name, cs.description, cs.tags, cs.storage_path,
     cs.size_bytes, cs.duration_ms, cs.waveform_peaks,
     cs.download_count, cs.uploader_id, cs.created_at,
-    1 - (cs.embedding <=> query_embedding) as similarity
-  from public.community_samples cs
-  where cs.embedding is not null
-    and 1 - (cs.embedding <=> query_embedding) > match_threshold
-  order by cs.embedding <=> query_embedding
-  limit max_results;
-$$ language sql stable security definer;
+    1 - (cs.embedding <=> query_embedding) AS similarity
+  FROM public.community_samples cs
+  WHERE cs.embedding IS NOT NULL
+    AND 1 - (cs.embedding <=> query_embedding) > match_threshold
+  ORDER BY cs.embedding <=> query_embedding
+  LIMIT max_results;
+$$ LANGUAGE sql STABLE SECURITY DEFINER;
+
+DO $$ BEGIN RAISE NOTICE '[005] ✓ community samples migration complete'; END $$;

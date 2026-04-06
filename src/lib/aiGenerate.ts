@@ -10,6 +10,7 @@ import {
   createProvider,
   createFastProvider,
   createSmartProvider,
+  getSessionCostCents,
   type AIProvider,
 } from './aiProvider';
 import {
@@ -422,7 +423,7 @@ CRITICAL SYNTAX RULES (NO COLONS, NO QUOTES, NO EQUALS):
 
 export async function verifyAndRepair(
   code: string,
-  maxAttempts: number = 2,
+  maxAttempts: number = 1,
 ): Promise<{ success: boolean; code: string; error: string | null }> {
   let currentCode = code;
 
@@ -465,7 +466,8 @@ export async function generateCode(
   currentScript: string | undefined,
   loadedSamples: string[],
   conversationHistory: { role: string; content: string }[],
-): Promise<{ code: string; error: string | null }> {
+): Promise<{ code: string; error: string | null; costCents: number }> {
+  const costBefore = getSessionCostCents();
   const hasExistingScript = !!(currentScript && currentScript.trim() && currentScript.trim() !== '# satie');
   const provider = createSmartProvider(userPrompt, hasExistingScript);
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
@@ -473,7 +475,7 @@ export async function generateCode(
   const [topEx, antiEx, communitySamples] = await Promise.all([
     getTopExamples('script', 3),
     getAntiPatterns('script', 2),
-    searchCommunity(userPrompt, keywords, 10).catch(() => [] as CommunitySample[]),
+    searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]),
   ]);
   const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult, topEx, antiEx, communitySamples);
   const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
@@ -497,6 +499,7 @@ export async function generateCode(
   return {
     code: verified.code,
     error: verified.error,
+    costCents: getSessionCostCents() - costBefore,
   };
 }
 
@@ -680,6 +683,7 @@ export interface EnsembleCandidate {
 export interface EnsembleResult {
   best: EnsembleCandidate;
   candidates: EnsembleCandidate[];
+  costCents: number;
 }
 
 /**
@@ -694,16 +698,17 @@ export async function generateEnsemble(
   currentScript: string | undefined,
   loadedSamples: string[],
   conversationHistory: { role: string; content: string }[],
-  candidateCount: number = 3,
-  temperatures: number[] = [0.5, 0.7, 0.9],
+  candidateCount: number = 2,
+  temperatures: number[] = [0.5, 0.8],
 ): Promise<EnsembleResult> {
-  const provider = createProvider();
+  const costBefore = getSessionCostCents();
+  const provider = createFastProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
   const keywords = extractSoundKeywords(userPrompt.toLowerCase());
   const [topEx, antiEx, communitySamples] = await Promise.all([
     getTopExamples('script', 3),
     getAntiPatterns('script', 2),
-    searchCommunity(userPrompt, keywords, 10).catch(() => [] as CommunitySample[]),
+    searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]),
   ]);
   const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult, topEx, antiEx, communitySamples);
   const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
@@ -741,6 +746,7 @@ export async function generateEnsemble(
   return {
     best: candidates[0],
     candidates,
+    costCents: getSessionCostCents() - costBefore,
   };
 }
 
@@ -763,14 +769,15 @@ export async function refineScript(
   script: string,
   userPrompt: string,
   loadedSamples: string[],
-  rounds: number = 3,
+  rounds: number = 2,
   onProgress?: (progress: RefinementProgress) => void,
-): Promise<{ code: string; score: ScriptScore; improvements: string[] }> {
+): Promise<{ code: string; score: ScriptScore; improvements: string[]; costCents: number }> {
+  const costBefore = getSessionCostCents();
   let currentCode = script;
   let currentScore = scoreScript(script);
   const improvements: string[] = [];
 
-  const provider = createProvider();
+  const provider = createFastProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
 
   const refinementPrompt = `You are a spatial audio composition expert refining a Satie script.
@@ -841,7 +848,7 @@ RULES:
     });
   }
 
-  return { code: currentCode, score: currentScore, improvements };
+  return { code: currentCode, score: currentScore, improvements, costCents: getSessionCostCents() - costBefore };
 }
 
 // ── Feature 3: Self-improving system prompts ──────────────
@@ -953,7 +960,7 @@ export async function generateCodeAdaptive(
   const provider = createProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
   const keywords = extractSoundKeywords(userPrompt.toLowerCase());
-  const communitySamples = await searchCommunity(userPrompt, keywords, 10).catch(() => [] as CommunitySample[]);
+  const communitySamples = await searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]);
 
   const { prompt: systemPrompt, effectiveness } = await buildAdaptiveSystemPrompt(
     loadedSamples,

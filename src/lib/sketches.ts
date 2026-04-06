@@ -16,11 +16,11 @@ export async function getSketch(id: string): Promise<Sketch | null> {
     .from('sketches')
     .select('*')
     .eq('id', id)
-    .single();
+    .maybeSingle();
 
   if (error) {
-    if (error.code === 'PGRST116') return null; // not found
-    throw error;
+    console.warn('[sketches] getSketch error:', error.code, error.message);
+    return null;
   }
   return data;
 }
@@ -78,11 +78,11 @@ export async function getPublicSketch(id: string): Promise<Sketch | null> {
     .select('*')
     .eq('id', id)
     .eq('is_public', true)
-    .single();
+    .maybeSingle();
 
   if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
+    console.warn('[sketches] getPublicSketch error:', error.code, error.message);
+    return null;
   }
   return data;
 }

@@ -4,6 +4,7 @@ import {
   createProvider,
   getPreferredProvider,
   setPreferredProvider,
+  getSessionCostCents,
   type AIProviderType,
 } from '../../lib/aiProvider';
 import {
@@ -260,21 +261,25 @@ export function AIPanel({
         let resultError: string | null = null;
 
         if (ensembleMode) {
-          // Ensemble: generate 3 candidates, pick the best
-          setStatus('generating 3 candidates...');
+          // Ensemble: generate 2 candidates, pick the best
+          setStatus('generating 2 candidates...');
           const ensemble = await generateEnsemble(
-            prompt, currentScript, loadedSamples, recentHistory, 3,
+            prompt, currentScript, loadedSamples, recentHistory, 2,
           );
           resultCode = ensemble.best.code;
           resultError = ensemble.best.error;
           const validCount = ensemble.candidates.filter(c => c.score.parseValid).length;
-          setStatus(`best of ${validCount}/${ensemble.candidates.length} — score ${(ensemble.best.score.total * 100).toFixed(0)}%`);
+          const ensCost = ensemble.costCents > 0 ? ` · $${(ensemble.costCents / 100).toFixed(4)}` : '';
+          setStatus(`best of ${validCount}/${ensemble.candidates.length} — score ${(ensemble.best.score.total * 100).toFixed(0)}%${ensCost}`);
         } else {
           const result = await generateCode(
             prompt, currentScript, loadedSamples, recentHistory,
           );
           resultCode = result.code;
           resultError = result.error;
+          if (result.costCents > 0) {
+            setStatus(`$${(result.costCents / 100).toFixed(4)}`);
+          }
         }
 
         if (/\b(loop|oneshot)\b/.test(resultCode)) {
@@ -365,7 +370,8 @@ export function AIPanel({
 
       if (result.improvements.length > 0) {
         onGenerate(result.code);
-        setStatus(`refined: ${result.improvements.length} improvement${result.improvements.length > 1 ? 's' : ''} — ${(result.score.total * 100).toFixed(0)}%`);
+        const refCost = result.costCents > 0 ? ` · $${(result.costCents / 100).toFixed(4)}` : '';
+        setStatus(`refined: ${result.improvements.length} improvement${result.improvements.length > 1 ? 's' : ''} — ${(result.score.total * 100).toFixed(0)}%${refCost}`);
 
         const fb = createFeedbackEntry(`refine: ${lastPrompt}`, result.code, 'script');
         saveFeedback(fb);
@@ -550,6 +556,17 @@ export function AIPanel({
             fontFamily: "'SF Mono', monospace",
           }}>
             {status}
+          </div>
+        )}
+        {getSessionCostCents() > 0 && (
+          <div style={{
+            padding: '2px 0',
+            color: '#1a3a2a',
+            opacity: 0.35,
+            fontSize: '13px',
+            fontFamily: "'SF Mono', monospace",
+          }}>
+            session: ${(getSessionCostCents() / 100).toFixed(4)}
           </div>
         )}
         {asr.recording && (

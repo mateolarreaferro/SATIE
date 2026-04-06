@@ -204,9 +204,10 @@ export function Chat() {
       const fb = createFeedbackEntry(prompt, result.code, 'script');
       saveFeedback(fb);
 
+      const costStr = result.costCents > 0 ? ` · $${(result.costCents / 100).toFixed(4)}` : '';
       setMessages(prev => prev.map(m =>
         m.id === assistantId
-          ? { ...m, script: result.code, status: 'playing' as const, error: result.error ?? undefined, feedbackId: fb.id }
+          ? { ...m, script: result.code, status: 'playing' as const, error: result.error ? `${result.error}${costStr}` : (costStr ? costStr.trim() : undefined), feedbackId: fb.id }
           : m
       ));
     } catch (e: any) {

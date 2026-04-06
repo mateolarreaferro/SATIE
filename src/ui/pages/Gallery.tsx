@@ -20,17 +20,22 @@ interface PhysicsBody {
 const CARD_W = 280;
 const CARD_H = 150;
 
-/** Shared AudioContext for collision sounds */
+/** Shared AudioContext for collision sounds — created lazily on first user gesture */
 let _collisionCtx: AudioContext | null = null;
-function getCollisionCtx(): AudioContext {
-  if (!_collisionCtx || _collisionCtx.state === 'closed') _collisionCtx = new AudioContext();
-  if (_collisionCtx.state === 'suspended') _collisionCtx.resume();
-  return _collisionCtx;
+function getCollisionCtx(): AudioContext | null {
+  try {
+    if (!_collisionCtx || _collisionCtx.state === 'closed') _collisionCtx = new AudioContext();
+    if (_collisionCtx.state === 'suspended') _collisionCtx.resume();
+    return _collisionCtx;
+  } catch {
+    return null;
+  }
 }
 
 function collisionSound(speed: number) {
   try {
     const ctx = getCollisionCtx();
+    if (!ctx) return;
     const len = Math.ceil(ctx.sampleRate * 0.03);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);

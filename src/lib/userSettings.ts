@@ -27,6 +27,9 @@ export function setPreferCommunitySamples(value: boolean): void {
   localStorage.setItem(LS_PREFER_COMMUNITY, value ? 'true' : 'false');
 }
 
+/** Track failed Supabase fetches to avoid repeated failing requests per session */
+let _supabaseSettingsFailed = false;
+
 /** Load settings: tries Supabase first (logged in), falls back to localStorage. */
 export async function loadSettings(userId: string | null): Promise<UserSettings> {
   const local: UserSettings = {
@@ -36,18 +39,18 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
     gemini_key: localStorage.getItem(LS_GEMINI) ?? '',
   };
 
-  if (!userId) return local;
+  if (!userId || _supabaseSettingsFailed) return local;
 
   try {
     const { data, error } = await supabase
       .from('user_settings')
       .select('anthropic_key, elevenlabs_key, openai_key, gemini_key')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
-    // PGRST116 = row not found, 42P01 = table doesn't exist, 400 = bad request (table missing)
-    if (error && error.code !== 'PGRST116' && error.code !== '42P01') {
-      // Silently fall back to localStorage for any Supabase error
+    if (error) {
+      // Remember failure so we don't retry on every page navigation
+      _supabaseSettingsFailed = true;
       return local;
     }
 
@@ -72,7 +75,7 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
     }
     return local;
   } catch {
-    // Supabase unavailable or table missing — use localStorage silently
+    _supabaseSettingsFailed = true;
     return local;
   }
 }

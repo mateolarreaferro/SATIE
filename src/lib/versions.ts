@@ -55,11 +55,11 @@ export async function getVersion(versionId: string): Promise<SketchVersion | nul
     .from('sketch_versions')
     .select('*')
     .eq('id', versionId)
-    .single();
+    .maybeSingle();
 
   if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
+    console.warn('[versions] getVersion error:', error.code, error.message);
+    return null;
   }
   return data;
 }

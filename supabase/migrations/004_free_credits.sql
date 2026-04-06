@@ -1,2 +1,7 @@
--- Track whether a user has claimed their free signup credits
-alter table public.credits add column if not exists free_credits_claimed boolean not null default false;
+-- ============================================================
+-- 004: Add free_credits_claimed flag to credits
+-- ============================================================
+
+ALTER TABLE public.credits ADD COLUMN IF NOT EXISTS free_credits_claimed BOOLEAN NOT NULL DEFAULT false;
+
+DO $$ BEGIN RAISE NOTICE '[004] ✓ free_credits_claimed column ready'; END $$;

@@ -1,44 +1,55 @@
 import { supabase, type Profile } from './supabase';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
+    if (error) {
+      console.warn('[profiles] getProfile error:', error.code, error.message);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
   }
-  return data;
 }
 
 export async function getProfileByUsername(username: string): Promise<Profile | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('username', username)
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('username', username)
+      .maybeSingle();
 
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw error;
+    if (error) {
+      console.warn('[profiles] getProfileByUsername error:', error.code, error.message);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
   }
-  return data;
 }
 
 export async function upsertProfile(
   userId: string,
   updates: Partial<Pick<Profile, 'username' | 'display_name' | 'bio' | 'avatar_url'>>,
-): Promise<Profile> {
+): Promise<Profile | null> {
   const { data, error } = await supabase
     .from('profiles')
     .upsert({ id: userId, ...updates })
     .select()
-    .single();
+    .maybeSingle();
 
-  if (error) throw error;
+  if (error) {
+    console.warn('[profiles] upsertProfile error:', error.code, error.message);
+    return null;
+  }
   return data;
 }
 

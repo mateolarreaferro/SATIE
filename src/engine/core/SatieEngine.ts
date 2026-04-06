@@ -309,6 +309,7 @@ export class SatieEngine {
     if (this.ctx.state === 'suspended') await this.ctx.resume();
 
     this.clearRuntimeWarnings();
+    this._generationDisabled = false;
     this._isPlaying = true;
     this.clock.start();
     this.scheduler.reset();
@@ -618,6 +619,9 @@ export class SatieEngine {
     const buffer = this.audioBuffers.get(clipPath) ?? this.audioBuffers.get(stmt.clip);
 
     if (!buffer) {
+      // If generation is already in-flight for this clip, don't re-request
+      if (this._generationInFlight.has(clipPath)) return;
+
       if (stmt.isGenerated && stmt.genPrompt) {
         // Community-first: try finding a matching community sample before generating
         if (this.preferCommunitySamples && this.onSearchCommunity) {
@@ -765,48 +769,100 @@ export class SatieEngine {
   }
 
   private fallbackGenerate(prompt: string, clipPath: string, stmt: Statement): void {
+    if (this._generationDisabled) return;
+
+    // Deduplicate: skip if already in-flight or already loaded
+    if (this._generationInFlight.has(clipPath)) return;
+    if (this.audioBuffers.has(clipPath)) return;
+
     const opts = this.sampleGenOptions(stmt);
     console.log(`[SatieEngine] Generating audio: "${prompt}" → ${clipPath}`);
-    generateAudio(this.ctx, prompt, clipPath, stmt.kind === 'loop', opts)
+    const promise = generateAudio(this.ctx, prompt, clipPath, stmt.kind === 'loop', opts)
       .then((audioBuffer) => {
         this.audioBuffers.set(clipPath, audioBuffer);
+        return audioBuffer;
       })
       .catch((e: any) => {
+        if (e.message?.includes('402') || e.message?.includes('401') ||
+            e.message?.includes('credits') || e.message?.includes('Sign in')) {
+          this._generationDisabled = true;
+        }
         this.addRuntimeWarning(`Audio generation failed: ${e.message}`);
+        return null;
+      })
+      .finally(() => {
+        this._generationInFlight.delete(clipPath);
       });
+
+    this._generationInFlight.set(clipPath, promise as Promise<AudioBuffer | null>);
   }
 
+  /** In-flight generation promises keyed by clipPath — prevents duplicate requests */
+  private _generationInFlight = new Map<string, Promise<AudioBuffer | null>>();
+
+  /** Set to true when the proxy returns 402 — stops further generation attempts */
+  private _generationDisabled = false;
+
   private async generateAndRetrigger(key: string, stmt: Statement, clipPath: string): Promise<void> {
-    try {
-      const opts = this.sampleGenOptions(stmt);
+    // Stop spamming the API if we already know there are no credits
+    if (this._generationDisabled) return;
 
-      // Detect variant suffix (e.g., _2, _3) and vary the prompt
-      let effectivePrompt = stmt.genPrompt!;
-      const variantMatch = clipPath.match(/_(\d+)$/);
-      if (variantMatch) {
-        const variantIdx = parseInt(variantMatch[1]);
-        if (variantIdx > 1) {
-          const variations = ['with subtle variation', 'slightly different texture', 'alternative take', 'another version', 'different character'];
-          effectivePrompt = `${effectivePrompt}, ${variations[(variantIdx - 2) % variations.length]}`;
-        }
-      }
-
-      console.log(`[SatieEngine] Generating audio: "${effectivePrompt}" → ${clipPath}`);
-      const audioBuffer = await generateAudio(
-        this.ctx,
-        effectivePrompt,
-        clipPath,
-        stmt.kind === 'loop',
-        opts,
-      );
-      this.audioBuffers.set(clipPath, audioBuffer);
-
-      // Retry playback if still playing
-      if (this._isPlaying && this.tracks.has(key)) {
+    // If already in-flight for this clipPath, wait for the existing request
+    const existing = this._generationInFlight.get(clipPath);
+    if (existing) {
+      const buf = await existing;
+      if (buf && this._isPlaying && this.tracks.has(key)) {
         this.retriggerAudio(key, stmt);
       }
-    } catch (e: any) {
-      this.addRuntimeWarning(`Audio generation failed for "${stmt.genPrompt}": ${e.message}`);
+      return;
+    }
+
+    const promise = (async (): Promise<AudioBuffer | null> => {
+      try {
+        const opts = this.sampleGenOptions(stmt);
+
+        // Detect variant suffix (e.g., _2, _3) and vary the prompt
+        let effectivePrompt = stmt.genPrompt!;
+        const variantMatch = clipPath.match(/_(\d+)$/);
+        if (variantMatch) {
+          const variantIdx = parseInt(variantMatch[1]);
+          if (variantIdx > 1) {
+            const variations = ['with subtle variation', 'slightly different texture', 'alternative take', 'another version', 'different character'];
+            effectivePrompt = `${effectivePrompt}, ${variations[(variantIdx - 2) % variations.length]}`;
+          }
+        }
+
+        console.log(`[SatieEngine] Generating audio: "${effectivePrompt}" → ${clipPath}`);
+        const audioBuffer = await generateAudio(
+          this.ctx,
+          effectivePrompt,
+          clipPath,
+          stmt.kind === 'loop',
+          opts,
+        );
+        this.audioBuffers.set(clipPath, audioBuffer);
+        return audioBuffer;
+      } catch (e: any) {
+        // If 402 (no credits) or 401 (not signed in), stop all future generation
+        if (e.message?.includes('402') || e.message?.includes('401') ||
+            e.message?.includes('credits') || e.message?.includes('Sign in')) {
+          this._generationDisabled = true;
+          this.addRuntimeWarning(e.message);
+        } else {
+          this.addRuntimeWarning(`Audio generation failed for "${stmt.genPrompt}": ${e.message}`);
+        }
+        return null;
+      } finally {
+        this._generationInFlight.delete(clipPath);
+      }
+    })();
+
+    this._generationInFlight.set(clipPath, promise);
+    const buf = await promise;
+
+    // Retry playback if still playing
+    if (buf && this._isPlaying && this.tracks.has(key)) {
+      this.retriggerAudio(key, stmt);
     }
   }
 
