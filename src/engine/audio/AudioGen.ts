@@ -120,14 +120,26 @@ export async function generateAudio(
     return ctx.decodeAudioData(cached.slice(0));
   }
 
+  // Also check cache with just the base prompt (without variation suffixes) to avoid
+  // regenerating audio when the script is regenerated but prompts are the same
+  const basePrompt = prompt.replace(/, (with subtle variation|slightly different texture|alternative take|another version|different character)$/, '');
+  if (basePrompt !== prompt) {
+    const baseCk = cacheKey(basePrompt, duration, influence, clipName);
+    const baseCached = await getCached(baseCk);
+    if (baseCached) {
+      return ctx.decodeAudioData(baseCached.slice(0));
+    }
+  }
+
   // Deduplicate concurrent requests for the same clip
   let rawPromise = pending.get(clipName);
   if (!rawPromise) {
     if (apiKey) {
-      // User has their own key — direct call
+      // User has their own key — direct call (no credits consumed)
       rawPromise = fetchSoundGenerationRateLimited(apiKey, prompt, duration, influence, outputFormat);
     } else {
-      // No key — use proxy (requires auth)
+      // No key — use proxy (costs ~$0.20-0.40 per voice in credits)
+      console.warn(`[AudioGen] No ElevenLabs key — using proxy for "${clipName}" (costs credits). Add your key in settings to avoid credit usage.`);
       rawPromise = fetchSoundGenerationViaProxy(prompt, duration, influence, outputFormat);
     }
     pending.set(clipName, rawPromise);

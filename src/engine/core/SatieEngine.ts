@@ -287,12 +287,48 @@ export class SatieEngine {
   // ── Script / transport ──
 
   loadScript(script: string): void {
+    // Snapshot existing gen prompt → audio buffer mappings before re-parse
+    const prevGenBuffers = new Map<string, AudioBuffer>();
+    for (const stmt of this.statements) {
+      if (!stmt.isGenerated || !stmt.genPrompt) continue;
+      const cp = pathFor(stmt.clip);
+      const buf = this.audioBuffers.get(cp) ?? this.audioBuffers.get(stmt.clip);
+      if (buf) prevGenBuffers.set(stmt.genPrompt, buf);
+    }
+
     try {
       this.statements = parse(script);
       this.errors = null;
     } catch (e: any) {
       this.errors = e.message;
       this.statements = [];
+    }
+
+    // Carry forward audio buffers for gen voices whose prompts match previous ones,
+    // even if clip paths changed (e.g. AI reworded the script but kept same sounds)
+    for (const stmt of this.statements) {
+      if (!stmt.isGenerated || !stmt.genPrompt) continue;
+      const cp = pathFor(stmt.clip);
+      if (this.audioBuffers.has(cp) || this.audioBuffers.has(stmt.clip)) continue;
+
+      // Exact match first
+      let existing = prevGenBuffers.get(stmt.genPrompt);
+
+      // Fuzzy match: if the new prompt contains an old prompt (or vice versa), reuse it
+      if (!existing) {
+        const newWords = stmt.genPrompt.toLowerCase();
+        for (const [oldPrompt, buf] of prevGenBuffers) {
+          const oldWords = oldPrompt.toLowerCase();
+          if (newWords.includes(oldWords) || oldWords.includes(newWords)) {
+            existing = buf;
+            break;
+          }
+        }
+      }
+
+      if (existing) {
+        this.audioBuffers.set(cp, existing);
+      }
     }
 
     // If playing, restart with new statements

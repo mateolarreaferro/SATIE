@@ -9,7 +9,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '');
+// Use a placeholder URL when env vars are missing (e.g. in CI/test) so createClient doesn't throw
+export const supabase = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key',
+);
 
 export interface Sketch {
   id: string;

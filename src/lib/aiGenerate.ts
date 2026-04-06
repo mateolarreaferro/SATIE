@@ -279,6 +279,7 @@ TRAJECTORY GEN BLOCKS:
 - Ranges use 'to' without spaces (0.5to1.0)
 - Keep it MINIMAL — only add what the user asks for
 - When modifying existing code, PRESERVE everything unless asked to change it
+- NEVER change gen prompts when modifying an existing script (e.g. keep "gen gentle rain" exactly as-is). Changing gen text triggers expensive audio re-generation. Only add NEW gen voices if the user asks for new sounds.
 - Prefer ranges and count multipliers over copy-pasting statements
 - Think about musical relationships: bass is low pitch, high voices are high pitch
 - Think about spatial relationships: spread voices apart, use movement for life
@@ -794,6 +795,7 @@ RULES:
 - Keep the original artistic intent intact
 - Make ONE focused improvement per round (don't rewrite everything)
 - Preserve all existing voices and their core character
+- NEVER change gen prompts (e.g. keep "gen gentle rain" exactly as-is). Changing gen text triggers expensive audio re-generation. Only modify properties like volume, pitch, move, effects — never the gen prompt text itself.
 - ALWAYS output the COMPLETE script`;
 
   for (let round = 0; round < rounds; round++) {

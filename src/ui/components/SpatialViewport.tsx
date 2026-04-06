@@ -1,9 +1,8 @@
 import { useRef, useEffect, useCallback, useState, useMemo, memo, createContext, useContext } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, Trail } from '@react-three/drei';
+import { Grid, Trail } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import type { TrackState } from '../../engine';
 import { useHeadTracking } from '../hooks/useHeadTracking';
 import { useFaceTracking, type FaceMeshData } from '../hooks/useFaceTracking';
@@ -1016,57 +1015,53 @@ function OverlayFlyControls() {
   return null;
 }
 
-// Unity-style fly camera: WASD when viewport focused
+// FPS-style fly controls for the editor — camera IS the listener.
+// Right-click drag to mouselook, WASD to move, Q/E for up/down.
 function FlyControls() {
   const { camera, gl } = useThree();
   const { focused } = useContext(ViewportFocusContext);
   const listenerSync = useContext(ListenerSyncContext);
-  // Ref to keep useFrame closure in sync with latest context value
   const listenerSyncRef = useRef(listenerSync);
   listenerSyncRef.current = listenerSync;
-  const controlsRef = useRef<OrbitControlsImpl>(null);
   const keysDown = useRef(new Set<string>());
   const rightMouseDown = useRef(false);
   const focusedRef = useRef(focused);
   focusedRef.current = focused;
-  const flySpeed = 5;
+  const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+  const flySpeed = 6;
+  const lookSensitivity = 0.003;
   const resetRef = useContext(CameraResetContext);
   const zoomRef = useContext(CameraZoomContext);
   const fitRef = useContext(CameraFitContext);
 
+  // Initialize euler from camera
+  useEffect(() => {
+    euler.current.setFromQuaternion(camera.quaternion, 'YXZ');
+  }, [camera]);
+
   useEffect(() => {
     resetRef.current = () => {
       camera.position.set(0, 0, 0);
-      if (controlsRef.current) {
-        controlsRef.current.target.set(0, 0, 0);
-        controlsRef.current.update();
-      }
+      euler.current.set(0, 0, 0, 'YXZ');
+      camera.quaternion.setFromEuler(euler.current);
     };
     return () => { resetRef.current = null; };
   }, [camera, resetRef]);
 
   useEffect(() => {
     zoomRef.current = (dir: number) => {
-      // Dolly camera toward/away from orbit target
-      const target = controlsRef.current?.target ?? new THREE.Vector3();
-      const offset = camera.position.clone().sub(target);
-      const factor = dir > 0 ? 0.75 : 1.33;
-      offset.multiplyScalar(factor);
-      camera.position.copy(target).add(offset);
-      controlsRef.current?.update();
+      // Move camera forward/backward along view direction
+      const fwd = new THREE.Vector3();
+      camera.getWorldDirection(fwd);
+      const step = dir > 0 ? 2 : -2;
+      camera.position.addScaledVector(fwd, step);
     };
     return () => { zoomRef.current = null; };
   }, [camera, zoomRef]);
 
   useEffect(() => {
     fitRef.current = () => {
-      // Compute AABB of all voice positions
-      const sync = listenerSync;
-      // Access scene children to find voice positions
-      const scene = gl.domElement.parentElement;
-      if (!controlsRef.current) return;
-      // We'll read positions from the tracksRef via closure — but we don't have it here.
-      // Instead, scan all meshes in the scene
+      // Compute AABB of all voice positions and fly camera to see them
       const box = new THREE.Box3();
       let hasPoints = false;
       camera.parent?.traverse((obj) => {
@@ -1079,7 +1074,6 @@ function FlyControls() {
         }
       });
       if (!hasPoints) {
-        // Default: frame the origin area
         box.expandByPoint(new THREE.Vector3(-5, 0, -5));
         box.expandByPoint(new THREE.Vector3(5, 3, 5));
       }
@@ -1090,12 +1084,15 @@ function FlyControls() {
       const maxDim = Math.max(bSize.x, bSize.y, bSize.z, 2);
       const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
       const dist = maxDim / (2 * Math.tan(fov / 2)) * 1.5;
-      camera.position.set(center.x + dist * 0.5, center.y + dist * 0.5, center.z + dist);
-      controlsRef.current.target.copy(center);
-      controlsRef.current.update();
+      camera.position.set(center.x, center.y + dist * 0.3, center.z + dist);
+      // Look at center
+      const dir = center.clone().sub(camera.position).normalize();
+      euler.current.y = Math.atan2(-dir.x, -dir.z);
+      euler.current.x = Math.asin(dir.y);
+      camera.quaternion.setFromEuler(euler.current);
     };
     return () => { fitRef.current = null; };
-  }, [camera, fitRef, gl, listenerSync]);
+  }, [camera, fitRef]);
 
   const _forward = useMemo(() => new THREE.Vector3(), []);
   const _right = useMemo(() => new THREE.Vector3(), []);
@@ -1125,113 +1122,81 @@ function FlyControls() {
     if (e.button === 2) rightMouseDown.current = false;
   }, []);
 
+  const onMouseMove = useCallback((e: MouseEvent) => {
+    if (!rightMouseDown.current) return;
+    euler.current.y -= e.movementX * lookSensitivity;
+    euler.current.x -= e.movementY * lookSensitivity;
+    euler.current.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.current.x));
+    camera.quaternion.setFromEuler(euler.current);
+  }, [camera]);
+
+  // Release right-click if mouse leaves canvas (mouseup fires on window)
+  const onWindowMouseUp = useCallback((e: MouseEvent) => {
+    if (e.button === 2) rightMouseDown.current = false;
+  }, []);
+
   useEffect(() => {
     const el = gl.domElement;
     el.addEventListener('mousedown', onMouseDown);
     el.addEventListener('mouseup', onMouseUp);
+    el.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onWindowMouseUp);
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('keyup', onKeyUp);
     return () => {
       el.removeEventListener('mousedown', onMouseDown);
       el.removeEventListener('mouseup', onMouseUp);
+      el.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onWindowMouseUp);
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [gl, onKeyDown, onKeyUp, onMouseDown, onMouseUp]);
+  }, [gl, onKeyDown, onKeyUp, onMouseDown, onMouseUp, onMouseMove, onWindowMouseUp]);
 
   useEffect(() => {
     if (!focused) keysDown.current.clear();
   }, [focused]);
 
   useFrame((_, delta) => {
+    // WASD movement when focused or right-mouse held
+    const active = focused || rightMouseDown.current;
+    if (active) {
+      const keys = keysDown.current;
+      if (keys.size > 0) {
+        const speed = delta * flySpeed;
+        camera.getWorldDirection(_forward);
+        _right.crossVectors(_forward, _up).normalize();
+        _move.set(0, 0, 0);
+
+        if (keys.has('w') || keys.has('arrowup')) _move.addScaledVector(_forward, speed);
+        if (keys.has('s') || keys.has('arrowdown')) _move.addScaledVector(_forward, -speed);
+        if (keys.has('a') || keys.has('arrowleft')) _move.addScaledVector(_right, -speed);
+        if (keys.has('d') || keys.has('arrowright')) _move.addScaledVector(_right, speed);
+        if (keys.has('e') || keys.has(' ')) _move.y += speed;
+        if (keys.has('q')) _move.y -= speed;
+
+        if (_move.lengthSq() > 0) {
+          camera.position.add(_move);
+        }
+      }
+    }
+
+    // Always sync audio listener to camera (camera IS the listener)
     const ls = listenerSyncRef.current;
-    // Always sync AudioContext.listener to the triangle position
-    const lp = ls.listenerPosRef.current;
+    ls.listenerPosRef.current.copy(camera.position);
     if (ls.onMove) {
-      ls.onMove(lp.x, lp.y, lp.z);
+      ls.onMove(camera.position.x, camera.position.y, camera.position.z);
     }
     if (!ls.externalTrackingActive) {
-      // Default: orientation from camera direction
       camera.getWorldDirection(_forward);
       ls.listenerForwardRef.current.set(_forward.x, _forward.y, _forward.z);
       if (ls.onRotate) {
-        ls.onRotate(_forward.x, _forward.y, _forward.z, _up.x, _up.y, _up.z);
-      }
-    }
-
-    const active = focused || rightMouseDown.current;
-
-    if (ls.linked) {
-      // 3rd-person mode: WASD moves the listener, camera follows behind
-      if (active) {
-        const keys = keysDown.current;
-        if (keys.size > 0) {
-          const speed = delta * flySpeed;
-          // Movement relative to camera direction (projected to XZ for ground movement)
-          camera.getWorldDirection(_forward);
-          _forward.y = 0;
-          _forward.normalize();
-          _right.crossVectors(_forward, _up).normalize();
-          _move.set(0, 0, 0);
-
-          if (keys.has('w') || keys.has('arrowup')) _move.addScaledVector(_forward, speed);
-          if (keys.has('s') || keys.has('arrowdown')) _move.addScaledVector(_forward, -speed);
-          if (keys.has('a') || keys.has('arrowleft')) _move.addScaledVector(_right, -speed);
-          if (keys.has('d') || keys.has('arrowright')) _move.addScaledVector(_right, speed);
-          if (keys.has('e') || keys.has(' ')) _move.y += speed;
-          if (keys.has('q')) _move.y -= speed;
-
-          if (_move.lengthSq() > 0) {
-            lp.add(_move);
-          }
-        }
-      }
-
-      // Keep orbit target locked on the listener
-      if (controlsRef.current) {
-        controlsRef.current.target.copy(lp);
-      }
-    } else {
-      // Free camera mode: WASD moves the camera
-      if (!active) return;
-
-      const keys = keysDown.current;
-      if (keys.size === 0) return;
-      const speed = delta * flySpeed;
-
-      camera.getWorldDirection(_forward);
-      _right.crossVectors(_forward, _up).normalize();
-      _move.set(0, 0, 0);
-
-      if (keys.has('w') || keys.has('arrowup')) _move.addScaledVector(_forward, speed);
-      if (keys.has('s') || keys.has('arrowdown')) _move.addScaledVector(_forward, -speed);
-      if (keys.has('a') || keys.has('arrowleft')) _move.addScaledVector(_right, -speed);
-      if (keys.has('d') || keys.has('arrowright')) _move.addScaledVector(_right, speed);
-      if (keys.has('e') || keys.has(' ')) _move.y += speed;
-      if (keys.has('q')) _move.y -= speed;
-
-      if (_move.lengthSq() > 0) {
-        camera.position.add(_move);
-        if (controlsRef.current) {
-          controlsRef.current.target.add(_move);
-        }
+        ls.onRotate(_forward.x, _forward.y, _forward.z, 0, 1, 0);
       }
     }
   });
 
-  return (
-    <OrbitControls
-      ref={controlsRef}
-      makeDefault
-      enableDamping
-      dampingFactor={0.05}
-      mouseButtons={{
-        LEFT: THREE.MOUSE.ROTATE,
-        MIDDLE: THREE.MOUSE.PAN,
-        RIGHT: THREE.MOUSE.ROTATE,
-      }}
-    />
-  );
+  return null;
 }
 
 /** Compute a contrasting color: invert lightness so it's always visible. */
@@ -1286,8 +1251,7 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
             />
           )
         )}
-        {!overlayMode && <Listener color={listenerColor} faceTrackingActive={listenerSync.externalTrackingActive} />}
-        {!overlayMode && <HearingCone color={listenerColor} />}
+        {/* Camera IS the listener in both modes — no separate listener visual needed */}
         <AudioSourcePool tracksRef={tracksRef} />
         {overlayMode ? <OverlayFlyControls /> : <FlyControls />}
         {!overlayMode && <AxisGizmo />}
@@ -1547,10 +1511,9 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
         </button>
         <button
           onClick={() => {
-            listenerPosRef.current.set(0, 0, 0);
             cameraResetRef.current?.();
           }}
-          title="Reset listener to origin"
+          title="Reset camera to origin"
           style={{
             width: 28,
             height: 28,
