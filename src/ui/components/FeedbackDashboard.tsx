@@ -1,15 +1,21 @@
 /**
- * Feedback Effectiveness Dashboard — advanced view showing which
- * compositional patterns the adaptive AI system has learned to
- * boost or avoid based on RLHF feedback.
+ * Feedback Effectiveness Dashboard — read-only view showing which
+ * compositional patterns users prefer based on RLHF feedback data
+ * stored in IndexedDB. Does NOT inject anything into AI prompts.
  */
 
 import { useState, useEffect } from 'react';
-import { buildAdaptiveSystemPrompt, checkLibrary, type PromptEffectiveness } from '../../lib/aiGenerate';
+import { getTopExamples, getAntiPatterns } from '../../lib/feedbackStore';
 import type { Theme } from '../hooks/useDayNightCycle';
 
 interface FeedbackDashboardProps {
   theme: Theme;
+}
+
+interface PatternStat {
+  name: string;
+  successRate: number;
+  sampleSize: number;
 }
 
 const PATTERN_LABELS: Record<string, string> = {
@@ -27,27 +33,57 @@ const PATTERN_LABELS: Record<string, string> = {
   variables: 'Variables (let)',
 };
 
+const PATTERN_DETECTORS: { name: string; test: (code: string) => boolean }[] = [
+  { name: 'count_multiplier', test: (c) => /\d+\s*\*\s*(loop|oneshot)/.test(c) },
+  { name: 'groups', test: (c) => c.includes('group') && c.includes('endgroup') },
+  { name: 'reverb', test: (c) => /reverb\s/.test(c) },
+  { name: 'delay', test: (c) => /delay\s/.test(c) },
+  { name: 'filter', test: (c) => /filter\s/.test(c) },
+  { name: 'interpolation', test: (c) => /\b(fade|jump|gobetween|interpolate)\b/.test(c) },
+  { name: 'ranges', test: (c) => /\d+to\d+/.test(c) },
+  { name: 'movement', test: (c) => /move\s+(walk|fly|orbit|spiral|lorenz)/.test(c) },
+  { name: 'trajectory', test: (c) => /move\s+(spiral|orbit|lorenz|gen)/.test(c) },
+  { name: 'visual_trail', test: (c) => /visual\s+trail/.test(c) },
+  { name: 'gen_audio', test: (c) => /\bgen\s+\w/.test(c) },
+  { name: 'variables', test: (c) => /\blet\s+\w/.test(c) },
+];
+
 export function FeedbackDashboard({ theme }: FeedbackDashboardProps) {
-  const [effectiveness, setEffectiveness] = useState<PromptEffectiveness[]>([]);
+  const [stats, setStats] = useState<PatternStat[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    buildAdaptiveSystemPrompt([], checkLibrary('', []))
-      .then(({ effectiveness: eff }) => {
-        if (!cancelled) {
-          setEffectiveness(eff.sort((a, b) => b.sampleSize - a.sampleSize));
-          setLoading(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false);
+
+    // Analyze feedback data locally (IndexedDB only, no API calls)
+    Promise.all([
+      getTopExamples('script', 20),
+      getAntiPatterns('script', 20),
+    ]).then(([positive, negative]) => {
+      if (cancelled) return;
+
+      const results = PATTERN_DETECTORS.map(({ name, test }) => {
+        const posHits = positive.filter(f => test(f.userEditedOutput ?? f.output)).length;
+        const negHits = negative.filter(f => test(f.output)).length;
+        const total = posHits + negHits;
+        return {
+          name,
+          successRate: total > 0 ? posHits / total : 0.5,
+          sampleSize: total,
+        };
       });
+
+      setStats(results.sort((a, b) => b.sampleSize - a.sampleSize));
+      setLoading(false);
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
+    });
+
     return () => { cancelled = true; };
   }, []);
 
-  const totalSamples = effectiveness.reduce((sum, e) => sum + e.sampleSize, 0);
+  const totalSamples = stats.reduce((sum, e) => sum + e.sampleSize, 0);
   const hasFeedback = totalSamples > 0;
 
   return (
@@ -62,31 +98,30 @@ export function FeedbackDashboard({ theme }: FeedbackDashboardProps) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ fontSize: '12px', opacity: 0.25, marginBottom: 2 }}>
-            {totalSamples} feedback signals analyzed
+            {totalSamples} feedback signals collected
           </div>
 
-          {effectiveness.map((e) => {
-            const label = PATTERN_LABELS[e.patternName] ?? e.patternName;
+          {stats.map((e) => {
+            const label = PATTERN_LABELS[e.name] ?? e.name;
             const pct = Math.round(e.successRate * 100);
             const barColor = e.sampleSize < 2
-              ? `${theme.text}20`  // insufficient data — gray
+              ? `${theme.text}20`
               : e.successRate >= 0.7
-                ? '#2d6a4f'  // boosted — green
+                ? '#2d6a4f'
                 : e.successRate <= 0.3
-                  ? '#8b0000'  // warned — red
-                  : `${theme.text}40`;  // neutral
+                  ? '#8b0000'
+                  : `${theme.text}40`;
 
             const statusLabel = e.sampleSize < 2
               ? 'insufficient data'
               : e.successRate >= 0.7
-                ? 'boosted'
+                ? 'preferred'
                 : e.successRate <= 0.3
-                  ? 'avoided'
+                  ? 'disliked'
                   : 'neutral';
 
             return (
-              <div key={e.patternName} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {/* Label */}
+              <div key={e.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{
                   fontSize: '12px',
                   fontFamily: "'SF Mono', monospace",
@@ -101,7 +136,6 @@ export function FeedbackDashboard({ theme }: FeedbackDashboardProps) {
                   {label}
                 </div>
 
-                {/* Bar */}
                 <div style={{
                   flex: 1,
                   height: 6,
@@ -119,7 +153,6 @@ export function FeedbackDashboard({ theme }: FeedbackDashboardProps) {
                   }} />
                 </div>
 
-                {/* Percentage + status */}
                 <div style={{
                   fontSize: '11px',
                   fontFamily: "'SF Mono', monospace",
@@ -144,8 +177,7 @@ export function FeedbackDashboard({ theme }: FeedbackDashboardProps) {
             marginTop: 4,
             lineHeight: 1.5,
           }}>
-            Patterns above 70% are emphasized in AI prompts.
-            Below 30% are flagged as caution. Rate more generations to refine.
+            Feedback is collected locally. Rate more generations to build a clearer picture of your preferences.
           </div>
         </div>
       )}

@@ -13,13 +13,6 @@ import {
   getSessionCostCents,
   type AIProvider,
 } from './aiProvider';
-import {
-  getTopExamples,
-  getAntiPatterns,
-  type StoredFeedback,
-} from './feedbackStore';
-import { searchCommunity, formatCommunitySamplesForPrompt } from './communitySearch';
-import type { CommunitySample } from './communitySamples';
 
 // ── Code cleaning ──────────────────────────────────────────
 
@@ -290,13 +283,14 @@ TRAJECTORY GEN BLOCKS:
 /**
  * Build the dynamic (per-call) portion of the system prompt.
  * This part changes per request and is NOT cached.
+ *
+ * Kept intentionally lean — only includes the audio library listing.
+ * RLHF feedback is collected (IndexedDB) but NOT injected into prompts.
+ * It will be used for offline analysis / fine-tuning, not per-call inflation.
  */
-function buildDynamicPromptSection(
+export function buildSystemPrompt(
   loadedSamples: string[],
   libraryResult: LibraryCheckResult,
-  topExamples: StoredFeedback[] = [],
-  antiPatterns: StoredFeedback[] = [],
-  communitySamples: CommunitySample[] = [],
 ): string {
   let audioLibrary: string;
   if (loadedSamples.length > 0) {
@@ -305,32 +299,7 @@ function buildDynamicPromptSection(
     audioLibrary = 'No audio files loaded. Use gen keyword to generate sounds (e.g. loop gen gentle rain on leaves).';
   }
 
-  const communitySection = formatCommunitySamplesForPrompt(communitySamples);
-  if (communitySection) {
-    audioLibrary += '\n' + communitySection;
-  }
-
-  const parts: string[] = [audioLibrary];
-
-  if (topExamples.length > 0) {
-    parts.push(`\nPROVEN PATTERNS (user-approved — follow these):\n${topExamples.map((ex, i) => `${i + 1}. "${ex.prompt}" →\n${(ex.userEditedOutput ?? ex.output).slice(0, 400)}`).join('\n\n')}`);
-  }
-  if (antiPatterns.length > 0) {
-    parts.push(`\nREJECTED PATTERNS (avoid):\n${antiPatterns.map((ex, i) => `${i + 1}. "${ex.prompt}" → rejected:\n${ex.output.slice(0, 200)}`).join('\n\n')}`);
-  }
-
-  return parts.join('\n');
-}
-
-export function buildSystemPrompt(
-  loadedSamples: string[],
-  libraryResult: LibraryCheckResult,
-  topExamples: StoredFeedback[] = [],
-  antiPatterns: StoredFeedback[] = [],
-  communitySamples: CommunitySample[] = [],
-): string {
-  const dynamic = buildDynamicPromptSection(loadedSamples, libraryResult, topExamples, antiPatterns, communitySamples);
-  return STATIC_SYSTEM_PROMPT + '\n\n' + dynamic;
+  return STATIC_SYSTEM_PROMPT + '\n\n' + audioLibrary;
 }
 
 // ── Sample generation system prompt ────────────────────────
@@ -473,24 +442,7 @@ export async function generateCode(
   const complex = isComplexPrompt(userPrompt, hasExistingScript);
   const provider = complex ? createProvider() : createFastProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
-
-  // Only fetch RLHF examples + community samples for complex prompts.
-  // Simple edits ("make it louder", "add reverb") don't benefit from
-  // examples in the prompt, and they inflate token count significantly.
-  let topEx: StoredFeedback[] = [];
-  let antiEx: StoredFeedback[] = [];
-  let communitySamples: CommunitySample[] = [];
-
-  if (complex) {
-    const keywords = extractSoundKeywords(userPrompt.toLowerCase());
-    [topEx, antiEx, communitySamples] = await Promise.all([
-      getTopExamples('script', 3),
-      getAntiPatterns('script', 2),
-      searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]),
-    ]);
-  }
-
-  const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult, topEx, antiEx, communitySamples);
+  const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult);
   const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
 
   const apiMessages = [
@@ -864,137 +816,13 @@ RULES:
   return { code: currentCode, score: currentScore, improvements, costCents: getSessionCostCents() - costBefore };
 }
 
-// ── Feature 3: Self-improving system prompts ──────────────
-
-export interface PromptEffectiveness {
-  patternName: string;
-  successRate: number;  // 0–1 based on feedback scores
-  sampleSize: number;
-}
-
-/**
- * Analyze RLHF feedback to determine which compositional patterns
- * are most effective, then build an adaptive system prompt that
- * emphasizes proven patterns and de-emphasizes rejected ones.
- */
-export async function buildAdaptiveSystemPrompt(
-  loadedSamples: string[],
-  libraryResult: LibraryCheckResult,
-  communitySamples: CommunitySample[] = [],
-): Promise<{ prompt: string; effectiveness: PromptEffectiveness[] }> {
-  // Gather more feedback than usual to analyze patterns
-  const [topEx, antiEx, allPositive, allNegative] = await Promise.all([
-    getTopExamples('script', 5),
-    getAntiPatterns('script', 5),
-    getTopExamples('script', 20),
-    getAntiPatterns('script', 20),
-  ]);
-
-  // Analyze which patterns appear in successful vs failed generations
-  const patternDetectors: { name: string; test: (code: string) => boolean }[] = [
-    { name: 'count_multiplier', test: (c) => /\d+\s*\*\s*(loop|oneshot)/.test(c) },
-    { name: 'groups', test: (c) => c.includes('group') && c.includes('endgroup') },
-    { name: 'reverb', test: (c) => /reverb\s/.test(c) },
-    { name: 'delay', test: (c) => /delay\s/.test(c) },
-    { name: 'filter', test: (c) => /filter\s/.test(c) },
-    { name: 'interpolation', test: (c) => /\b(fade|jump|gobetween|interpolate)\b/.test(c) },
-    { name: 'ranges', test: (c) => /\d+to\d+/.test(c) },
-    { name: 'movement', test: (c) => /move\s+(walk|fly|orbit|spiral|lorenz)/.test(c) },
-    { name: 'trajectory', test: (c) => /move\s+(spiral|orbit|lorenz|gen)/.test(c) },
-    { name: 'visual_trail', test: (c) => /visual\s+trail/.test(c) },
-    { name: 'gen_audio', test: (c) => /\bgen\s+\w/.test(c) },
-    { name: 'variables', test: (c) => /\blet\s+\w/.test(c) },
-  ];
-
-  const effectiveness: PromptEffectiveness[] = patternDetectors.map(({ name, test }) => {
-    const positiveHits = allPositive.filter(f => {
-      const code = f.userEditedOutput ?? f.output;
-      return test(code);
-    }).length;
-    const negativeHits = allNegative.filter(f => test(f.output)).length;
-    const total = positiveHits + negativeHits;
-    return {
-      patternName: name,
-      successRate: total > 0 ? positiveHits / total : 0.5, // default neutral
-      sampleSize: total,
-    };
-  });
-
-  // Build adaptive sections: boost high-success patterns, add warnings for low-success ones
-  const boosted = effectiveness
-    .filter(e => e.sampleSize >= 2 && e.successRate >= 0.7)
-    .map(e => e.patternName);
-
-  const warned = effectiveness
-    .filter(e => e.sampleSize >= 2 && e.successRate <= 0.3)
-    .map(e => e.patternName);
-
-  const patternNameToAdvice: Record<string, string> = {
-    count_multiplier: 'Use count multipliers (N * loop) for voice variation — proven effective',
-    groups: 'Use groups for shared properties — users approve of clean organization',
-    reverb: 'Reverb is frequently well-received — include when fitting',
-    delay: 'Delay effects are appreciated — use for rhythmic interest',
-    filter: 'Filters add expressiveness — use for timbral variation',
-    interpolation: 'Interpolation (fade/jump) makes compositions feel alive — use generously',
-    ranges: 'Ranges (e.g., 0.3to0.7) add organic variation — strongly preferred',
-    movement: 'Spatial movement is a key differentiator — add walk/fly when appropriate',
-    trajectory: 'Trajectories (spiral/orbit/lorenz) create compelling spatial motion',
-    visual_trail: 'Visual trails enhance the experience for moving voices',
-    gen_audio: 'Generated audio (gen keyword) works well when samples aren\'t available',
-    variables: 'Variables (let) help with consistency across voices',
-  };
-
-  let adaptiveSection = '';
-  if (boosted.length > 0) {
-    adaptiveSection += '\n\n═══ PROVEN EFFECTIVE (use these confidently) ═══\n';
-    adaptiveSection += boosted.map(name => `✓ ${patternNameToAdvice[name] ?? name}`).join('\n');
-  }
-  if (warned.length > 0) {
-    adaptiveSection += '\n\n═══ USE WITH CAUTION (often rejected by users) ═══\n';
-    adaptiveSection += warned.map(name => `✗ ${name}: this pattern was frequently rejected — use sparingly`).join('\n');
-  }
-
-  const basePrompt = buildSystemPrompt(loadedSamples, libraryResult, topEx, antiEx, communitySamples);
-  const prompt = basePrompt + adaptiveSection;
-
-  return { prompt, effectiveness };
-}
-
-/**
- * Enhanced generateCode that uses adaptive prompts when sufficient feedback exists.
- * Drop-in replacement for generateCode with self-improving behavior.
- */
-export async function generateCodeAdaptive(
-  userPrompt: string,
-  currentScript: string | undefined,
-  loadedSamples: string[],
-  conversationHistory: { role: string; content: string }[],
-): Promise<{ code: string; error: string | null; effectiveness?: PromptEffectiveness[] }> {
-  const provider = createProvider();
-  const libraryResult = checkLibrary(userPrompt, loadedSamples);
-  const keywords = extractSoundKeywords(userPrompt.toLowerCase());
-  const communitySamples = await searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]);
-
-  const { prompt: systemPrompt, effectiveness } = await buildAdaptiveSystemPrompt(
-    loadedSamples,
-    libraryResult,
-    communitySamples,
-  );
-
-  const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
-
-  const apiMessages = [
-    ...conversationHistory,
-    { role: 'user', content: enrichedPrompt },
-  ];
-
-  const rawResponse = await callAI(provider, systemPrompt, apiMessages, 2048, 0.7);
-  const cleanedCode = cleanGeneratedCode(rawResponse);
-  const verified = await verifyAndRepair(cleanedCode);
-
-  return {
-    code: verified.code,
-    error: verified.error,
-    effectiveness,
-  };
-}
+// ── RLHF ──────────────────────────────────────────────────
+//
+// Feedback is collected via thumbs up/down in the UI and stored
+// in IndexedDB (see feedbackStore.ts). It is NOT injected into
+// AI prompts — that approach inflated token cost on every call
+// for marginal benefit.
+//
+// The FeedbackDashboard component reads this data for a read-only
+// view of user preferences. In the future, this data can be used
+// for offline fine-tuning or batch prompt optimization.

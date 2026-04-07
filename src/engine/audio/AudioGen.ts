@@ -138,8 +138,8 @@ export async function generateAudio(
       // User has their own key — direct call (no credits consumed)
       rawPromise = fetchSoundGenerationRateLimited(apiKey, prompt, duration, influence, outputFormat);
     } else {
-      // No key — use proxy (costs ~$0.20-0.40 per voice in credits)
-      console.warn(`[AudioGen] No ElevenLabs key — using proxy for "${clipName}" (costs credits). Add your key in settings to avoid credit usage.`);
+      // No key — use proxy (~1 cent per voice in credits)
+      console.warn(`[AudioGen] No ElevenLabs key — using proxy for "${clipName}" (~1c in credits).`);
       rawPromise = fetchSoundGenerationViaProxy(prompt, duration, influence, outputFormat);
     }
     pending.set(clipName, rawPromise);

@@ -15,12 +15,14 @@ const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL |
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
 
-// ElevenLabs sound generation pricing: ~$0.04 per second of audio
-const ELEVENLABS_COST_PER_SECOND = 0.04; // dollars
+// ElevenLabs sound generation pricing (Creator plan):
+// $22/mo for 289,205 credits. Sound gen uses ~100 credits per call.
+// Real cost: ~$0.008 per generation. We charge a flat 1 cent to cover
+// infrastructure + small margin, regardless of duration.
+const ELEVENLABS_COST_PER_GENERATION_CENTS = 1; // 1 cent flat
 
-function calculateAudioCostCents(durationSeconds: number): number {
-  const cost = durationSeconds * ELEVENLABS_COST_PER_SECOND;
-  return Math.max(1, Math.ceil(cost * 100)); // round up to nearest cent
+function calculateAudioCostCents(_durationSeconds: number): number {
+  return ELEVENLABS_COST_PER_GENERATION_CENTS;
 }
 
 async function authenticateUser(req: VercelRequest): Promise<string | null> {

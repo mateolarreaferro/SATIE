@@ -27,8 +27,9 @@ export function setPreferCommunitySamples(value: boolean): void {
   localStorage.setItem(LS_PREFER_COMMUNITY, value ? 'true' : 'false');
 }
 
-/** Track failed Supabase fetches to avoid repeated failing requests per session */
-let _supabaseSettingsFailed = false;
+/** Track failed Supabase fetches — retry after cooldown instead of giving up permanently */
+let _supabaseSettingsFailedAt = 0;
+const SUPABASE_RETRY_COOLDOWN_MS = 30_000; // 30 seconds
 
 /** Load settings: tries Supabase first (logged in), falls back to localStorage. */
 export async function loadSettings(userId: string | null): Promise<UserSettings> {
@@ -39,7 +40,8 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
     gemini_key: localStorage.getItem(LS_GEMINI) ?? '',
   };
 
-  if (!userId || _supabaseSettingsFailed) return local;
+  if (!userId) return local;
+  if (_supabaseSettingsFailedAt && Date.now() - _supabaseSettingsFailedAt < SUPABASE_RETRY_COOLDOWN_MS) return local;
 
   try {
     const { data, error } = await supabase
@@ -50,7 +52,7 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
 
     if (error) {
       // Remember failure so we don't retry on every page navigation
-      _supabaseSettingsFailed = true;
+      _supabaseSettingsFailedAt = Date.now();
       return local;
     }
 
@@ -75,7 +77,7 @@ export async function loadSettings(userId: string | null): Promise<UserSettings>
     }
     return local;
   } catch {
-    _supabaseSettingsFailed = true;
+    _supabaseSettingsFailedAt = Date.now();
     return local;
   }
 }
