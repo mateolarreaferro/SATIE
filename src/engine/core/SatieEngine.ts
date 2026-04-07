@@ -759,9 +759,12 @@ export class SatieEngine {
 
   /** Eagerly pre-generate all gen audio on play(). Doesn't block playback. */
   private preGenerateAll(): void {
-    // Track prompts we've seen — when the same prompt appears multiple times
-    // (from count > 1), vary the prompt so ElevenLabs produces distinct sounds
-    const promptCounts = new Map<string, number>();
+    // Reuse the same audio buffer for duplicate gen prompts (e.g. count-multiplied
+    // voices like "3 * loop gen wind"). Variation in volume/pitch/position already
+    // differentiates them sonically — generating separate ElevenLabs audio for each
+    // wastes $0.20-0.40 per duplicate with negligible audible benefit.
+    const promptToClip = new Map<string, string>(); // basePrompt → first clipPath
+    const promptToPromise = new Map<string, Promise<void>>(); // basePrompt → generation promise
 
     for (let i = 0; i < this.statements.length; i++) {
       const stmt = this.statements[i];
@@ -771,35 +774,47 @@ export class SatieEngine {
       // Skip if already loaded
       if (this.audioBuffers.has(clipPath) || this.audioBuffers.has(stmt.clip)) continue;
 
-      // Vary the prompt for duplicate gen requests so each variant sounds different
       const basePrompt = stmt.genPrompt;
-      const count = (promptCounts.get(basePrompt) ?? 0) + 1;
-      promptCounts.set(basePrompt, count);
 
-      let effectivePrompt = basePrompt;
-      if (count > 1) {
-        // Add a variation suffix to produce a distinct sound
-        const variations = ['with subtle variation', 'slightly different texture', 'alternative take', 'another version', 'different character'];
-        effectivePrompt = `${basePrompt}, ${variations[(count - 2) % variations.length]}`;
+      // If we already queued generation for this prompt, reuse that buffer once ready
+      const firstClip = promptToClip.get(basePrompt);
+      if (firstClip) {
+        const p = promptToPromise.get(basePrompt);
+        if (p) {
+          p.then(() => {
+            const buf = this.audioBuffers.get(firstClip);
+            if (buf) this.audioBuffers.set(clipPath, buf);
+          });
+        }
+        continue;
       }
+
+      promptToClip.set(basePrompt, clipPath);
 
       // Community-first: try community samples before calling ElevenLabs
       if (this.preferCommunitySamples && this.onSearchCommunity) {
-        const searchPrompt = effectivePrompt;
-        this.onSearchCommunity(searchPrompt)
+        const promise = this.onSearchCommunity(basePrompt)
           .then(async (communityData) => {
             if (communityData) {
-              console.log(`[SatieEngine] Community match for "${searchPrompt}" → ${clipPath}`);
+              console.log(`[SatieEngine] Community match for "${basePrompt}" → ${clipPath}`);
               const ab = await this.ctx.decodeAudioData(communityData.slice(0));
               this.audioBuffers.set(clipPath, ab);
             } else {
               // No match — fall back to ElevenLabs
-              return this.fallbackGenerate(effectivePrompt, clipPath, stmt);
+              return this.fallbackGenerate(basePrompt, clipPath, stmt);
             }
           })
-          .catch(() => this.fallbackGenerate(effectivePrompt, clipPath, stmt));
+          .catch(() => this.fallbackGenerate(basePrompt, clipPath, stmt));
+        promptToPromise.set(basePrompt, promise);
       } else {
-        this.fallbackGenerate(effectivePrompt, clipPath, stmt);
+        const promise = new Promise<void>((resolve) => {
+          this.fallbackGenerate(basePrompt, clipPath, stmt);
+          // fallbackGenerate is fire-and-forget; resolve after the in-flight promise
+          const inflight = this._generationInFlight.get(clipPath);
+          if (inflight) inflight.then(() => resolve()).catch(() => resolve());
+          else resolve();
+        });
+        promptToPromise.set(basePrompt, promise);
       }
     }
   }
@@ -856,15 +871,27 @@ export class SatieEngine {
     const promise = (async (): Promise<AudioBuffer | null> => {
       try {
         const opts = this.sampleGenOptions(stmt);
+        const effectivePrompt = stmt.genPrompt!;
 
-        // Detect variant suffix (e.g., _2, _3) and vary the prompt
-        let effectivePrompt = stmt.genPrompt!;
+        // For variant clips (e.g. _2, _3 from count multiplier), reuse the
+        // base clip's buffer instead of generating a separate ElevenLabs call.
+        // Volume/pitch/position randomization already differentiates them.
         const variantMatch = clipPath.match(/_(\d+)$/);
         if (variantMatch) {
-          const variantIdx = parseInt(variantMatch[1]);
-          if (variantIdx > 1) {
-            const variations = ['with subtle variation', 'slightly different texture', 'alternative take', 'another version', 'different character'];
-            effectivePrompt = `${effectivePrompt}, ${variations[(variantIdx - 2) % variations.length]}`;
+          const baseClip = clipPath.replace(/_\d+$/, '');
+          const baseBuf = this.audioBuffers.get(baseClip);
+          if (baseBuf) {
+            this.audioBuffers.set(clipPath, baseBuf);
+            return baseBuf;
+          }
+          // If base is in-flight, wait for it
+          const baseInFlight = this._generationInFlight.get(baseClip);
+          if (baseInFlight) {
+            const buf = await baseInFlight;
+            if (buf) {
+              this.audioBuffers.set(clipPath, buf);
+              return buf;
+            }
           }
         }
 

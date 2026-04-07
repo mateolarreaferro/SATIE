@@ -25,9 +25,6 @@ export function useSatieEngine() {
     soloedIndices: emptySet,
   });
 
-  // Track whether we paused due to tab hidden (so we can auto-resume)
-  const pausedByVisibility = useRef(false);
-
   useEffect(() => {
     const engine = new SatieEngine();
     engineRef.current = engine;
@@ -39,23 +36,7 @@ export function useSatieEngine() {
       setUIState(state);
     });
 
-    // Pause engine when tab is hidden to prevent background API calls / credit drain
-    const handleVisibilityChange = () => {
-      if (!engineRef.current) return;
-      if (document.hidden) {
-        if (engineRef.current.isPlaying) {
-          engineRef.current.stop();
-          pausedByVisibility.current = true;
-        }
-      } else if (pausedByVisibility.current) {
-        pausedByVisibility.current = false;
-        engineRef.current.play();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsub();
       engine.destroy();
     };

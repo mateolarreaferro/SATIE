@@ -9,7 +9,7 @@ import type { Statement } from '../engine/core/Statement';
 import {
   createProvider,
   createFastProvider,
-  createSmartProvider,
+  isComplexPrompt,
   getSessionCostCents,
   type AIProvider,
 } from './aiProvider';
@@ -470,14 +470,26 @@ export async function generateCode(
 ): Promise<{ code: string; error: string | null; costCents: number }> {
   const costBefore = getSessionCostCents();
   const hasExistingScript = !!(currentScript && currentScript.trim() && currentScript.trim() !== '# satie');
-  const provider = createSmartProvider(userPrompt, hasExistingScript);
+  const complex = isComplexPrompt(userPrompt, hasExistingScript);
+  const provider = complex ? createProvider() : createFastProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
-  const keywords = extractSoundKeywords(userPrompt.toLowerCase());
-  const [topEx, antiEx, communitySamples] = await Promise.all([
-    getTopExamples('script', 3),
-    getAntiPatterns('script', 2),
-    searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]),
-  ]);
+
+  // Only fetch RLHF examples + community samples for complex prompts.
+  // Simple edits ("make it louder", "add reverb") don't benefit from
+  // examples in the prompt, and they inflate token count significantly.
+  let topEx: StoredFeedback[] = [];
+  let antiEx: StoredFeedback[] = [];
+  let communitySamples: CommunitySample[] = [];
+
+  if (complex) {
+    const keywords = extractSoundKeywords(userPrompt.toLowerCase());
+    [topEx, antiEx, communitySamples] = await Promise.all([
+      getTopExamples('script', 3),
+      getAntiPatterns('script', 2),
+      searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]),
+    ]);
+  }
+
   const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult, topEx, antiEx, communitySamples);
   const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
 
@@ -486,11 +498,14 @@ export async function generateCode(
     { role: 'user', content: enrichedPrompt },
   ];
 
+  // Use smaller maxTokens for simple edits — they produce short output
+  const maxTokens = complex ? 2048 : 1024;
+
   const rawResponse = await callAI(
     provider,
     systemPrompt,
     apiMessages,
-    2048,
+    maxTokens,
     0.7,
   );
 
@@ -705,13 +720,9 @@ export async function generateEnsemble(
   const costBefore = getSessionCostCents();
   const provider = createFastProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
-  const keywords = extractSoundKeywords(userPrompt.toLowerCase());
-  const [topEx, antiEx, communitySamples] = await Promise.all([
-    getTopExamples('script', 3),
-    getAntiPatterns('script', 2),
-    searchCommunity(userPrompt, keywords, 3).catch(() => [] as CommunitySample[]),
-  ]);
-  const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult, topEx, antiEx, communitySamples);
+  // Ensemble already multiplies cost — skip RLHF examples and community search
+  // to keep each candidate's prompt lean
+  const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult);
   const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
 
   const apiMessages = [
