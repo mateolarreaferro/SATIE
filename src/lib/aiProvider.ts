@@ -79,6 +79,30 @@ export function resetSessionCosts(): void {
   _sessionCosts = [];
 }
 
+// ── Session budget / cost guard ──────────────────────────────
+
+const DEFAULT_BUDGET_CENTS = 50; // $0.50 default session budget
+const LS_BUDGET = 'satie-session-budget-cents';
+
+export function getSessionBudgetCents(): number {
+  const stored = localStorage.getItem(LS_BUDGET);
+  return stored ? Number(stored) : DEFAULT_BUDGET_CENTS;
+}
+
+export function setSessionBudgetCents(cents: number): void {
+  localStorage.setItem(LS_BUDGET, String(Math.max(0, cents)));
+}
+
+/**
+ * Check if the session cost has exceeded the budget.
+ * Returns { over, current, budget } — caller decides how to handle.
+ */
+export function checkBudget(): { over: boolean; currentCents: number; budgetCents: number } {
+  const currentCents = getSessionCostCents();
+  const budgetCents = getSessionBudgetCents();
+  return { over: currentCents >= budgetCents, currentCents, budgetCents };
+}
+
 // ── Proxied provider (uses /api/ai with Supabase JWT) ──────
 
 export class ProxiedProvider implements AIProvider {

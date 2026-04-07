@@ -5,6 +5,7 @@ import {
   getPreferredProvider,
   setPreferredProvider,
   getSessionCostCents,
+  checkBudget,
   type AIProviderType,
 } from '../../lib/aiProvider';
 import {
@@ -147,6 +148,8 @@ export function AIPanel({
   // Ensemble & refinement modes
   const [ensembleMode, setEnsembleMode] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
+  const [refineCooldown, setRefineCooldown] = useState(false);
+  const [budgetExceeded, setBudgetExceeded] = useState(false);
 
   // Generation history (Option A: linear stack)
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -192,6 +195,15 @@ export function AIPanel({
       createProvider();
     } catch {
       setStatus('No AI provider configured. Add an API key in dashboard settings.');
+      setIsLoading(false);
+      return;
+    }
+
+    // Budget guard — warn and block if session cost exceeds budget
+    const budget = checkBudget();
+    if (budget.over) {
+      setBudgetExceeded(true);
+      setStatus(`session budget reached ($${(budget.currentCents / 100).toFixed(2)} / $${(budget.budgetCents / 100).toFixed(2)}). Refresh page to reset.`);
       setIsLoading(false);
       return;
     }
@@ -261,8 +273,8 @@ export function AIPanel({
         let resultError: string | null = null;
 
         if (ensembleMode) {
-          // Ensemble: generate 2 candidates, pick the best
-          setStatus('generating 2 candidates...');
+          // Ensemble: generate 2 candidates, pick the best (2-4x cost)
+          setStatus('ensemble: generating 2 candidates (2x cost)...');
           const ensemble = await generateEnsemble(
             prompt, currentScript, loadedSamples, recentHistory, 2,
           );
@@ -350,19 +362,28 @@ export function AIPanel({
     updateFeedback(entry.feedbackId, { rating: newRating });
   }, [history, historyIndex, feedbackRatings]);
 
-  // Refinement handler — polishes the current script
+  // Refinement handler — polishes the current script (with cooldown + budget check)
   const handleRefine = useCallback(async () => {
-    if (!currentScript || isRefining) return;
+    if (!currentScript || isRefining || refineCooldown) return;
+
+    // Budget guard
+    const budget = checkBudget();
+    if (budget.over) {
+      setBudgetExceeded(true);
+      setStatus(`session budget reached ($${(budget.currentCents / 100).toFixed(2)} / $${(budget.budgetCents / 100).toFixed(2)}). Refresh page to reset.`);
+      return;
+    }
+
     const lastPrompt = history.length > 0 ? history[history.length - 1].prompt : 'spatial composition';
     setIsRefining(true);
-    setStatus('refining...');
+    setStatus('refining (2 rounds, ~4 API calls)...');
 
     try {
       const result = await refineScript(
         currentScript,
         lastPrompt,
         loadedSamples,
-        3,
+        2,
         (progress: RefinementProgress) => {
           setStatus(`refining ${progress.round}/${progress.totalRounds} — ${(progress.currentScore * 100).toFixed(0)}%`);
         },
@@ -393,8 +414,11 @@ export function AIPanel({
       setStatus(`refine error: ${e.message}`);
     } finally {
       setIsRefining(false);
+      // 10-second cooldown to prevent rapid re-clicks
+      setRefineCooldown(true);
+      setTimeout(() => setRefineCooldown(false), 10_000);
     }
-  }, [currentScript, loadedSamples, history, isRefining, onGenerate, onFeedbackCreated]);
+  }, [currentScript, loadedSamples, history, isRefining, refineCooldown, onGenerate, onFeedbackCreated]);
 
   const targetBtnStyle = (active: boolean): React.CSSProperties => ({
     padding: '2px 8px',
@@ -472,50 +496,64 @@ export function AIPanel({
 
       {/* Ensemble toggle + Refine button (script mode only) */}
       {target === 'script' && (
-        <div style={{
-          display: 'flex',
-          gap: '6px',
-          padding: '0 14px 6px',
-          alignItems: 'center',
-          flexShrink: 0,
-        }}>
-          <button
-            onClick={() => setEnsembleMode(!ensembleMode)}
-            title="Ensemble mode: generate 3 candidates and pick the best"
-            style={{
-              padding: '1px 7px',
-              background: ensembleMode ? '#1a3a2a' : 'none',
-              color: ensembleMode ? '#fff' : '#1a3a2a',
-              border: `1px solid ${ensembleMode ? '#1a3a2a' : '#d0cdc4'}`,
+        <div style={{ padding: '0 14px 6px', flexShrink: 0 }}>
+          <div style={{
+            display: 'flex',
+            gap: '6px',
+            alignItems: 'center',
+          }}>
+            <button
+              onClick={() => setEnsembleMode(!ensembleMode)}
+              style={{
+                padding: '1px 7px',
+                background: ensembleMode ? '#1a3a2a' : 'none',
+                color: ensembleMode ? '#fff' : '#1a3a2a',
+                border: `1px solid ${ensembleMode ? '#1a3a2a' : '#d0cdc4'}`,
+                borderRadius: 5,
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontFamily: "'SF Mono', monospace",
+                opacity: ensembleMode ? 1 : 0.5,
+                transition: 'all 0.15s',
+              }}
+            >
+              ensemble
+            </button>
+            <button
+              onClick={handleRefine}
+              disabled={!currentScript || isRefining || isLoading || refineCooldown || budgetExceeded}
+              title={refineCooldown ? 'Cooldown — wait a few seconds' : 'Iteratively refine the current script (2 rounds, ~4 API calls)'}
+              style={{
+                padding: '1px 7px',
+                background: 'none',
+                color: '#1a3a2a',
+                border: '1px solid #d0cdc4',
+                borderRadius: 5,
+                cursor: (!currentScript || isRefining || isLoading || refineCooldown || budgetExceeded) ? 'default' : 'pointer',
+                fontSize: '12px',
+                fontFamily: "'SF Mono', monospace",
+                opacity: (!currentScript || isRefining || isLoading || refineCooldown || budgetExceeded) ? 0.2 : 0.5,
+                transition: 'all 0.15s',
+              }}
+            >
+              {isRefining ? 'refining...' : refineCooldown ? 'wait...' : 'refine'}
+            </button>
+          </div>
+          {ensembleMode && (
+            <div style={{
+              marginTop: 4,
+              padding: '5px 8px',
+              background: '#f0ede6',
               borderRadius: 5,
-              cursor: 'pointer',
-              fontSize: '12px',
+              fontSize: '11px',
               fontFamily: "'SF Mono', monospace",
-              opacity: ensembleMode ? 1 : 0.5,
-              transition: 'all 0.15s',
-            }}
-          >
-            ensemble
-          </button>
-          <button
-            onClick={handleRefine}
-            disabled={!currentScript || isRefining || isLoading}
-            title="Iteratively refine the current script (3 rounds)"
-            style={{
-              padding: '1px 7px',
-              background: 'none',
               color: '#1a3a2a',
-              border: '1px solid #d0cdc4',
-              borderRadius: 5,
-              cursor: (!currentScript || isRefining || isLoading) ? 'default' : 'pointer',
-              fontSize: '12px',
-              fontFamily: "'SF Mono', monospace",
-              opacity: (!currentScript || isRefining || isLoading) ? 0.2 : 0.5,
-              transition: 'all 0.15s',
-            }}
-          >
-            {isRefining ? 'refining...' : 'refine'}
-          </button>
+              lineHeight: 1.4,
+              opacity: 0.7,
+            }}>
+              Generates 2 candidates with different temperatures, scores each on spatial spread, DSP richness, and movement, then picks the best. Uses ~2x API credits per generation.
+            </div>
+          )}
         </div>
       )}
 
@@ -558,17 +596,22 @@ export function AIPanel({
             {status}
           </div>
         )}
-        {getSessionCostCents() > 0 && (
-          <div style={{
-            padding: '2px 0',
-            color: '#1a3a2a',
-            opacity: 0.35,
-            fontSize: '13px',
-            fontFamily: "'SF Mono', monospace",
-          }}>
-            session: ${(getSessionCostCents() / 100).toFixed(4)}
-          </div>
-        )}
+        {getSessionCostCents() > 0 && (() => {
+          const b = checkBudget();
+          const pct = b.budgetCents > 0 ? b.currentCents / b.budgetCents : 0;
+          const warn = pct >= 0.8;
+          return (
+            <div style={{
+              padding: '2px 0',
+              color: warn ? '#8b0000' : '#1a3a2a',
+              opacity: warn ? 0.6 : 0.35,
+              fontSize: '13px',
+              fontFamily: "'SF Mono', monospace",
+            }}>
+              session: ${(b.currentCents / 100).toFixed(4)} / ${(b.budgetCents / 100).toFixed(2)}{warn ? ' — approaching limit' : ''}
+            </div>
+          );
+        })()}
         {asr.recording && (
           <div style={{ opacity: 0.4, fontSize: '16px', padding: '4px 0', color: '#8b0000' }}>recording...</div>
         )}

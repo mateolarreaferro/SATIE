@@ -509,7 +509,7 @@ export async function generateCode(
 export async function generateSampleSpec(
   userPrompt: string,
 ): Promise<{ name: string; prompt: string }> {
-  const provider = createProvider();
+  const provider = createFastProvider();
   const rawResponse = await callAI(
     provider,
     SAMPLE_GEN_SYSTEM_PROMPT,

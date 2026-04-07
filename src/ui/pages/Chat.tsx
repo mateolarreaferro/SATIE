@@ -5,7 +5,7 @@ import { createSketch, getPublicSketches } from '../../lib/sketches';
 import { getProfile } from '../../lib/profiles';
 import { generateCode } from '../../lib/aiGenerate';
 import { createFeedbackEntry, saveFeedback, updateFeedback } from '../../lib/feedbackStore';
-import { createProvider } from '../../lib/aiProvider';
+import { createProvider, checkBudget } from '../../lib/aiProvider';
 import { useDayNightCycle } from '../hooks/useDayNightCycle';
 import { useSFX } from '../hooks/useSFX';
 import { useSatieEngine } from '../hooks/useSatieEngine';
@@ -155,6 +155,18 @@ export function Chat() {
         ...prev,
         { id: nextId(), role: 'user', content: prompt, status: 'done' },
         { id: errId, role: 'assistant', content: '', status: 'error', error: 'No credits or API key configured. Click the wallet icon above to add credits or your own API key.' },
+      ]);
+      return;
+    }
+
+    // Budget guard — block if session cost exceeds budget
+    const budget = checkBudget();
+    if (budget.over) {
+      const errId = nextId();
+      setMessages(prev => [
+        ...prev,
+        { id: nextId(), role: 'user', content: prompt, status: 'done' },
+        { id: errId, role: 'assistant', content: '', status: 'error', error: `Session budget reached ($${(budget.currentCents / 100).toFixed(2)} / $${(budget.budgetCents / 100).toFixed(2)}). Refresh page to reset.` },
       ]);
       return;
     }
