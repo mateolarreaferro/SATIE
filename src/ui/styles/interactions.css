@@ -113,6 +113,12 @@ input:focus {
   border-color: #0a0a0a !important;
 }
 
+/* Scroll-down bounce indicator */
+@keyframes satie-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(6px); }
+}
+
 /* Smooth page transitions */
 .page-enter {
   animation: fadeSlideIn 0.3s ease-out;
