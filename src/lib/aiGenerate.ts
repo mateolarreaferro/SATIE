@@ -162,15 +162,15 @@ VARIATION THROUGH MULTIPLICATION (the idiomatic way):
   3 * loop gen gentle wind
       volume 0.2to0.5
       pitch 0.8to1.3
-      move fly x -8to8 y -2to4 z -8to8
+      move fly speed 1to3
       start 0to3
   → Creates 3 voices, each with different random volume, pitch, position, timing
 
 LAYERING (building texture):
   group
       volume 0.5
-      reverb 0.3 0.7 0.5
-      move fly x -5to5 y 0to3 z -5to5
+      reverb wet 0.3 size 0.7 damping 0.5
+      move fly speed 1to2
 
       loop gen warm pad drone
           volume 0.3
@@ -192,11 +192,12 @@ RHYTHMIC PATTERNS (generative timing):
       pitch 0.8to1.5
       move walk x -3to3 z -3to3
 
-SPATIAL DEPTH (positioning voices):
-  - Close: move fly x 0to0 y 0to0 z -2to-2
-  - Far: move fly x 0to0 y 0to0 z -15to-15
-  - Moving: move fly x -10to10 y -3to5 z -10to10 speed 0.3
-  - Orbiting: move orbit x -3to3 y 0to2 z -3to3 speed 0.2
+SPATIAL DEPTH (keep within 1–8 meters):
+  - Static: no move property needed — voice stays at origin
+  - Moving: move fly speed 2
+  - Walking: move walk speed 1to3
+  - Orbiting: move orbit speed 1to2
+  - Spiraling: move spiral speed 1 noise 0.3
 
 ═══ SYNTAX REFERENCE ═══
 
@@ -228,28 +229,31 @@ INTERPOLATION:
 MOVEMENT (only valid types: walk, fly, spiral, orbit, lorenz, gen):
   move walk                                        # random walk on ground (xz plane)
   move fly                                         # random walk in 3D
-  move fly x -10to10 y 0to5 z -10to10 speed 2     # constrained fly area
-  move walk x -3to3 z -3to3 speed 0.5             # constrained walk area
-  move spiral speed 0.5 noise 0.3                  # spiral trajectory
-  move orbit speed 0.2                             # orbit trajectory
-  move lorenz                                      # lorenz attractor trajectory
-  move gen flying bird speed 0.5                   # AI-generated trajectory
+  move walk speed 2                                # walk with speed
+  move fly speed 1to3                              # fly with speed range
+  move fly x -6to6 y 0to4 z -6to6 speed 2         # constrained fly area
+  move walk x -4to4 z -4to4 speed 1               # constrained walk area
+  move spiral speed 1 noise 0.3                    # spiral trajectory
+  move orbit speed 1to2                            # orbit trajectory
+  move lorenz speed 2                              # lorenz attractor trajectory
+  move gen flying bird speed 1                     # AI-generated trajectory
+  Speed range is 1 to 10. Keep spatial bounds within 1–8 meters.
 
 GROUPS:
   group
       volume 0.5
-      reverb 0.3 0.7 0.5
+      reverb wet 0.3 size 0.7 damping 0.5
       loop sound1
       loop sound2
   endgroup
 
 EFFECTS (use only when requested or musically relevant):
-  reverb 0.4 0.7 0.5                              # wet size damping
-  delay 0.3 0.25 0.5                               # wet time feedback
-  delay 0.3 0.25 0.5 pingpong                      # stereo delay
+  reverb wet 0.4 size 0.7 damping 0.5              # named params required
+  delay wet 0.3 time 0.25 feedback 0.5             # named params required
+  delay wet 0.3 time 0.25 feedback 0.5 pingpong    # stereo delay
   filter lowpass cutoff 800 resonance 2             # filter
   distortion softclip drive 3 wet 0.5              # distortion
-  eq 3 -2 1                                        # low mid high (dB)
+  eq low 3 mid -2 high 1                           # named params required
 
 COLOR & VISUALS:
   color #FF5733 | color red | color red 200 green 100 blue 50
@@ -272,10 +276,10 @@ TRAJECTORY GEN BLOCKS:
 
 ═══ COMMON MISTAKES — NEVER DO THESE ═══
 
-- NEVER use "move fixed" — there is NO "fixed" movement type. To position a voice at a static point, use fly with equal min/max: move fly x 2to2 y 0to0 z -3to-3
+- NEVER use "move fixed" — there is NO "fixed" movement type. For a static voice, simply omit the move property
 - NEVER use "random" as a keyword — it does not exist. Use ranges instead: volume 0.3to0.7, pitch 0.8to1.2
 - NEVER use movement types that don't exist. The ONLY valid types after "move" are: walk, fly, spiral, orbit, lorenz, gen, or a custom trajectory name
-- NEVER use "position" or "pos" as a movement type — use "move fly x XtoX y YtoY z ZtoZ" for positioning
+- NEVER use "position" or "pos" as a movement type — for static voices, just omit the move property
 - NEVER use "goto", "gobetween", or "interpolate" — these do NOT exist. Use "fade" or "jump" for interpolation
 - NEVER use colons, equals signs, or quotes in property values
 - NEVER use parentheses in interpolation syntax — it's "fade 0 1 every 3 loop bounce", NOT "fade(0, 1)"
@@ -392,7 +396,7 @@ CRITICAL SYNTAX RULES (NO COLONS, NO QUOTES, NO EQUALS):
 - Loop modes on interpolation: "loop bounce" (oscillate) or "loop restart" (cycle)
 - Movement: move walk OR move fly speed 1to3 OR move fly x -10to10 y 0to15 z -10to5 speed 2
 - Movement types: ONLY walk, fly, spiral, orbit, lorenz, gen — NEVER "fixed", "random", "position", "pos"
-- Static positioning: move fly x 2to2 y 0to0 z -3to-3 (equal min/max = no movement)
+- Static voices: omit the move property entirely — voice stays at origin
 - Trajectories: move spiral OR move orbit OR move lorenz OR move gen flying bird
 - Trajectory gen blocks: gen name + prompt/duration/smoothing/ground/variation (indented)
 - Groups: group ... endgroup (volume/pitch multiply with parent)
