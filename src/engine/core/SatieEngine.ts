@@ -276,7 +276,7 @@ export class SatieEngine {
   }
 
   async loadAudioBuffer(name: string, data: ArrayBuffer): Promise<void> {
-    const audioBuffer = await this.ctx.decodeAudioData(data);
+    const audioBuffer = await this.ctx.decodeAudioData(data.slice(0));
     this.audioBuffers.set(name, audioBuffer);
   }
 

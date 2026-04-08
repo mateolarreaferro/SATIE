@@ -135,8 +135,9 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
     }
   }, []);
 
-  const handlePreviewPlay = useCallback(() => {
+  const handlePreviewPlay = useCallback(async () => {
     if (!audioBuffer || !previewCtx.current) return;
+    if (previewCtx.current.state === 'suspended') await previewCtx.current.resume();
     previewSource.current?.stop();
     const source = previewCtx.current.createBufferSource();
     source.buffer = audioBuffer;

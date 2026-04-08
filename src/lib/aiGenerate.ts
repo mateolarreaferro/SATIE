@@ -193,8 +193,8 @@ RHYTHMIC PATTERNS (generative timing):
       move walk x -3to3 z -3to3
 
 SPATIAL DEPTH (positioning voices):
-  - Close: move fixed 0 0 -2
-  - Far: move fixed 0 0 -15
+  - Close: move fly x 0to0 y 0to0 z -2to-2
+  - Far: move fly x 0to0 y 0to0 z -15to-15
   - Moving: move fly x -10to10 y -3to5 z -10to10 speed 0.3
   - Orbiting: move orbit x -3to3 y 0to2 z -3to3 speed 0.2
 
@@ -202,9 +202,11 @@ SPATIAL DEPTH (positioning voices):
 
 STATEMENTS:
   loop clip_name                     # loop a file
-  oneshot clip_name every 2to5       # retrigger
+  oneshot clip_name every 2to5       # retrigger oneshot
+  loop clip_name every 5             # retrigger loop
   3 * loop clip_name                 # multiply voices
   loop gen descriptive prompt        # AI-generated audio
+  oneshot gen percussive hit every 1to3  # generated oneshot with retrigger
 
 PROPERTIES (indented under statement):
   volume 0.5          pitch 1.2           start 2          duration 10
@@ -223,13 +225,15 @@ INTERPOLATION:
   volume fade 0.2 0.8 every 5 loop bounce         # oscillate
   pitch jump 0.5 1.0 1.5 every 2 loop restart     # step through values
 
-MOVEMENT:
-  move walk                                        # ground plane
-  move fly                                         # 3D space
-  move fly x -10to10 y 0to5 z -10to10 speed 2     # constrained area
-  move spiral speed 0.5 noise 0.3                  # trajectory
-  move orbit | move lorenz                         # other trajectories
-  move gen flying bird speed 0.5                   # AI-generated path
+MOVEMENT (only valid types: walk, fly, spiral, orbit, lorenz, gen):
+  move walk                                        # random walk on ground (xz plane)
+  move fly                                         # random walk in 3D
+  move fly x -10to10 y 0to5 z -10to10 speed 2     # constrained fly area
+  move walk x -3to3 z -3to3 speed 0.5             # constrained walk area
+  move spiral speed 0.5 noise 0.3                  # spiral trajectory
+  move orbit speed 0.2                             # orbit trajectory
+  move lorenz                                      # lorenz attractor trajectory
+  move gen flying bird speed 0.5                   # AI-generated trajectory
 
 GROUPS:
   group
@@ -265,6 +269,16 @@ TRAJECTORY GEN BLOCKS:
       duration 15
       smoothing 0.3
   Then use: move birdpath
+
+═══ COMMON MISTAKES — NEVER DO THESE ═══
+
+- NEVER use "move fixed" — there is NO "fixed" movement type. To position a voice at a static point, use fly with equal min/max: move fly x 2to2 y 0to0 z -3to-3
+- NEVER use "random" as a keyword — it does not exist. Use ranges instead: volume 0.3to0.7, pitch 0.8to1.2
+- NEVER use movement types that don't exist. The ONLY valid types after "move" are: walk, fly, spiral, orbit, lorenz, gen, or a custom trajectory name
+- NEVER use "position" or "pos" as a movement type — use "move fly x XtoX y YtoY z ZtoZ" for positioning
+- NEVER use "goto", "gobetween", or "interpolate" — these do NOT exist. Use "fade" or "jump" for interpolation
+- NEVER use colons, equals signs, or quotes in property values
+- NEVER use parentheses in interpolation syntax — it's "fade 0 1 every 3 loop bounce", NOT "fade(0, 1)"
 
 ═══ CRITICAL RULES ═══
 
@@ -368,32 +382,33 @@ const REPAIR_SYSTEM_PROMPT = `You are a Satie code repair specialist.
 Fix the syntax errors in the provided Satie code. Output ONLY the corrected code.
 
 CRITICAL SYNTAX RULES (NO COLONS, NO QUOTES, NO EQUALS):
-- Statements: loop audio/file (NOT loop "audio/file": or loop = "audio/file")
-- Statements: oneshot audio/file every 2to5
+- Statements: loop clip_name OR oneshot clip_name every 2to5
 - Generate: loop gen descriptive prompt OR oneshot gen descriptive prompt every 2to5
 - Variables: let name value (top level only, no reserved words)
 - Properties: volume 0.5 (NOT volume = 0.5 or volume: 0.5)
 - Properties: pitch 0.8to1.2 (space-separated, NO equals sign)
-- Interpolation: goto(0and0.2 in 5) OR gobetween(1and2 in 10) OR interpolate(0and1 as incubic in 5)
-- Repeat: gobetween(0and1 in 5 for 3) OR for ever
-- Easing: insine, outsine, inquad, incubic, inoutcubic, inexpo, inback, inelastic, inbounce, etc.
+- Interpolation: volume fade 0 1 every 3 OR volume fade 0.2 0.8 every 5 loop bounce OR pitch jump 0.5 1.0 1.5 every 2 loop restart
+- NEVER use goto, gobetween, or interpolate — they do NOT exist. Only "fade" and "jump"
+- Loop modes on interpolation: "loop bounce" (oscillate) or "loop restart" (cycle)
 - Movement: move walk OR move fly speed 1to3 OR move fly x -10to10 y 0to15 z -10to5 speed 2
+- Movement types: ONLY walk, fly, spiral, orbit, lorenz, gen — NEVER "fixed", "random", "position", "pos"
+- Static positioning: move fly x 2to2 y 0to0 z -3to-3 (equal min/max = no movement)
 - Trajectories: move spiral OR move orbit OR move lorenz OR move gen flying bird
 - Trajectory gen blocks: gen name + prompt/duration/smoothing/ground/variation (indented)
 - Groups: group ... endgroup (volume/pitch multiply with parent)
 - Multi-clip: oneshot bird and rain every 5
-- Color: color red gobetween(0and255 as incubic in 20) green 0to255 blue 100
-- Alpha: alpha 0.5 OR color #FF0000 alpha gobetween(0and1 in 5)
+- Color: color red fade 0 255 every 5 green 0to255 blue 100
+- Alpha: alpha 0.5 OR alpha fade 0 1 every 5 loop bounce
 - Effects: delay wet 0.9 time 0.5 feedback 0.5 [pingpong] | reverb wet 0.8 size 0.9 damping 0.5 | filter mode lowpass cutoff 3000 resonance 1 | distortion mode tanh drive 2 | eq low 3 mid -2 high 1
 - Visual: visual cloud-rain trail | visual bird trail | visual fire | visual waves | visual music-note trail
 - Ranges: 0.5to1.0 (NO SPACES around 'to')
-- Timing: start 5, end 30 fade 2, fadein 1, fadeout 2
+- Timing: start 5, end 30 fade 2, fade_in 1, fade_out 2
 - Comments: # inline comment OR comment ... endcomment block
 - NO explanations, NO markdown, NO text before/after code`;
 
 export async function verifyAndRepair(
   code: string,
-  maxAttempts: number = 1,
+  maxAttempts: number = 2,
 ): Promise<{ success: boolean; code: string; error: string | null }> {
   let currentCode = code;
 
