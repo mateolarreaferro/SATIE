@@ -349,7 +349,7 @@ export function CommunityUploadDialog({
         </div>
 
         {/* Waveform + play controls */}
-        <div ref={containerRef} style={{ marginBottom: 8 }}>
+        <div style={{ marginBottom: 8 }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -388,18 +388,21 @@ export function CommunityUploadDialog({
             </button>
 
             {/* Waveform canvas — clickable for seeking */}
-            <canvas
-              ref={canvasRef}
-              onClick={handleWaveformClick}
-              onMouseMove={handleWaveformHover}
-              onMouseLeave={handleWaveformLeave}
-              style={{
-                flex: 1,
-                height: 80,
-                borderRadius: 6,
-                cursor: 'pointer',
-              }}
-            />
+            <div ref={containerRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <canvas
+                ref={canvasRef}
+                onClick={handleWaveformClick}
+                onMouseMove={handleWaveformHover}
+                onMouseLeave={handleWaveformLeave}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  height: 80,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                }}
+              />
+            </div>
           </div>
         </div>
 

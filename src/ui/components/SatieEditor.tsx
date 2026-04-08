@@ -80,7 +80,7 @@ const DISTORTION_MODES = ['softclip', 'hardclip', 'tanh', 'cubic', 'asymmetric']
 
 let languageRegistered = false;
 
-function registerSatieLanguage(monaco: any) {
+export function registerSatieLanguage(monaco: any) {
   if (languageRegistered) return;
   languageRegistered = true;
 

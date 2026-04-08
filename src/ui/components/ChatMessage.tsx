@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import Editor, { type OnMount } from '@monaco-editor/react';
 import type { Theme } from '../hooks/useDayNightCycle';
+import { registerSatieLanguage } from './SatieEditor';
 
 export interface ChatMessageData {
   id: string;
@@ -20,6 +22,12 @@ interface ChatMessageProps {
   onScriptEdit?: (messageId: string, newScript: string) => void;
 }
 
+/** Minimum editor height (lines * lineHeight + padding) */
+const MIN_EDITOR_HEIGHT = 80;
+const MAX_EDITOR_HEIGHT = 500;
+const LINE_HEIGHT = 19;
+const EDITOR_PADDING = 12;
+
 function EditableScript({ script, messageId, theme, onScriptEdit }: {
   script: string;
   messageId: string;
@@ -28,7 +36,16 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
 }) {
   const [editedScript, setEditedScript] = useState(script);
   const [dirty, setDirty] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [open, setOpen] = useState(false);
+  const [editorHeight, setEditorHeight] = useState(() => {
+    const lines = script.split('\n').length;
+    return Math.min(Math.max(lines * LINE_HEIGHT + EDITOR_PADDING, MIN_EDITOR_HEIGHT), MAX_EDITOR_HEIGHT);
+  });
+  const [resizing, setResizing] = useState(false);
+  const editorRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const resizeStartRef = useRef({ y: 0, height: 0 });
+  const handleRunRef = useRef<() => void>(() => {});
 
   // Sync if parent script changes (e.g. new generation)
   useEffect(() => {
@@ -36,29 +53,78 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
     setDirty(false);
   }, [script]);
 
-  // Auto-resize textarea to fit content
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (ta) {
-      ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 300) + 'px';
-    }
-  }, [editedScript]);
+  // Auto-size editor height to content
+  const updateEditorHeight = useCallback((value: string) => {
+    const lines = value.split('\n').length;
+    const contentHeight = lines * LINE_HEIGHT + EDITOR_PADDING;
+    setEditorHeight(Math.min(Math.max(contentHeight, MIN_EDITOR_HEIGHT), MAX_EDITOR_HEIGHT));
+  }, []);
 
-  const handleChange = (value: string) => {
-    setEditedScript(value);
-    setDirty(value !== script);
+  const handleChange = (value: string | undefined) => {
+    const v = value ?? '';
+    setEditedScript(v);
+    setDirty(v !== script);
+    updateEditorHeight(v);
   };
 
-  const handleRun = () => {
-    if (onScriptEdit && dirty) {
+  const handleRun = useCallback(() => {
+    if (onScriptEdit) {
       onScriptEdit(messageId, editedScript);
       setDirty(false);
     }
+  }, [onScriptEdit, messageId, editedScript]);
+  handleRunRef.current = handleRun;
+
+  const handleMount: OnMount = useCallback((editor, monaco) => {
+    editorRef.current = editor;
+    registerSatieLanguage(monaco);
+    monaco.editor.setTheme('satie-light');
+
+    // Cmd/Ctrl+Enter to run — use ref so it always calls the latest closure
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      handleRunRef.current();
+    });
+
+    // Prevent keystrokes from bubbling to the chat layer
+    editor.onKeyDown((e: any) => {
+      e.browserEvent?.stopPropagation();
+    });
+  }, []);
+
+  // Drag-to-resize
+  useEffect(() => {
+    if (!resizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = e.clientY - resizeStartRef.current.y;
+      const newHeight = Math.min(Math.max(resizeStartRef.current.height + delta, MIN_EDITOR_HEIGHT), MAX_EDITOR_HEIGHT);
+      setEditorHeight(newHeight);
+    };
+
+    const handleMouseUp = () => {
+      setResizing(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizing]);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartRef.current = { y: e.clientY, height: editorHeight };
+    setResizing(true);
   };
 
   return (
-    <details style={{ marginTop: 4 }}>
+    <details
+      style={{ marginTop: 4 }}
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
       <summary style={{
         cursor: 'pointer',
         fontSize: '13px',
@@ -75,63 +141,95 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
         </svg>
         script
       </summary>
-      <textarea
-        ref={textareaRef}
-        value={editedScript}
-        onChange={(e) => handleChange(e.target.value)}
-        onKeyDown={(e) => {
-          // Cmd/Ctrl+Enter to run
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && dirty) {
-            e.preventDefault();
-            handleRun();
-          }
-          // Prevent chat input from capturing keys while editing
-          e.stopPropagation();
-        }}
-        spellCheck={false}
-        style={{
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
-          fontSize: '12px',
-          lineHeight: 1.5,
-          padding: '8px 12px',
-          marginTop: 6,
-          background: `${theme.bg}80`,
-          borderRadius: 8,
-          border: dirty ? `1px solid ${theme.text}40` : '1px solid transparent',
-          overflow: 'auto',
-          maxHeight: 300,
-          width: '100%',
-          boxSizing: 'border-box',
-          resize: 'vertical',
-          color: theme.text,
-          outline: 'none',
-          whiteSpace: 'pre',
-          tabSize: 2,
-        }}
-      />
-      {dirty && (
-        <button
-          onClick={handleRun}
-          style={{
-            marginTop: 4,
-            padding: '3px 10px',
-            fontSize: '12px',
-            fontFamily: "'Inter', system-ui, sans-serif",
-            background: theme.invertedBg,
-            color: theme.invertedText,
-            border: 'none',
-            borderRadius: 5,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-          }}
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill={theme.invertedText} stroke="none">
-            <polygon points="5 3 19 12 5 21 5 3" />
-          </svg>
-          run
-        </button>
+
+      {/* Monaco editor — only mount when open */}
+      {open && (
+        <div ref={containerRef} style={{ marginTop: 6, position: 'relative' }}>
+          <div style={{
+            borderRadius: 8,
+            overflow: 'hidden',
+            border: dirty ? `1px solid ${theme.text}40` : `1px solid ${theme.border}`,
+            transition: 'border-color 0.15s',
+          }}>
+            <Editor
+              height={editorHeight}
+              language="satie"
+              theme="satie-light"
+              value={editedScript}
+              onChange={handleChange}
+              onMount={handleMount}
+              options={{
+                fontSize: 13,
+                fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+                minimap: { enabled: false },
+                lineNumbers: 'on',
+                wordWrap: 'on',
+                scrollBeyondLastLine: false,
+                tabSize: 2,
+                renderWhitespace: 'none',
+                bracketPairColorization: { enabled: false },
+                padding: { top: 6, bottom: 6 },
+                scrollbar: { vertical: 'auto', horizontal: 'hidden', verticalScrollbarSize: 6 },
+                overviewRulerBorder: false,
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                renderLineHighlight: 'line',
+                lineDecorationsWidth: 4,
+                lineNumbersMinChars: 3,
+                glyphMargin: false,
+                folding: false,
+                quickSuggestions: { other: true, comments: false, strings: false },
+                suggestOnTriggerCharacters: true,
+              }}
+            />
+          </div>
+
+          {/* Resize handle */}
+          <div
+            onMouseDown={startResize}
+            style={{
+              height: 8,
+              cursor: 'ns-resize',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: 0.3,
+              userSelect: 'none',
+            }}
+          >
+            <div style={{
+              width: 32,
+              height: 3,
+              borderRadius: 1.5,
+              background: theme.text,
+            }} />
+          </div>
+
+          {/* Run button */}
+          {dirty && (
+            <button
+              onClick={handleRun}
+              style={{
+                padding: '3px 10px',
+                fontSize: '12px',
+                fontFamily: "'Inter', system-ui, sans-serif",
+                background: theme.invertedBg,
+                color: theme.invertedText,
+                border: 'none',
+                borderRadius: 5,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill={theme.invertedText} stroke="none">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              run
+            </button>
+          )}
+        </div>
       )}
     </details>
   );

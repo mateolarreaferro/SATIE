@@ -13,6 +13,9 @@ let started = false;
 let audioData: ArrayBuffer | null = null;
 let activeCount = 0; // number of mounted components using the music
 let fetchingFor: string | null = null;
+let lastSrc: string | null = null;
+let lastVolume = 0.08;
+let softStopped = false; // true after stopBackgroundMusic() — cleared on next hook mount
 let musicEnabled = localStorage.getItem('satie-music-enabled') !== 'false'; // default true
 const enabledListeners = new Set<(enabled: boolean) => void>();
 
@@ -52,7 +55,8 @@ function tryStart(volume: number) {
     .catch(() => { /* decode failed */ });
 }
 
-function stopMusic() {
+/** Stop playback but keep audioData so music can restart without re-fetching */
+function stopPlayback() {
   if (gain && ctx && ctx.state !== 'closed') {
     const now = ctx.currentTime;
     gain.gain.setValueAtTime(gain.gain.value, now);
@@ -71,14 +75,19 @@ function stopMusic() {
   source = null;
   gain = null;
   started = false;
+}
+
+/** Full cleanup — stops playback and discards audio data */
+function stopMusic() {
+  stopPlayback();
   audioData = null;
   fetchingFor = null;
 }
 
-/** Stop background music (e.g. when user starts generating). Non-permanent — will restart on next page. */
+/** Stop background music (e.g. when user starts generating). Non-permanent — will restart on next hook mount. */
 export function stopBackgroundMusic() {
-  stopMusic();
-  activeCount = 0;
+  softStopped = true;
+  stopPlayback();
 }
 
 /** Get current music enabled state */
@@ -91,8 +100,18 @@ export function setMusicEnabled(enabled: boolean) {
   musicEnabled = enabled;
   localStorage.setItem('satie-music-enabled', String(enabled));
   if (!enabled) {
-    stopMusic();
-    activeCount = 0;
+    stopPlayback();
+  } else if (activeCount > 0 && !started) {
+    // Re-enable: restart music if a page is using the hook
+    if (audioData) {
+      tryStart(lastVolume);
+    } else if (lastSrc) {
+      fetchingFor = lastSrc;
+      fetch(lastSrc)
+        .then(res => res.arrayBuffer())
+        .then(buf => { audioData = buf; tryStart(lastVolume); })
+        .catch(() => {});
+    }
   }
   notifyListeners();
 }
@@ -124,6 +143,9 @@ export function useMusicEnabled(): [boolean, (enabled: boolean) => void] {
 export function useBackgroundMusic(src: string, volume = 0.08) {
   useEffect(() => {
     activeCount++;
+    lastSrc = src;
+    lastVolume = volume;
+    softStopped = false;
 
     // Fetch audio data if not already loaded
     if (!audioData && fetchingFor !== src) {
@@ -140,7 +162,7 @@ export function useBackgroundMusic(src: string, volume = 0.08) {
     }
 
     function onGesture() {
-      if (!musicEnabled) return;
+      if (!musicEnabled || softStopped) return;
       if (started) {
         if (ctx?.state === 'suspended') ctx.resume();
         return;
