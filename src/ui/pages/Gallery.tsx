@@ -60,6 +60,7 @@ function usePhysics(count: number, containerRef: React.RefObject<HTMLDivElement 
   const raf = useRef(0);
   const dragging = useRef(-1);
   const containerSize = useRef({ w: 1200, h: 600 });
+  const [, setVersion] = useState(0);
 
   // Track container size via ResizeObserver
   useEffect(() => {
@@ -100,6 +101,7 @@ function usePhysics(count: number, containerRef: React.RefObject<HTMLDivElement 
       });
     }
     bodies.current = newBodies;
+    setVersion(v => v + 1);
   }, [count]);
 
   useEffect(() => {

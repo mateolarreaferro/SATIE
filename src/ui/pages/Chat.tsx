@@ -253,6 +253,17 @@ export function Chat() {
     }));
   }, []);
 
+  const handleScriptEdit = useCallback((messageId: string, newScript: string) => {
+    // Update the message's script
+    setMessages(prev => prev.map(m =>
+      m.id === messageId ? { ...m, script: newScript } : m
+    ));
+    // Update current script and reload engine
+    setCurrentScript(newScript);
+    loadScript(newScript);
+    if (!uiState.isPlaying) play();
+  }, [loadScript, play, uiState.isPlaying]);
+
   const handleStop = useCallback(() => {
     stop();
     setHasActiveTracks(false);
@@ -540,6 +551,7 @@ export function Chat() {
                     theme={theme}
                     onSaveAsSketch={handleSaveAsSketch}
                     onRate={handleRate}
+                    onScriptEdit={handleScriptEdit}
                   />
                 ))}
               </div>

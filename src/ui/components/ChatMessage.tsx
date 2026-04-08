@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react';
 import type { Theme } from '../hooks/useDayNightCycle';
 
 export interface ChatMessageData {
@@ -16,9 +17,127 @@ interface ChatMessageProps {
   theme: Theme;
   onSaveAsSketch?: (script: string, prompt: string) => void;
   onRate?: (messageId: string, rating: 1 | -1) => void;
+  onScriptEdit?: (messageId: string, newScript: string) => void;
 }
 
-export function ChatMessage({ message, theme, onSaveAsSketch, onRate }: ChatMessageProps) {
+function EditableScript({ script, messageId, theme, onScriptEdit }: {
+  script: string;
+  messageId: string;
+  theme: Theme;
+  onScriptEdit?: (messageId: string, newScript: string) => void;
+}) {
+  const [editedScript, setEditedScript] = useState(script);
+  const [dirty, setDirty] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Sync if parent script changes (e.g. new generation)
+  useEffect(() => {
+    setEditedScript(script);
+    setDirty(false);
+  }, [script]);
+
+  // Auto-resize textarea to fit content
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (ta) {
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 300) + 'px';
+    }
+  }, [editedScript]);
+
+  const handleChange = (value: string) => {
+    setEditedScript(value);
+    setDirty(value !== script);
+  };
+
+  const handleRun = () => {
+    if (onScriptEdit && dirty) {
+      onScriptEdit(messageId, editedScript);
+      setDirty(false);
+    }
+  };
+
+  return (
+    <details style={{ marginTop: 4 }}>
+      <summary style={{
+        cursor: 'pointer',
+        fontSize: '13px',
+        opacity: 0.5,
+        fontFamily: "'SF Mono', 'Fira Code', monospace",
+        userSelect: 'none',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+      }}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
+        </svg>
+        script
+      </summary>
+      <textarea
+        ref={textareaRef}
+        value={editedScript}
+        onChange={(e) => handleChange(e.target.value)}
+        onKeyDown={(e) => {
+          // Cmd/Ctrl+Enter to run
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && dirty) {
+            e.preventDefault();
+            handleRun();
+          }
+          // Prevent chat input from capturing keys while editing
+          e.stopPropagation();
+        }}
+        spellCheck={false}
+        style={{
+          fontFamily: "'SF Mono', 'Fira Code', monospace",
+          fontSize: '12px',
+          lineHeight: 1.5,
+          padding: '8px 12px',
+          marginTop: 6,
+          background: `${theme.bg}80`,
+          borderRadius: 8,
+          border: dirty ? `1px solid ${theme.text}40` : '1px solid transparent',
+          overflow: 'auto',
+          maxHeight: 300,
+          width: '100%',
+          boxSizing: 'border-box',
+          resize: 'vertical',
+          color: theme.text,
+          outline: 'none',
+          whiteSpace: 'pre',
+          tabSize: 2,
+        }}
+      />
+      {dirty && (
+        <button
+          onClick={handleRun}
+          style={{
+            marginTop: 4,
+            padding: '3px 10px',
+            fontSize: '12px',
+            fontFamily: "'Inter', system-ui, sans-serif",
+            background: theme.invertedBg,
+            color: theme.invertedText,
+            border: 'none',
+            borderRadius: 5,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 24 24" fill={theme.invertedText} stroke="none">
+            <polygon points="5 3 19 12 5 21 5 3" />
+          </svg>
+          run
+        </button>
+      )}
+    </details>
+  );
+}
+
+export function ChatMessage({ message, theme, onSaveAsSketch, onRate, onScriptEdit }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
       <div style={{
@@ -120,42 +239,14 @@ export function ChatMessage({ message, theme, onSaveAsSketch, onRate }: ChatMess
               )}
             </div>
 
-            {/* Collapsible script */}
+            {/* Collapsible editable script */}
             {message.script && (
-              <details style={{ marginTop: 4 }}>
-                <summary style={{
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  opacity: 0.5,
-                  fontFamily: "'SF Mono', 'Fira Code', monospace",
-                  userSelect: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                }}>
-                  {/* Code icon */}
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="16 18 22 12 16 6" />
-                    <polyline points="8 6 2 12 8 18" />
-                  </svg>
-                  script
-                </summary>
-                <pre style={{
-                  fontFamily: "'SF Mono', 'Fira Code', monospace",
-                  fontSize: '12px',
-                  lineHeight: 1.5,
-                  padding: '8px 12px',
-                  marginTop: 6,
-                  background: `${theme.bg}80`,
-                  borderRadius: 8,
-                  overflow: 'auto',
-                  maxHeight: 200,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}>
-                  {message.script}
-                </pre>
-              </details>
+              <EditableScript
+                script={message.script}
+                messageId={message.id}
+                theme={theme}
+                onScriptEdit={onScriptEdit}
+              />
             )}
 
             {/* Actions row: save + feedback */}

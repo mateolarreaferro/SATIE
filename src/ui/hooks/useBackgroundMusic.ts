@@ -1,22 +1,27 @@
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 
 /**
  * Singleton background music player.
  * Persists across route changes — only one instance plays at a time.
- * Starts on first user gesture, loops forever until stopBackgroundMusic() is called.
+ * Starts on first user gesture, loops forever until stopped.
  */
 
 let ctx: AudioContext | null = null;
 let source: AudioBufferSourceNode | null = null;
 let gain: GainNode | null = null;
 let started = false;
-let killed = false; // true after explicit stopBackgroundMusic() — prevents restart
 let audioData: ArrayBuffer | null = null;
 let activeCount = 0; // number of mounted components using the music
 let fetchingFor: string | null = null;
+let musicEnabled = localStorage.getItem('satie-music-enabled') !== 'false'; // default true
+const enabledListeners = new Set<(enabled: boolean) => void>();
+
+function notifyListeners() {
+  enabledListeners.forEach(fn => fn(musicEnabled));
+}
 
 function tryStart(volume: number) {
-  if (started || !audioData || killed) return;
+  if (started || !audioData || !musicEnabled) return;
 
   const c = new AudioContext();
   if (c.state === 'suspended') {
@@ -70,11 +75,45 @@ function stopMusic() {
   fetchingFor = null;
 }
 
-/** Imperatively stop background music (e.g. when user starts generating). Permanent — won't restart. */
+/** Stop background music (e.g. when user starts generating). Non-permanent — will restart on next page. */
 export function stopBackgroundMusic() {
-  killed = true;
   stopMusic();
   activeCount = 0;
+}
+
+/** Get current music enabled state */
+export function getMusicEnabled() {
+  return musicEnabled;
+}
+
+/** Toggle music on/off globally (persisted to localStorage) */
+export function setMusicEnabled(enabled: boolean) {
+  musicEnabled = enabled;
+  localStorage.setItem('satie-music-enabled', String(enabled));
+  if (!enabled) {
+    stopMusic();
+    activeCount = 0;
+  }
+  notifyListeners();
+}
+
+/** React hook for reading/toggling the music enabled state */
+export function useMusicEnabled(): [boolean, (enabled: boolean) => void] {
+  const [enabled, setEnabled] = useState(musicEnabled);
+
+  useEffect(() => {
+    const handler = (val: boolean) => setEnabled(val);
+    enabledListeners.add(handler);
+    // Sync in case it changed before mount
+    setEnabled(musicEnabled);
+    return () => { enabledListeners.delete(handler); };
+  }, []);
+
+  const toggle = useCallback((val: boolean) => {
+    setMusicEnabled(val);
+  }, []);
+
+  return [enabled, toggle];
 }
 
 /**
@@ -101,7 +140,7 @@ export function useBackgroundMusic(src: string, volume = 0.08) {
     }
 
     function onGesture() {
-      if (killed) return;
+      if (!musicEnabled) return;
       if (started) {
         if (ctx?.state === 'suspended') ctx.resume();
         return;

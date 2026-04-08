@@ -73,6 +73,7 @@ function usePhysics(count: number, containerRef: React.RefObject<HTMLDivElement 
   const dragging = useRef<number>(-1);
   /** Cached container size — updated on resize, not every frame */
   const containerSize = useRef({ w: 1200, h: 600 });
+  const [, setVersion] = useState(0);
 
   // Track container size via ResizeObserver instead of per-frame getBoundingClientRect
   useEffect(() => {
@@ -118,6 +119,7 @@ function usePhysics(count: number, containerRef: React.RefObject<HTMLDivElement 
       });
     }
     bodies.current = newBodies;
+    setVersion(v => v + 1);
   }, [count]);
 
   // Physics loop — delta-time based for frame-rate independence

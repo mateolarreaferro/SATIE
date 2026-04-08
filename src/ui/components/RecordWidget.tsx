@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
 
 interface RecordWidgetProps {
   onSave: (name: string, buffer: ArrayBuffer) => Promise<void>;
@@ -18,6 +18,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
   const startTime = useRef(0);
   const timerRef = useRef(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const waveformContainerRef = useRef<HTMLDivElement>(null) as RefObject<HTMLDivElement>;
   const previewCtx = useRef<AudioContext | null>(null);
   const previewSource = useRef<AudioBufferSourceNode | null>(null);
   const dragging = useRef<'start' | 'end' | null>(null);
@@ -34,15 +35,24 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
     }
   }, [state]);
 
-  // Draw waveform on canvas
+  // Draw waveform on canvas — dynamically sized to container
   useEffect(() => {
-    if (!audioBuffer || !canvasRef.current) return;
+    if (!audioBuffer || !canvasRef.current || !waveformContainerRef.current) return;
     const canvas = canvasRef.current;
+    const container = waveformContainerRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const w = canvas.width;
-    const h = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const containerW = container.clientWidth;
+    canvas.width = containerW * dpr;
+    canvas.height = 40 * dpr;
+    canvas.style.width = `${containerW}px`;
+    canvas.style.height = '40px';
+    ctx.scale(dpr, dpr);
+
+    const w = containerW;
+    const h = 40;
     const data = audioBuffer.getChannelData(0);
     const step = Math.ceil(data.length / w);
 
@@ -232,24 +242,24 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
 
   if (state === 'preview' && audioBuffer) {
     return (
-      <div style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <div style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: 0, overflow: 'hidden' }}>
         {/* Waveform with trim */}
-        <canvas
-          ref={canvasRef}
-          width={300}
-          height={40}
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={handleCanvasMouseUp}
-          style={{
-            width: '100%',
-            height: 40,
-            cursor: 'col-resize',
-            borderRadius: 4,
-            background: 'rgba(26, 58, 42, 0.02)',
-          }}
-        />
+        <div ref={waveformContainerRef} style={{ width: '100%', overflow: 'hidden', borderRadius: 4 }}>
+          <canvas
+            ref={canvasRef}
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseUp}
+            style={{
+              display: 'block',
+              width: '100%',
+              height: 40,
+              cursor: 'col-resize',
+              background: 'rgba(26, 58, 42, 0.02)',
+            }}
+          />
+        </div>
         <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
           <input
             value={name}
