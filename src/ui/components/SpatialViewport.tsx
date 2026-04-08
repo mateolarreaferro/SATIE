@@ -85,17 +85,182 @@ function resolveVisualKind(visual: string[]): VisualKind {
   return 'none';
 }
 
-// ── Shared useFrame logic for a single voice ─────────────────
+// ── Orb shader ──────────────────────────────────────────────
 
-function useAudioSourceFrame(
+const ORB_VERTEX = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+const ORB_FRAGMENT = /* glsl */ `
+uniform vec3 uColor;
+uniform float uOpacity;
+varying vec2 vUv;
+void main() {
+  vec2 c = vUv - 0.5;
+  float dist = length(c) * 2.0;
+  // Bright inner core
+  float core = 1.0 - smoothstep(0.0, 0.35, dist);
+  // Soft exponential glow
+  float glow = exp(-dist * dist * 3.5);
+  float alpha = (core * 0.9 + glow * 0.5) * uOpacity;
+  if (alpha < 0.005) discard;
+  // Brighten center, tint glow with voice color
+  vec3 col = uColor * (1.0 + core * 0.6);
+  gl_FragColor = vec4(col, alpha);
+}`;
+
+const sharedPlaneGeo = new THREE.PlaneGeometry(1, 1);
+
+function makeOrbMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader: ORB_VERTEX,
+    fragmentShader: ORB_FRAGMENT,
+    uniforms: {
+      uColor: { value: new THREE.Color(DEFAULT_VOICE_COLOR) },
+      uOpacity: { value: 0.9 },
+    },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+}
+
+// ── Label rendering ─────────────────────────────────────────
+
+function useLabelFrame(
   trackRef: React.RefObject<TrackState | null>,
-  meshRef: React.RefObject<THREE.Mesh | null>,
-  matRef: React.RefObject<THREE.MeshStandardMaterial | null>,
   labelRef: React.RefObject<THREE.Sprite | null>,
+  posRef: React.RefObject<THREE.Object3D | null>,
 ) {
   const labelTexRef = useRef<THREE.CanvasTexture | null>(null);
   const prevLabel = useRef<string>('');
+
+  useFrame(() => {
+    const track = trackRef.current;
+    if (!track || !labelRef.current) return;
+
+    const pos = posRef.current;
+    const yOff = pos ? 0.55 : 0.3;
+    labelRef.current.position.set(track.position.x, track.position.y + yOff, track.position.z);
+
+    const raw = track.statement.clip.split('/').pop() ?? '';
+    const label = raw
+      .replace(/_\d+$/g, '')
+      .replace(/_\d+$/g, '')
+      .replace(/_/g, ' ')
+      .trim();
+
+    if (label !== prevLabel.current) {
+      prevLabel.current = label;
+      if (labelTexRef.current) labelTexRef.current.dispose();
+
+      const SCALE = 3;
+      const H = 48 * SCALE;
+      const FONT_SIZE = 22 * SCALE;
+      const PADDING_X = 18 * SCALE;
+
+      const offscreen = document.createElement('canvas');
+      const offCtx = offscreen.getContext('2d')!;
+      offCtx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+      const textW = offCtx.measureText(label).width;
+
+      const W = textW + PADDING_X * 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d')!;
+
+      const r = H * 0.42;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(W - r, 0);
+      ctx.quadraticCurveTo(W, 0, W, r);
+      ctx.lineTo(W, H - r);
+      ctx.quadraticCurveTo(W, H, W - r, H);
+      ctx.lineTo(r, H);
+      ctx.quadraticCurveTo(0, H, 0, H - r);
+      ctx.lineTo(0, r);
+      ctx.quadraticCurveTo(0, 0, r, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, W / 2, H / 2);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.minFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      labelTexRef.current = tex;
+
+      const worldH = 0.28;
+      const worldW = worldH * (W / H);
+      labelRef.current.scale.set(worldW, worldH, 1);
+
+      (labelRef.current.material as THREE.SpriteMaterial).map = tex;
+      (labelRef.current.material as THREE.SpriteMaterial).needsUpdate = true;
+    }
+  });
+}
+
+function LabelSprite({ labelRef }: { labelRef: React.RefObject<THREE.Sprite | null> }) {
+  return (
+    <sprite ref={labelRef} scale={[2.0, 0.28, 1]} renderOrder={999}>
+      <spriteMaterial transparent depthTest={false} toneMapped={false} />
+    </sprite>
+  );
+}
+
+// ── Orb voice (sphere / none) ───────────────────────────────
+
+function AudioSourceOrb({ trackRef }: { trackRef: React.RefObject<TrackState | null> }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const labelRef = useRef<THREE.Sprite>(null);
   const isDarkBg = useContext(DarkBgContext);
+  const { camera } = useThree();
+
+  const orbMat = useMemo(() => makeOrbMaterial(), []);
+
+  useLabelFrame(trackRef, labelRef, meshRef);
+
+  useFrame(() => {
+    const track = trackRef.current;
+    if (!track || !meshRef.current) return;
+
+    meshRef.current.position.set(track.position.x, track.position.y, track.position.z);
+    meshRef.current.quaternion.copy(camera.quaternion);
+    const baseScale = 0.3 + track.volume * 0.35;
+    const sizeMultiplier = track.statement.visualSize ?? 1;
+    meshRef.current.scale.setScalar(baseScale * sizeMultiplier);
+
+    const displayColor = remapColor(track.color, isDarkBg, track.seed);
+    orbMat.uniforms.uColor.value.set(displayColor);
+    orbMat.uniforms.uOpacity.value = track.alpha * 0.9;
+  });
+
+  return (
+    <>
+      <mesh ref={meshRef} geometry={sharedPlaneGeo} material={orbMat} renderOrder={100} />
+      <LabelSprite labelRef={labelRef} />
+    </>
+  );
+}
+
+// ── Cube voice ──────────────────────────────────────────────
+
+function AudioSourceCube({ trackRef }: { trackRef: React.RefObject<TrackState | null> }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const labelRef = useRef<THREE.Sprite>(null);
+  const isDarkBg = useContext(DarkBgContext);
+
+  useLabelFrame(trackRef, labelRef, meshRef);
 
   useFrame(() => {
     const track = trackRef.current;
@@ -111,193 +276,129 @@ function useAudioSourceFrame(
     if (matRef.current) {
       const displayColor = remapColor(track.color, isDarkBg, track.seed);
       matRef.current.color.set(displayColor);
-      if ((matRef.current as any).emissive) {
-        (matRef.current as any).emissive.set(displayColor);
-      }
+      matRef.current.emissive.set(displayColor);
+      matRef.current.opacity = track.alpha * 0.85;
+    }
+  });
+
+  return (
+    <>
+      <mesh ref={meshRef}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial
+          ref={matRef}
+          emissiveIntensity={0.8}
+          transparent
+          opacity={0.6}
+          roughness={0.3}
+          metalness={0}
+        />
+      </mesh>
+      <LabelSprite labelRef={labelRef} />
+    </>
+  );
+}
+
+// ── Trail + orb voice ───────────────────────────────────────
+
+function AudioSourceTrailOrb({ trackRef }: { trackRef: React.RefObject<TrackState | null> }) {
+  const anchorRef = useRef<THREE.Mesh>(null);
+  const orbRef = useRef<THREE.Mesh>(null);
+  const labelRef = useRef<THREE.Sprite>(null);
+  const trailRef = useRef<any>(null);
+  const overlayMode = useContext(OverlayModeContext);
+  const isDarkBg = useContext(DarkBgContext);
+  const { camera } = useThree();
+
+  const orbMat = useMemo(() => makeOrbMaterial(), []);
+
+  useLabelFrame(trackRef, labelRef, orbRef);
+
+  useFrame(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    // Move the trail anchor
+    if (anchorRef.current) {
+      anchorRef.current.position.set(track.position.x, track.position.y, track.position.z);
+      const baseScale = 0.12 + track.volume * 0.2;
+      const sizeMultiplier = track.statement.visualSize ?? 1;
+      anchorRef.current.scale.setScalar(baseScale * sizeMultiplier);
+    }
+
+    // Sync the visible orb to anchor position
+    if (orbRef.current) {
+      orbRef.current.position.set(track.position.x, track.position.y, track.position.z);
+      orbRef.current.quaternion.copy(camera.quaternion);
+      const baseScale = 0.3 + track.volume * 0.35;
+      const sizeMultiplier = track.statement.visualSize ?? 1;
+      orbRef.current.scale.setScalar(baseScale * sizeMultiplier);
+    }
+
+    const displayColor = remapColor(track.color, isDarkBg, track.seed);
+    orbMat.uniforms.uColor.value.set(displayColor);
+    orbMat.uniforms.uOpacity.value = track.alpha * 0.9;
+
+    // Trail color
+    if (trailRef.current) {
+      const tMat = trailRef.current.material as any;
+      if (tMat?.uniforms?.color) tMat.uniforms.color.value.set(displayColor);
+      else if (tMat?.color) tMat.color.set(displayColor);
+    }
+  });
+
+  const trailWidth = overlayMode ? 6 : 2.5;
+  const trailLength = overlayMode ? 140 : 80;
+
+  return (
+    <>
+      <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
+        <mesh ref={anchorRef}>
+          <sphereGeometry args={[0.01, 4, 4]} />
+          <meshBasicMaterial transparent opacity={0} />
+        </mesh>
+      </Trail>
+      <mesh ref={orbRef} geometry={sharedPlaneGeo} material={orbMat} renderOrder={100} />
+      <LabelSprite labelRef={labelRef} />
+    </>
+  );
+}
+
+// ── Trail + cube voice ──────────────────────────────────────
+
+function AudioSourceTrailCube({ trackRef }: { trackRef: React.RefObject<TrackState | null> }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const matRef = useRef<THREE.MeshStandardMaterial>(null);
+  const labelRef = useRef<THREE.Sprite>(null);
+  const trailRef = useRef<any>(null);
+  const overlayMode = useContext(OverlayModeContext);
+  const isDarkBg = useContext(DarkBgContext);
+
+  useLabelFrame(trackRef, labelRef, meshRef);
+
+  useFrame(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    if (meshRef.current) {
+      meshRef.current.position.set(track.position.x, track.position.y, track.position.z);
+      const baseScale = 0.12 + track.volume * 0.2;
+      const sizeMultiplier = track.statement.visualSize ?? 1;
+      meshRef.current.scale.setScalar(baseScale * sizeMultiplier);
+    }
+
+    if (matRef.current) {
+      const displayColor = remapColor(track.color, isDarkBg, track.seed);
+      matRef.current.color.set(displayColor);
+      matRef.current.emissive.set(displayColor);
       matRef.current.opacity = track.alpha * 0.85;
     }
 
-    if (labelRef.current) {
-      const yOff = meshRef.current ? 0.55 : 0.3;
-      labelRef.current.position.set(track.position.x, track.position.y + yOff, track.position.z);
-
-      // Clean label: strip path prefix, generation indices, underscores → spaces
-      const raw = track.statement.clip.split('/').pop() ?? '';
-      const label = raw
-        .replace(/_\d+$/g, '')      // strip trailing _0, _1 indices
-        .replace(/_\d+$/g, '')      // strip second level _0 (e.g. _0_0)
-        .replace(/_/g, ' ')         // underscores → spaces
-        .trim();
-
-      if (label !== prevLabel.current) {
-        prevLabel.current = label;
-        if (labelTexRef.current) labelTexRef.current.dispose();
-
-        // Render at 3× resolution for crisp text on retina displays
-        const SCALE = 3;
-        const H = 48 * SCALE;
-        const FONT_SIZE = 22 * SCALE;
-        const PADDING_X = 18 * SCALE;
-        const PADDING_Y = 10 * SCALE;
-
-        // Measure text first to size canvas
-        const offscreen = document.createElement('canvas');
-        const offCtx = offscreen.getContext('2d')!;
-        offCtx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
-        const textW = offCtx.measureText(label).width;
-
-        const W = textW + PADDING_X * 2;
-        const canvas = document.createElement('canvas');
-        canvas.width = W;
-        canvas.height = H;
-        const ctx = canvas.getContext('2d')!;
-
-        // Background pill
-        const r = H * 0.42;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
-        ctx.beginPath();
-        ctx.moveTo(r, 0);
-        ctx.lineTo(W - r, 0);
-        ctx.quadraticCurveTo(W, 0, W, r);
-        ctx.lineTo(W, H - r);
-        ctx.quadraticCurveTo(W, H, W - r, H);
-        ctx.lineTo(r, H);
-        ctx.quadraticCurveTo(0, H, 0, H - r);
-        ctx.lineTo(0, r);
-        ctx.quadraticCurveTo(0, 0, r, 0);
-        ctx.closePath();
-        ctx.fill();
-
-        // Text
-        ctx.font = `600 ${FONT_SIZE}px Inter, system-ui, sans-serif`;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, W / 2, H / 2);
-
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.minFilter = THREE.LinearFilter;
-        tex.generateMipmaps = false;
-        labelTexRef.current = tex;
-
-        // Scale sprite to match canvas aspect ratio; world height = 0.28
-        const worldH = 0.28;
-        const worldW = worldH * (W / H);
-        labelRef.current.scale.set(worldW, worldH, 1);
-
-        (labelRef.current.material as THREE.SpriteMaterial).map = tex;
-        (labelRef.current.material as THREE.SpriteMaterial).needsUpdate = true;
-      }
-    }
-  });
-}
-
-// ── Geometry components ──────────────────────────────────────
-
-function SphereGeo({ meshRef, matRef }: {
-  meshRef: React.RefObject<THREE.Mesh | null>;
-  matRef: React.RefObject<THREE.MeshStandardMaterial | null>;
-}) {
-  return (
-    <mesh ref={meshRef}>
-      <sphereGeometry args={[1, 32, 32]} />
-      <meshStandardMaterial
-        ref={matRef}
-        emissiveIntensity={0.8}
-        transparent
-        opacity={0.6}
-        roughness={0.3}
-        metalness={0}
-      />
-    </mesh>
-  );
-}
-
-function CubeGeo({ meshRef, matRef }: {
-  meshRef: React.RefObject<THREE.Mesh | null>;
-  matRef: React.RefObject<THREE.MeshStandardMaterial | null>;
-}) {
-  return (
-    <mesh ref={meshRef}>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial
-        ref={matRef}
-        emissiveIntensity={0.8}
-        transparent
-        opacity={0.6}
-        roughness={0.3}
-        metalness={0}
-      />
-    </mesh>
-  );
-}
-
-function LabelSprite({ labelRef }: { labelRef: React.RefObject<THREE.Sprite | null> }) {
-  return (
-    <sprite ref={labelRef} scale={[2.0, 0.28, 1]} renderOrder={999}>
-      <spriteMaterial transparent depthTest={false} toneMapped={false} />
-    </sprite>
-  );
-}
-
-// ── Voice with no visual — sphere + label ────────────────────
-
-function AudioSourceNone({ trackRef }: { trackRef: React.RefObject<TrackState | null> }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const labelRef = useRef<THREE.Sprite>(null);
-
-  useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
-
-  return (
-    <>
-      <SphereGeo meshRef={meshRef} matRef={matRef} />
-      <LabelSprite labelRef={labelRef} />
-    </>
-  );
-}
-
-// ── Voice with mesh (sphere or cube), no trail ───────────────
-
-function AudioSourceMesh({ trackRef, shape }: { trackRef: React.RefObject<TrackState | null>; shape: 'sphere' | 'cube' }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const labelRef = useRef<THREE.Sprite>(null);
-
-  useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
-
-  return (
-    <>
-      {shape === 'cube'
-        ? <CubeGeo meshRef={meshRef} matRef={matRef} />
-        : <SphereGeo meshRef={meshRef} matRef={matRef} />
-      }
-      <LabelSprite labelRef={labelRef} />
-    </>
-  );
-}
-
-// ── Voice with trail only (trail wraps a small sphere for the trail point) ──
-
-function AudioSourceTrailOnly({ trackRef }: { trackRef: React.RefObject<TrackState | null> }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const labelRef = useRef<THREE.Sprite>(null);
-  const trailRef = useRef<any>(null);
-  const overlayMode = useContext(OverlayModeContext);
-  const isDarkBg = useContext(DarkBgContext);
-
-  useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
-
-  useFrame(() => {
-    const track = trackRef.current;
-    if (!track || !trailRef.current) return;
-    const displayColor = remapColor(track.color, isDarkBg, track.seed);
-    const mat = trailRef.current.material as any;
-    if (mat?.uniforms?.color) {
-      mat.uniforms.color.value.set(displayColor);
-    } else if (mat?.color) {
-      mat.color.set(displayColor);
+    if (trailRef.current) {
+      const displayColor = remapColor(track.color, isDarkBg, track.seed);
+      const tMat = trailRef.current.material as any;
+      if (tMat?.uniforms?.color) tMat.uniforms.color.value.set(displayColor);
+      else if (tMat?.color) tMat.color.set(displayColor);
     }
   });
 
@@ -308,57 +409,7 @@ function AudioSourceTrailOnly({ trackRef }: { trackRef: React.RefObject<TrackSta
     <>
       <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
         <mesh ref={meshRef}>
-          <sphereGeometry args={[1, 32, 32]} />
-          <meshStandardMaterial
-            ref={matRef}
-            emissiveIntensity={0.8}
-            transparent
-            opacity={0.6}
-            roughness={0.3}
-            metalness={0}
-          />
-        </mesh>
-      </Trail>
-      <LabelSprite labelRef={labelRef} />
-    </>
-  );
-}
-
-// ── Voice with trail + mesh ──────────────────────────────────
-
-function AudioSourceTrailMesh({ trackRef, shape }: { trackRef: React.RefObject<TrackState | null>; shape: 'sphere' | 'cube' }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const matRef = useRef<THREE.MeshStandardMaterial>(null);
-  const labelRef = useRef<THREE.Sprite>(null);
-  const trailRef = useRef<any>(null);
-  const overlayMode = useContext(OverlayModeContext);
-  const isDarkBg = useContext(DarkBgContext);
-
-  useAudioSourceFrame(trackRef, meshRef, matRef, labelRef);
-
-  useFrame(() => {
-    const track = trackRef.current;
-    if (!track || !trailRef.current) return;
-    const displayColor = remapColor(track.color, isDarkBg, track.seed);
-    const mat = trailRef.current.material as any;
-    if (mat?.uniforms?.color) {
-      mat.uniforms.color.value.set(displayColor);
-    } else if (mat?.color) {
-      mat.color.set(displayColor);
-    }
-  });
-
-  const trailWidth = overlayMode ? 6 : 2.5;
-  const trailLength = overlayMode ? 140 : 80;
-
-  return (
-    <>
-      <Trail ref={trailRef} width={trailWidth} length={trailLength} decay={1} attenuation={(w) => w * w}>
-        <mesh ref={meshRef}>
-          {shape === 'cube'
-            ? <boxGeometry args={[1, 1, 1]} />
-            : <sphereGeometry args={[1, 32, 32]} />
-          }
+          <boxGeometry args={[1, 1, 1]} />
           <meshStandardMaterial
             ref={matRef}
             emissiveIntensity={0.8}
@@ -431,13 +482,13 @@ function AudioSourcePool({ tracksRef }: { tracksRef: React.RefObject<TrackState[
       {trackRefs.slice(0, slotInfo.count).map((ref, i) => {
         const kind = slotInfo.kinds[i];
         switch (kind) {
-          case 'none':         return <AudioSourceNone key={i} trackRef={ref} />;
-          case 'sphere':       return <AudioSourceMesh key={i} trackRef={ref} shape="sphere" />;
-          case 'cube':         return <AudioSourceMesh key={i} trackRef={ref} shape="cube" />;
-          case 'trail':        return <AudioSourceTrailOnly key={i} trackRef={ref} />;
-          case 'trail+sphere': return <AudioSourceTrailMesh key={i} trackRef={ref} shape="sphere" />;
-          case 'trail+cube':   return <AudioSourceTrailMesh key={i} trackRef={ref} shape="cube" />;
-          default:             return <AudioSourceNone key={i} trackRef={ref} />;
+          case 'none':         return <AudioSourceOrb key={i} trackRef={ref} />;
+          case 'sphere':       return <AudioSourceOrb key={i} trackRef={ref} />;
+          case 'cube':         return <AudioSourceCube key={i} trackRef={ref} />;
+          case 'trail':        return <AudioSourceTrailOrb key={i} trackRef={ref} />;
+          case 'trail+sphere': return <AudioSourceTrailOrb key={i} trackRef={ref} />;
+          case 'trail+cube':   return <AudioSourceTrailCube key={i} trackRef={ref} />;
+          default:             return <AudioSourceOrb key={i} trackRef={ref} />;
         }
       })}
     </>
