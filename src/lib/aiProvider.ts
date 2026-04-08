@@ -263,8 +263,8 @@ export class AnthropicProvider implements AIProvider {
    */
   private splitSystemPrompt(prompt: string): { staticPrefix: string; dynamicSuffix: string } {
     // The static prompt ends right before the dynamic audio library / examples section.
-    // We look for the icon list ending (last line of STATIC_SYSTEM_PROMPT) as the split marker.
-    const marker = 'wave-sine, church, sword, shield, diamond, crown';
+    // We look for the visual tokens line (last line of STATIC_SYSTEM_PROMPT) as the split marker.
+    const marker = 'Valid visual tokens: trail, sphere, cube, none. Combine them: "visual trail sphere", "visual trail cube".';
     const idx = prompt.indexOf(marker);
     if (idx === -1) {
       // Fallback: no split (e.g. repair prompt) — send as single block

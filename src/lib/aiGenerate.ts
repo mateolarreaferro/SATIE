@@ -294,9 +294,8 @@ TRAJECTORY GEN BLOCKS:
 - Prefer ranges and count multipliers over copy-pasting statements
 - Think about musical relationships: bass is low pitch, high voices are high pitch
 - Think about spatial relationships: spread voices apart, use movement for life
-- ALWAYS add a visual with an icon matching the sound. Moving voices: "visual iconname trail". Static voices: "visual iconname".
-  Examples: "visual cloud-rain trail", "visual bird trail", "visual fire", "visual waves trail", "visual music-note"
-  Icons: lightning, bird, fire, wind, cloud-rain, cloud-snow, cloud-lightning, waves, drop, sun, moon, star, campfire, tree, leaf, flower, mountains, flame, meteor, planet, globe, tent, city, buildings, factory, siren, bell, guitar, piano-keys, music-note, music-notes, vinyl-record, speaker-high, microphone-stage, waveform, radio, dog, cat, fish, horse, butterfly, paw-print, person-simple-walk, footprints, car, train, boat, rocket, robot, alien, ghost, skull, heartbeat, brain, eye, clock, gear, bomb, snowflake, rainbow, wave-sine, church, sword, shield, diamond, crown`;
+- ALWAYS add a visual property. Moving voices (walk/fly/spiral/orbit/lorenz/gen): "visual trail". Static voices: "visual sphere".
+  Valid visual tokens: trail, sphere, cube, none. Combine them: "visual trail sphere", "visual trail cube".`;
 
 /**
  * Build the dynamic (per-call) portion of the system prompt.

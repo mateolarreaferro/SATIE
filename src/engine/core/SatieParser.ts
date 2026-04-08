@@ -296,6 +296,8 @@ function parseEnd(s: Statement, v: string): void {
   if (fadeMatch) s.endFade = RangeOrValue.parse(fadeMatch[1].trim());
 }
 
+const VALID_VISUAL_TOKENS = new Set(['trail', 'sphere', 'cube', 'none']);
+
 function parseVisual(s: Statement, v: string): void {
   if (!v.trim()) return;
   // Support both "visual trail sphere" and legacy "visual trail and sphere"
@@ -313,14 +315,10 @@ function parseVisual(s: Statement, v: string): void {
         continue;
       }
     }
-    // Handle `object "PrefabName"` → push `object:PrefabName`
-    if (lower === 'object' && i + 1 < tokens.length) {
-      const name = tokens[i + 1].replace(/"/g, '');
-      s.visual.push(`object:${name}`);
-      i++; // skip next token
-      continue;
+    // Only accept standard visual tokens
+    if (VALID_VISUAL_TOKENS.has(lower)) {
+      s.visual.push(lower);
     }
-    s.visual.push(lower);
   }
 }
 

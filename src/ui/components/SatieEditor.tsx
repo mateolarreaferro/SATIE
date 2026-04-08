@@ -41,7 +41,7 @@ const PROPERTY_DOCS: PropDoc[] = [
   { label: 'noise', detail: '0–1', documentation: 'Trajectory noise amplitude. Adds organic jitter to movement paths.\nExample: `noise 0.3`' },
   { label: 'color', detail: '#hex | name | r g b', documentation: 'Voice color in the viewport.\n- Hex: `#ff3300`\n- Named: `red`, `blue`, `cyan`\n- RGB: `0.8 0.2 0.1`\n- Supports interpolation per channel.' },
   { label: 'alpha', detail: '0–1', documentation: 'Voice opacity in the viewport. Supports interpolation.\nExample: `alpha 0.5` or `alpha fade 0 1 every 3`' },
-  { label: 'visual', detail: 'sphere|cube|trail|none|<icon> [size N]', documentation: 'Visual representation in the 3D viewport.\nCombine types: `visual trail sphere`, `visual cube size 2`\nSemantic icons: `visual cloud`, `visual bird trail`, `visual lightning`\nIcons: lightning, bird, fire, wind, cloud, waves, rain, sun, moon, star, campfire, tree, leaf, flower, mountains, guitar, piano, bell, dog, cat, fish, footprints, city, ghost, skull, rocket, robot, etc.' },
+  { label: 'visual', detail: 'sphere|cube|trail|none [size N]', documentation: 'Visual representation in the 3D viewport.\nCombine types: `visual trail sphere`, `visual cube size 2`\nValid tokens: trail, sphere, cube, none' },
   { label: 'background', detail: '#hex | name | grayscale', documentation: 'Set the viewport background color.\n- Hex: `background #1a1a2e`\n- Named: `background black`\n- Grayscale: `background 40`\n- RGB: `background 26,26,46`', insertText: 'background ' },
   { label: 'overlap', detail: 'flag', documentation: 'Allow overlapping retriggers (oneshot only).' },
   { label: 'persistent', detail: 'flag', documentation: 'Keep the voice alive even when it stops playing.' },
@@ -206,21 +206,10 @@ export function registerSatieLanguage(monaco: any) {
         }
       }
 
-      // After 'visual': visual types + semantic icons
+      // After 'visual': visual types
       if (/\bvisual\s+\S*$/.test(textBefore)) {
         for (const v of VISUAL_TYPES) {
           suggestions.push({ label: v, kind: CK.Enum, detail: 'visual type', insertText: v, range });
-        }
-        const ICON_VISUALS = [
-          'lightning', 'bird', 'fire', 'wind', 'cloud', 'cloud-rain', 'cloud-lightning',
-          'waves', 'drop', 'rain', 'sun', 'moon', 'star', 'campfire', 'tree', 'leaf',
-          'flower', 'mountains', 'flame', 'guitar', 'piano-keys', 'music-note',
-          'music-notes', 'bell', 'dog', 'cat', 'fish', 'footprints', 'city',
-          'factory', 'siren', 'car', 'train', 'boat', 'ghost', 'skull',
-          'rocket', 'robot', 'heartbeat', 'waveform', 'snowflake', 'rainbow',
-        ];
-        for (const ic of ICON_VISUALS) {
-          suggestions.push({ label: ic, kind: CK.Enum, detail: 'semantic icon', insertText: ic, range });
         }
       }
 
