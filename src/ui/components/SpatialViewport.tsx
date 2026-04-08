@@ -908,6 +908,7 @@ function OverlayFlyControls() {
   const isInputFocused = useCallback(() => {
     const el = document.activeElement;
     return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ||
+           el?.closest('.monaco-editor') != null ||
            el?.closest('header') != null || el?.closest('nav') != null;
   }, []);
 
@@ -1102,6 +1103,10 @@ function FlyControls() {
   const MOVE_KEYS = useMemo(() => new Set(['w', 'a', 's', 'd', 'q', 'e', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']), []);
 
   const onKeyDown = useCallback((e: KeyboardEvent) => {
+    // Skip when an editor or input is focused
+    const el = document.activeElement;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ||
+        el?.closest('.monaco-editor') != null) return;
     const key = e.key.toLowerCase();
     keysDown.current.add(key);
     if (focusedRef.current && MOVE_KEYS.has(key)) {

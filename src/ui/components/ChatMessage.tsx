@@ -59,6 +59,8 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
   const [dirty, setDirty] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const handleRunRef = useRef<() => void>(() => {});
+  const expandedRef = useRef(false);
+  expandedRef.current = expanded;
 
   const inlineHeight = Math.min(
     Math.max(script.split('\n').length * INLINE_LINE_HEIGHT + INLINE_PADDING, INLINE_MIN_HEIGHT),
@@ -85,34 +87,43 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
   }, [onScriptEdit, messageId, editedScript]);
   handleRunRef.current = handleRun;
 
+  // Determine dark vs light based on theme bg luminance
+  const isDark = (() => {
+    const bg = theme.bg;
+    // Parse hex color
+    const match = bg.match(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
+    if (!match) return false;
+    const r = parseInt(match[1], 16) / 255;
+    const g = parseInt(match[2], 16) / 255;
+    const b = parseInt(match[3], 16) / 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) < 0.5;
+  })();
+
+  const monacoTheme = isDark ? 'vs-dark' : 'satie-light';
+
   const handleMount: OnMount = useCallback((editor, monaco) => {
     registerSatieLanguage(monaco);
-    monaco.editor.setTheme('satie-light');
+    // Set correct theme for current mode
+    monaco.editor.setTheme(monacoTheme);
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       handleRunRef.current();
     });
 
-    editor.onKeyDown((e: any) => {
-      e.browserEvent?.stopPropagation();
+    // Escape to close the expanded editor
+    editor.addCommand(monaco.KeyCode.Escape, () => {
+      if (expandedRef.current) setExpanded(false);
     });
 
     // Focus the editor after mount
-    setTimeout(() => editor.focus(), 50);
-  }, []);
+    setTimeout(() => editor.focus(), 80);
+  }, [monacoTheme]);
 
-  // Close expanded on Escape
-  useEffect(() => {
-    if (!expanded) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setExpanded(false);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [expanded]);
+  // Modal card colors from theme
+  const cardBg = isDark ? '#1e1e1e' : '#faf9f6';
+  const cardText = isDark ? '#d4d4d4' : '#1a1a1a';
+  const cardBorder = isDark ? '#333' : '#e8e0d8';
+  const accentBg = isDark ? '#2d5a3d' : '#1a3a2a';
 
   return (
     <>
@@ -191,11 +202,15 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
             justifyContent: 'center',
             backdropFilter: 'blur(16px)',
             WebkitBackdropFilter: 'blur(16px)',
-            background: 'rgba(0,0,0,0.45)',
+            background: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.45)',
             animation: 'chatEditorFadeIn 0.2s ease-out',
           }}
+          onKeyDown={(e) => {
+            // Stop ALL key events inside the overlay from reaching fly controls
+            e.stopPropagation();
+          }}
           onClick={(e) => {
-            // Close when clicking the backdrop
+            // Close when clicking the backdrop (not the card)
             if (e.target === e.currentTarget) setExpanded(false);
           }}
         >
@@ -217,8 +232,8 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
             flexDirection: 'column',
             borderRadius: 16,
             overflow: 'hidden',
-            background: '#faf9f6',
-            boxShadow: '0 24px 80px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.08)',
+            background: cardBg,
+            boxShadow: '0 24px 80px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)',
             animation: 'chatEditorSlideUp 0.25s ease-out',
           }}>
             {/* Header bar */}
@@ -226,10 +241,10 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
               display: 'flex',
               alignItems: 'center',
               padding: '10px 16px',
-              borderBottom: '1px solid #e8e0d8',
+              borderBottom: `1px solid ${cardBorder}`,
               gap: 8,
             }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a3a2a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={cardText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
                 <polyline points="16 18 22 12 16 6" />
                 <polyline points="8 6 2 12 8 18" />
               </svg>
@@ -237,7 +252,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
                 fontSize: '14px',
                 fontFamily: "'SF Mono', 'Fira Code', monospace",
                 fontWeight: 500,
-                color: '#1a1a1a',
+                color: cardText,
                 flex: 1,
               }}>
                 edit script
@@ -251,7 +266,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
                     padding: '5px 14px',
                     fontSize: '13px',
                     fontFamily: "'Inter', system-ui, sans-serif",
-                    background: '#1a3a2a',
+                    background: accentBg,
                     color: '#fff',
                     border: 'none',
                     borderRadius: 6,
@@ -274,7 +289,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
                 fontSize: '11px',
                 fontFamily: "'SF Mono', monospace",
                 opacity: 0.3,
-                color: '#1a1a1a',
+                color: cardText,
               }}>
                 {dirty ? '\u2318\u23CE run' : 'esc close'}
               </span>
@@ -292,7 +307,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
                   alignItems: 'center',
                 }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={cardText} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -304,7 +319,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
               <Editor
                 height="min(60vh, 600px)"
                 language="satie"
-                theme="satie-light"
+                theme={monacoTheme}
                 value={editedScript}
                 onChange={handleChange}
                 onMount={handleMount}
@@ -321,13 +336,13 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
             {/* Footer */}
             <div style={{
               padding: '8px 16px',
-              borderTop: '1px solid #e8e0d8',
+              borderTop: `1px solid ${cardBorder}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               fontSize: '12px',
               fontFamily: "'Inter', system-ui, sans-serif",
-              color: '#1a1a1a',
+              color: cardText,
               opacity: 0.4,
             }}>
               <span>{editedScript.split('\n').length} lines</span>
