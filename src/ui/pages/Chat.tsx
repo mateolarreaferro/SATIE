@@ -81,7 +81,7 @@ export function Chat() {
   useEffect(() => {
     getPublicSketches()
       .then(async (sketches) => {
-        const featured = sketches.slice(0, 4);
+        const featured = sketches.slice(0, 20);
         setFeaturedSketches(featured);
         // Fetch author profiles
         const uniqueUserIds = [...new Set(featured.map(s => s.user_id))];
@@ -468,7 +468,7 @@ export function Chat() {
                 <div style={{ fontSize: '12px', opacity: 0.25, marginBottom: 14, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>
                   from the community
                 </div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 680 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, maxWidth: 720, width: '100%' }}>
                   {featuredSketches.map(sketch => (
                     <button
                       key={sketch.id}
@@ -484,8 +484,7 @@ export function Chat() {
                         cursor: 'pointer',
                         color: theme.text,
                         textAlign: 'left',
-                        minWidth: 140,
-                        maxWidth: 200,
+                        width: '100%',
                         opacity: 0.6,
                         transition: 'opacity 0.15s, transform 0.15s',
                       }}
