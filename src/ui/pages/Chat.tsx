@@ -325,7 +325,7 @@ export function Chat() {
         <Header theme={theme} mode={mode} setMode={setMode} rightExtra={stopButton} />
 
         {isEmpty ? (
-          /* ── Landing state: hero → input → community (Replit-style) ── */
+          /* ── Landing state: hero → input → community (scroll-down sections) ── */
           <div style={{
             flex: 1,
             overflow: 'auto',
@@ -333,15 +333,15 @@ export function Chat() {
             flexDirection: 'column',
             pointerEvents: 'auto',
           }}>
-            {/* Hero + suggestions — vertically centered above input */}
+            {/* Hero + suggestions + input — fills the viewport like a first "page" */}
             <div style={{
-              flex: 1,
+              minHeight: '100%',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'center',
               alignItems: 'center',
               padding: '24px 24px 0',
-              minHeight: 0,
+              flexShrink: 0,
             }}>
               <div style={{ textAlign: 'center', width: '100%', maxWidth: 680 }}>
                 <h1 style={{
@@ -447,28 +447,29 @@ export function Chat() {
                   </div>
                 )}
               </div>
+
+              {/* Input bar — inside the hero section */}
+              <ChatInput
+                onSend={sendMessage}
+                disabled={isGenerating}
+                theme={theme}
+              />
             </div>
 
-            {/* Input bar — centered */}
-            <ChatInput
-              onSend={sendMessage}
-              disabled={isGenerating}
-              theme={theme}
-            />
-
-            {/* Community section — below input (Replit-style) */}
+            {/* Community section — second "page", scroll down to reveal */}
             {featuredSketches.length > 0 && (
               <div style={{
-                padding: '20px 24px 32px',
+                flexShrink: 0,
+                padding: '60px 24px 80px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 pointerEvents: 'auto',
               }}>
-                <div style={{ fontSize: '12px', opacity: 0.25, marginBottom: 14, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>
+                <div style={{ fontSize: '12px', opacity: 0.25, marginBottom: 24, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>
                   from the community
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, maxWidth: 720, width: '100%' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, maxWidth: 720, width: '100%' }}>
                   {featuredSketches.map(sketch => (
                     <button
                       key={sketch.id}
