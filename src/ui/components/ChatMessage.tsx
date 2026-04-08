@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type { Theme } from '../hooks/useDayNightCycle';
 import { registerSatieLanguage } from './SatieEditor';
@@ -22,11 +23,31 @@ interface ChatMessageProps {
   onScriptEdit?: (messageId: string, newScript: string) => void;
 }
 
-/** Minimum editor height (lines * lineHeight + padding) */
-const MIN_EDITOR_HEIGHT = 80;
-const MAX_EDITOR_HEIGHT = 500;
-const LINE_HEIGHT = 19;
-const EDITOR_PADDING = 12;
+const INLINE_LINE_HEIGHT = 19;
+const INLINE_MIN_HEIGHT = 80;
+const INLINE_MAX_HEIGHT = 200;
+const INLINE_PADDING = 12;
+
+/** Shared Monaco options for both inline and expanded editors */
+const EDITOR_OPTIONS = {
+  fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+  minimap: { enabled: false },
+  wordWrap: 'on' as const,
+  scrollBeyondLastLine: false,
+  tabSize: 2,
+  renderWhitespace: 'none' as const,
+  bracketPairColorization: { enabled: false },
+  overviewRulerBorder: false,
+  overviewRulerLanes: 0,
+  hideCursorInOverviewRuler: true,
+  renderLineHighlight: 'line' as const,
+  lineDecorationsWidth: 4,
+  lineNumbersMinChars: 3,
+  glyphMargin: false,
+  folding: false,
+  quickSuggestions: { other: true, comments: false, strings: false },
+  suggestOnTriggerCharacters: true,
+};
 
 function EditableScript({ script, messageId, theme, onScriptEdit }: {
   script: string;
@@ -36,16 +57,13 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
 }) {
   const [editedScript, setEditedScript] = useState(script);
   const [dirty, setDirty] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [editorHeight, setEditorHeight] = useState(() => {
-    const lines = script.split('\n').length;
-    return Math.min(Math.max(lines * LINE_HEIGHT + EDITOR_PADDING, MIN_EDITOR_HEIGHT), MAX_EDITOR_HEIGHT);
-  });
-  const [resizing, setResizing] = useState(false);
-  const editorRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const resizeStartRef = useRef({ y: 0, height: 0 });
+  const [expanded, setExpanded] = useState(false);
   const handleRunRef = useRef<() => void>(() => {});
+
+  const inlineHeight = Math.min(
+    Math.max(script.split('\n').length * INLINE_LINE_HEIGHT + INLINE_PADDING, INLINE_MIN_HEIGHT),
+    INLINE_MAX_HEIGHT,
+  );
 
   // Sync if parent script changes (e.g. new generation)
   useEffect(() => {
@@ -53,18 +71,10 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
     setDirty(false);
   }, [script]);
 
-  // Auto-size editor height to content
-  const updateEditorHeight = useCallback((value: string) => {
-    const lines = value.split('\n').length;
-    const contentHeight = lines * LINE_HEIGHT + EDITOR_PADDING;
-    setEditorHeight(Math.min(Math.max(contentHeight, MIN_EDITOR_HEIGHT), MAX_EDITOR_HEIGHT));
-  }, []);
-
   const handleChange = (value: string | undefined) => {
     const v = value ?? '';
     setEditedScript(v);
     setDirty(v !== script);
-    updateEditorHeight(v);
   };
 
   const handleRun = useCallback(() => {
@@ -76,162 +86,258 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
   handleRunRef.current = handleRun;
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
-    editorRef.current = editor;
     registerSatieLanguage(monaco);
     monaco.editor.setTheme('satie-light');
 
-    // Cmd/Ctrl+Enter to run — use ref so it always calls the latest closure
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       handleRunRef.current();
     });
 
-    // Prevent keystrokes from bubbling to the chat layer
     editor.onKeyDown((e: any) => {
       e.browserEvent?.stopPropagation();
     });
+
+    // Focus the editor after mount
+    setTimeout(() => editor.focus(), 50);
   }, []);
 
-  // Drag-to-resize
+  // Close expanded on Escape
   useEffect(() => {
-    if (!resizing) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const delta = e.clientY - resizeStartRef.current.y;
-      const newHeight = Math.min(Math.max(resizeStartRef.current.height + delta, MIN_EDITOR_HEIGHT), MAX_EDITOR_HEIGHT);
-      setEditorHeight(newHeight);
+    if (!expanded) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setExpanded(false);
+      }
     };
-
-    const handleMouseUp = () => {
-      setResizing(false);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [resizing]);
-
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault();
-    resizeStartRef.current = { y: e.clientY, height: editorHeight };
-    setResizing(true);
-  };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [expanded]);
 
   return (
-    <details
-      style={{ marginTop: 4 }}
-      open={open}
-      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
-    >
-      <summary style={{
-        cursor: 'pointer',
-        fontSize: '13px',
-        opacity: 0.5,
-        fontFamily: "'SF Mono', 'Fira Code', monospace",
-        userSelect: 'none',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 5,
-      }}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="16 18 22 12 16 6" />
-          <polyline points="8 6 2 12 8 18" />
-        </svg>
-        script
-      </summary>
+    <>
+      {/* Inline preview — click to expand */}
+      <div
+        onClick={() => setExpanded(true)}
+        style={{
+          marginTop: 4,
+          cursor: 'pointer',
+          position: 'relative',
+        }}
+      >
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          fontSize: '13px',
+          opacity: 0.5,
+          fontFamily: "'SF Mono', 'Fira Code', monospace",
+          userSelect: 'none',
+          marginBottom: 4,
+        }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="16 18 22 12 16 6" />
+            <polyline points="8 6 2 12 8 18" />
+          </svg>
+          script
+          {dirty && <span style={{ fontSize: '11px', opacity: 0.7 }}>(edited)</span>}
+          {/* Expand icon */}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 'auto', opacity: 0.4 }}>
+            <polyline points="15 3 21 3 21 9" />
+            <polyline points="9 21 3 21 3 15" />
+            <line x1="21" y1="3" x2="14" y2="10" />
+            <line x1="3" y1="21" x2="10" y2="14" />
+          </svg>
+        </div>
 
-      {/* Monaco editor — only mount when open */}
-      {open && (
-        <div ref={containerRef} style={{ marginTop: 6, position: 'relative' }}>
+        {/* Read-only inline preview */}
+        <pre style={{
+          fontFamily: "'SF Mono', 'Fira Code', monospace",
+          fontSize: '12px',
+          lineHeight: 1.5,
+          padding: '8px 12px',
+          background: `${theme.bg}80`,
+          borderRadius: 8,
+          overflow: 'hidden',
+          maxHeight: inlineHeight,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          margin: 0,
+          position: 'relative',
+        }}>
+          {editedScript}
+          {/* Fade-out at bottom if content overflows */}
           <div style={{
-            borderRadius: 8,
-            overflow: 'hidden',
-            border: dirty ? `1px solid ${theme.text}40` : `1px solid ${theme.border}`,
-            transition: 'border-color 0.15s',
-          }}>
-            <Editor
-              height={editorHeight}
-              language="satie"
-              theme="satie-light"
-              value={editedScript}
-              onChange={handleChange}
-              onMount={handleMount}
-              options={{
-                fontSize: 13,
-                fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-                minimap: { enabled: false },
-                lineNumbers: 'on',
-                wordWrap: 'on',
-                scrollBeyondLastLine: false,
-                tabSize: 2,
-                renderWhitespace: 'none',
-                bracketPairColorization: { enabled: false },
-                padding: { top: 6, bottom: 6 },
-                scrollbar: { vertical: 'auto', horizontal: 'hidden', verticalScrollbarSize: 6 },
-                overviewRulerBorder: false,
-                overviewRulerLanes: 0,
-                hideCursorInOverviewRuler: true,
-                renderLineHighlight: 'line',
-                lineDecorationsWidth: 4,
-                lineNumbersMinChars: 3,
-                glyphMargin: false,
-                folding: false,
-                quickSuggestions: { other: true, comments: false, strings: false },
-                suggestOnTriggerCharacters: true,
-              }}
-            />
-          </div>
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 32,
+            background: `linear-gradient(transparent, ${theme.cardBg || '#f4f3ee'})`,
+            pointerEvents: 'none',
+          }} />
+        </pre>
+      </div>
 
-          {/* Resize handle */}
-          <div
-            onMouseDown={startResize}
-            style={{
-              height: 8,
-              cursor: 'ns-resize',
+      {/* Expanded modal overlay */}
+      {expanded && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            background: 'rgba(0,0,0,0.45)',
+            animation: 'chatEditorFadeIn 0.2s ease-out',
+          }}
+          onClick={(e) => {
+            // Close when clicking the backdrop
+            if (e.target === e.currentTarget) setExpanded(false);
+          }}
+        >
+          <style>{`
+            @keyframes chatEditorFadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes chatEditorSlideUp {
+              from { opacity: 0; transform: translateY(20px) scale(0.97); }
+              to { opacity: 1; transform: translateY(0) scale(1); }
+            }
+          `}</style>
+
+          <div style={{
+            width: 'min(720px, 90vw)',
+            maxHeight: '80vh',
+            display: 'flex',
+            flexDirection: 'column',
+            borderRadius: 16,
+            overflow: 'hidden',
+            background: '#faf9f6',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.08)',
+            animation: 'chatEditorSlideUp 0.25s ease-out',
+          }}>
+            {/* Header bar */}
+            <div style={{
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              opacity: 0.3,
-              userSelect: 'none',
-            }}
-          >
-            <div style={{
-              width: 32,
-              height: 3,
-              borderRadius: 1.5,
-              background: theme.text,
-            }} />
-          </div>
-
-          {/* Run button */}
-          {dirty && (
-            <button
-              onClick={handleRun}
-              style={{
-                padding: '3px 10px',
-                fontSize: '12px',
-                fontFamily: "'Inter', system-ui, sans-serif",
-                background: theme.invertedBg,
-                color: theme.invertedText,
-                border: 'none',
-                borderRadius: 5,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <svg width="10" height="10" viewBox="0 0 24 24" fill={theme.invertedText} stroke="none">
-                <polygon points="5 3 19 12 5 21 5 3" />
+              padding: '10px 16px',
+              borderBottom: '1px solid #e8e0d8',
+              gap: 8,
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1a3a2a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
               </svg>
-              run
-            </button>
-          )}
-        </div>
+              <span style={{
+                fontSize: '14px',
+                fontFamily: "'SF Mono', 'Fira Code', monospace",
+                fontWeight: 500,
+                color: '#1a1a1a',
+                flex: 1,
+              }}>
+                edit script
+              </span>
+
+              {/* Run button */}
+              {dirty && (
+                <button
+                  onClick={handleRun}
+                  style={{
+                    padding: '5px 14px',
+                    fontSize: '13px',
+                    fontFamily: "'Inter', system-ui, sans-serif",
+                    background: '#1a3a2a',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontWeight: 500,
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="#fff" stroke="none">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  run
+                </button>
+              )}
+
+              {/* Keyboard shortcut hint */}
+              <span style={{
+                fontSize: '11px',
+                fontFamily: "'SF Mono', monospace",
+                opacity: 0.3,
+                color: '#1a1a1a',
+              }}>
+                {dirty ? '\u2318\u23CE run' : 'esc close'}
+              </span>
+
+              {/* Close button */}
+              <button
+                onClick={() => setExpanded(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 4,
+                  opacity: 0.4,
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Monaco editor — full size */}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <Editor
+                height="min(60vh, 600px)"
+                language="satie"
+                theme="satie-light"
+                value={editedScript}
+                onChange={handleChange}
+                onMount={handleMount}
+                options={{
+                  ...EDITOR_OPTIONS,
+                  fontSize: 14,
+                  lineNumbers: 'on',
+                  padding: { top: 12, bottom: 12 },
+                  scrollbar: { vertical: 'auto', horizontal: 'hidden', verticalScrollbarSize: 8 },
+                }}
+              />
+            </div>
+
+            {/* Footer */}
+            <div style={{
+              padding: '8px 16px',
+              borderTop: '1px solid #e8e0d8',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '12px',
+              fontFamily: "'Inter', system-ui, sans-serif",
+              color: '#1a1a1a',
+              opacity: 0.4,
+            }}>
+              <span>{editedScript.split('\n').length} lines</span>
+              <span>{dirty ? 'unsaved changes' : 'up to date'}</span>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
-    </details>
+    </>
   );
 }
 
