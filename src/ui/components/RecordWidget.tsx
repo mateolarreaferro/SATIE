@@ -137,11 +137,13 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
 
   const handlePreviewPlay = useCallback(async () => {
     if (!audioBuffer || !previewCtx.current) return;
-    if (previewCtx.current.state === 'suspended') await previewCtx.current.resume();
-    previewSource.current?.stop();
-    const source = previewCtx.current.createBufferSource();
+    const ctx = previewCtx.current;
+    if (ctx.state === 'closed') return;
+    if (ctx.state === 'suspended') await ctx.resume();
+    try { previewSource.current?.stop(); } catch { /* already ended */ }
+    const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(previewCtx.current.destination);
+    source.connect(ctx.destination);
     const startOffset = trimStart * audioBuffer.duration;
     const dur = (trimEnd - trimStart) * audioBuffer.duration;
     source.start(0, startOffset, dur);
@@ -152,48 +154,55 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
     if (!audioBuffer || !name.trim()) return;
     setSaving(true);
 
-    // Trim the audio buffer
-    const sampleRate = audioBuffer.sampleRate;
-    const channels = audioBuffer.numberOfChannels;
-    const startSample = Math.floor(trimStart * audioBuffer.length);
-    const endSample = Math.floor(trimEnd * audioBuffer.length);
-    const length = endSample - startSample;
+    try {
+      // Stop any playing preview before save
+      try { previewSource.current?.stop(); } catch { /* ok */ }
 
-    // Encode as WAV
-    const bitsPerSample = 16;
-    const dataSize = length * channels * (bitsPerSample / 8);
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
-    const writeStr = (off: number, s: string) => {
-      for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
-    };
-    writeStr(0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, channels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * channels * (bitsPerSample / 8), true);
-    view.setUint16(32, channels * (bitsPerSample / 8), true);
-    view.setUint16(34, bitsPerSample, true);
-    writeStr(36, 'data');
-    view.setUint32(40, dataSize, true);
+      // Trim the audio buffer
+      const sampleRate = audioBuffer.sampleRate;
+      const channels = audioBuffer.numberOfChannels;
+      const startSample = Math.floor(trimStart * audioBuffer.length);
+      const endSample = Math.floor(trimEnd * audioBuffer.length);
+      const length = endSample - startSample;
 
-    let offset = 44;
-    for (let i = 0; i < length; i++) {
-      for (let ch = 0; ch < channels; ch++) {
-        const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(ch)[startSample + i]));
-        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-        offset += 2;
+      // Encode as WAV
+      const bitsPerSample = 16;
+      const dataSize = length * channels * (bitsPerSample / 8);
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
+      const writeStr = (off: number, s: string) => {
+        for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+      };
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, channels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * channels * (bitsPerSample / 8), true);
+      view.setUint16(32, channels * (bitsPerSample / 8), true);
+      view.setUint16(34, bitsPerSample, true);
+      writeStr(36, 'data');
+      view.setUint32(40, dataSize, true);
+
+      let offset = 44;
+      for (let i = 0; i < length; i++) {
+        for (let ch = 0; ch < channels; ch++) {
+          const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(ch)[startSample + i]));
+          view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+          offset += 2;
+        }
       }
+
+      const clipName = `Audio/${name.trim().replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      await onSave(clipName, buffer);
+    } catch (e) {
+      console.error('[RecordWidget] Save failed:', e);
     }
 
-    const clipName = `Audio/${name.trim().replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-    await onSave(clipName, buffer);
-
-    // Reset
+    // Reset (always runs, even on error)
     setAudioBuffer(null);
     setState('idle');
     setName('');

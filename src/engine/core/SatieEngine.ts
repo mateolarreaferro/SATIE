@@ -276,6 +276,10 @@ export class SatieEngine {
   }
 
   async loadAudioBuffer(name: string, data: ArrayBuffer): Promise<void> {
+    // Resume context if suspended — decodeAudioData can hang on suspended contexts in some browsers
+    if (this.ctx.state === 'suspended') {
+      try { await this.ctx.resume(); } catch { /* ok — will attempt decode anyway */ }
+    }
     const audioBuffer = await this.ctx.decodeAudioData(data.slice(0));
     this.audioBuffers.set(name, audioBuffer);
   }
