@@ -347,7 +347,7 @@ function AudioSourceTrailOrb({ trackRef }: { trackRef: React.RefObject<TrackStat
     }
   });
 
-  const trailWidth = overlayMode ? 6 : 2.5;
+  const trailWidth = overlayMode ? 3 : 1.2;
   const trailLength = overlayMode ? 140 : 80;
 
   return (
@@ -402,7 +402,7 @@ function AudioSourceTrailCube({ trackRef }: { trackRef: React.RefObject<TrackSta
     }
   });
 
-  const trailWidth = overlayMode ? 6 : 2.5;
+  const trailWidth = overlayMode ? 3 : 1.2;
   const trailLength = overlayMode ? 140 : 80;
 
   return (
