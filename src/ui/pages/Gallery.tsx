@@ -311,7 +311,9 @@ function GalleryCard({ sketch, body, index, draggingRef, onClick, sfx, formatDat
 
 // ── Gallery page ──
 
-type SortKey = 'newest' | 'popular' | 'forks';
+const INITIAL_VISIBLE = 8;
+
+type TabKey = 'all' | 'liked' | 'forked';
 
 export function Gallery() {
   const navigate = useNavigate();
@@ -321,8 +323,9 @@ export function Gallery() {
   const [allSketches, setAllSketches] = useState<Sketch[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortKey>('newest');
+  const [tab, setTab] = useState<TabKey>('all');
   const canvasRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getPublicSketches()
@@ -331,43 +334,54 @@ export function Gallery() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Filter + sort
-  const sketches = (() => {
-    let filtered = allSketches;
-    if (search.trim()) {
-      const q = search.toLowerCase().trim();
-      filtered = allSketches.filter(s =>
-        (s.title ?? '').toLowerCase().includes(q) ||
-        (s.script ?? '').toLowerCase().includes(q)
-      );
-    }
-    const sorted = [...filtered];
-    switch (sort) {
-      case 'popular': sorted.sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0)); break;
-      case 'forks': sorted.sort((a, b) => (b.fork_count ?? 0) - (a.fork_count ?? 0)); break;
-      case 'newest': default: sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()); break;
-    }
-    return sorted;
+  // Filter by search
+  const searched = (() => {
+    if (!search.trim()) return allSketches;
+    const q = search.toLowerCase().trim();
+    return allSketches.filter(s =>
+      (s.title ?? '').toLowerCase().includes(q) ||
+      (s.script ?? '').toLowerCase().includes(q)
+    );
   })();
 
-  // Version key so physics reinits when the filtered set changes (not just count)
-  const sketchKey = sketches.map(s => s.id).join(',');
+  // Tab filtering
+  const tabSketches = (() => {
+    switch (tab) {
+      case 'liked': return searched.filter(s => (s.like_count ?? 0) > 0).sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0));
+      case 'forked': return searched.filter(s => (s.fork_count ?? 0) > 0).sort((a, b) => (b.fork_count ?? 0) - (a.fork_count ?? 0));
+      default: return [...searched].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+    }
+  })();
+
+  // For "all" tab: split into initial viewport + overflow
+  const isAllTab = tab === 'all' && !search.trim();
+  const visibleSketches = isAllTab ? tabSketches.slice(0, INITIAL_VISIBLE) : tabSketches;
+  const overflowSketches = isAllTab ? tabSketches.slice(INITIAL_VISIBLE) : [];
+
+  // Version key so physics reinits when the filtered set changes
+  const sketchKey = visibleSketches.map(s => s.id).join(',');
   const [physicsVersion, setPhysicsVersion] = useState(0);
   const lastKeyRef = useRef(sketchKey);
   if (lastKeyRef.current !== sketchKey) {
     lastKeyRef.current = sketchKey;
-    // Use a ref+state bump to trigger physics reinit without extra effect
     setPhysicsVersion(v => v + 1);
   }
-  const { bodies, dragging: draggingRef } = usePhysics(sketches.length, physicsVersion, canvasRef);
+  const { bodies, dragging: draggingRef } = usePhysics(visibleSketches.length, physicsVersion, canvasRef);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
+  // Tab config
+  const tabs: { key: TabKey; label: string; count: number }[] = [
+    { key: 'all', label: 'all', count: searched.length },
+    { key: 'liked', label: 'liked', count: searched.filter(s => (s.like_count ?? 0) > 0).length },
+    { key: 'forked', label: 'forked', count: searched.filter(s => (s.fork_count ?? 0) > 0).length },
+  ];
+
   return (
-    <div style={{
+    <div ref={scrollRef} style={{
       width: '100vw',
       height: '100vh',
       background: theme.bg,
@@ -382,7 +396,7 @@ export function Gallery() {
       <RiverCanvas mode={mode} />
       <Header theme={theme} mode={mode} setMode={setMode} />
 
-      {/* Search + sort bar */}
+      {/* Search + tabs bar */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -416,58 +430,62 @@ export function Gallery() {
           />
         </div>
 
-        {/* Sort buttons */}
+        {/* Tab buttons */}
         <div style={{ display: 'flex', gap: 4 }}>
-          {([['newest', 'new'], ['popular', 'likes'], ['forks', 'forks']] as [SortKey, string][]).map(([key, label]) => (
+          {tabs.map(({ key, label, count }) => (
             <button
               key={key}
-              onClick={() => setSort(key)}
+              onClick={() => setTab(key)}
               style={{
                 padding: '6px 14px',
                 fontSize: '13px',
                 fontFamily: "'Inter', system-ui, sans-serif",
-                background: sort === key
+                background: tab === key
                   ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)')
                   : 'transparent',
-                border: `1px solid ${sort === key
+                border: `1px solid ${tab === key
                   ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)')
                   : 'transparent'}`,
                 borderRadius: 8,
                 color: theme.text,
-                opacity: sort === key ? 0.9 : 0.4,
+                opacity: tab === key ? 0.9 : 0.4,
                 cursor: 'pointer',
-                fontWeight: sort === key ? 600 : 400,
+                fontWeight: tab === key ? 600 : 400,
                 transition: 'all 0.15s',
               }}
             >
-              {label}
+              {label}{count > 0 && key !== 'all' ? ` (${count})` : ''}
             </button>
           ))}
         </div>
 
-        {/* Result count */}
+        {/* Result count when searching */}
         {search.trim() && (
           <span style={{ fontSize: '13px', opacity: 0.3 }}>
-            {sketches.length} result{sketches.length !== 1 ? 's' : ''}
+            {tabSketches.length} result{tabSketches.length !== 1 ? 's' : ''}
           </span>
         )}
       </div>
 
-      {/* Floating cards canvas */}
-      <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'visible' }}>
+      {/* Physics canvas — first viewport of cards */}
+      <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'visible', flexShrink: 0 }}>
         {loading && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.4, fontSize: '16px' }}>
             loading...
           </div>
         )}
 
-        {!loading && sketches.length === 0 && (
+        {!loading && tabSketches.length === 0 && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.4, fontSize: '15px' }}>
-            No public sketches yet. Be the first to share one.
+            {allSketches.length === 0
+              ? 'No public sketches yet. Be the first to share one.'
+              : tab === 'liked' ? 'No liked sketches yet.'
+              : tab === 'forked' ? 'No forked sketches yet.'
+              : 'No sketches match your search.'}
           </div>
         )}
 
-        {!loading && sketches.map((sketch, i) => {
+        {!loading && visibleSketches.map((sketch, i) => {
           if (!bodies[i]) return null;
           return (
             <GalleryCard
@@ -484,6 +502,83 @@ export function Gallery() {
           );
         })}
       </div>
+
+      {/* Scroll-down indicator + overflow cards (all tab only) */}
+      {overflowSketches.length > 0 && (
+        <>
+          {/* Scroll hint */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '12px 0 8px',
+            opacity: 0.2,
+            animation: 'satie-bounce 2s ease-in-out infinite',
+            cursor: 'pointer',
+            flexShrink: 0,
+            position: 'relative',
+            zIndex: 10,
+          }}
+          onClick={() => {
+            const el = document.getElementById('gallery-overflow');
+            el?.scrollIntoView({ behavior: 'smooth' });
+          }}
+          >
+            <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, marginBottom: 4 }}>
+              {overflowSketches.length} more sketch{overflowSketches.length !== 1 ? 'es' : ''}
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+
+          {/* Overflow grid */}
+          <div id="gallery-overflow" style={{
+            flexShrink: 0,
+            padding: '40px 24px 80px',
+            display: 'grid',
+            gridTemplateColumns: `repeat(${GRID_COLS}, ${CARD_W}px)`,
+            gap: CARD_GAP,
+            justifyContent: 'center',
+            position: 'relative',
+            zIndex: 5,
+          }}>
+            {overflowSketches.map(sketch => (
+              <div
+                key={sketch.id}
+                className="gallery-card"
+                onClick={() => { sfx.open(); navigate(`/s/${sketch.id}`); }}
+                onMouseEnter={sfx.hover}
+                style={{
+                  width: CARD_W,
+                  background: theme.mode === 'dark' ? 'rgba(26,25,24,0.75)' : theme.mode === 'fade' ? 'rgba(255,255,255,0.25)' : 'rgba(250,249,246,0.65)',
+                  backdropFilter: 'blur(12px)',
+                  WebkitBackdropFilter: 'blur(12px)',
+                  border: `1.5px solid ${theme.cardBorder}`,
+                  borderRadius: 20,
+                  padding: '16px',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                  boxShadow: '0 2px 16px rgba(0,0,0,0.04)',
+                  transition: 'box-shadow 0.2s, transform 0.15s',
+                }}
+              >
+                <div style={{ fontSize: '16px', fontWeight: 600, color: theme.text, marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {sketch.title}
+                </div>
+                <pre style={{ fontSize: '15px', fontFamily: "'SF Mono', 'Consolas', monospace", opacity: 0.35, whiteSpace: 'pre-wrap', overflow: 'hidden', maxHeight: 48, margin: '0 0 12px', color: theme.text }}>
+                  {sketch.script.slice(0, 100)}{sketch.script.length > 100 ? '...' : ''}
+                </pre>
+                <div style={{ display: 'flex', gap: 8, fontSize: '15px', opacity: 0.3, color: theme.text }}>
+                  <span>{formatDate(sketch.updated_at)}</span>
+                  {(sketch.like_count ?? 0) > 0 && <span>{sketch.like_count} likes</span>}
+                  {(sketch.fork_count ?? 0) > 0 && <span>{sketch.fork_count} forks</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
