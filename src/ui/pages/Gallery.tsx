@@ -19,6 +19,9 @@ interface PhysicsBody {
 
 const CARD_W = 280;
 const CARD_H = 150;
+const CARD_GAP = 24;
+const GRID_PAD = 20;
+const GRID_COLS = 4;
 
 /** Shared AudioContext for collision sounds — created lazily on first user gesture */
 let _collisionCtx: AudioContext | null = null;
@@ -55,7 +58,7 @@ function collisionSound(speed: number) {
   } catch { /* ok */ }
 }
 
-function usePhysics(count: number, containerRef: React.RefObject<HTMLDivElement | null>) {
+function usePhysics(count: number, version: number, containerRef: React.RefObject<HTMLDivElement | null>) {
   const bodies = useRef<PhysicsBody[]>([]);
   const raf = useRef(0);
   const dragging = useRef(-1);
@@ -82,27 +85,32 @@ function usePhysics(count: number, containerRef: React.RefObject<HTMLDivElement 
 
   useEffect(() => {
     const cw = containerSize.current.w;
-    const ch = containerSize.current.h;
-    const pad = 20;
+    const cols = Math.min(GRID_COLS, Math.max(1, Math.floor((cw - GRID_PAD * 2 + CARD_GAP) / (CARD_W + CARD_GAP))));
+    const rows = Math.ceil(count / cols);
+    const totalW = cols * CARD_W + (cols - 1) * CARD_GAP;
+    const offsetX = (cw - totalW) / 2;
 
     const newBodies: PhysicsBody[] = [];
-    const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
     for (let i = 0; i < count; i++) {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const cellW = (cw - pad * 2) / cols;
-      const cellH = (ch - pad * 2) / Math.max(1, Math.ceil(count / cols));
       newBodies.push({
-        x: pad + col * cellW + (cellW - CARD_W) / 2 + (Math.random() - 0.5) * 20,
-        y: pad + row * cellH + (cellH - CARD_H) / 2 + (Math.random() - 0.5) * 15,
-        vx: (Math.random() - 0.5) * 0.12,
-        vy: (Math.random() - 0.5) * 0.12,
+        x: offsetX + col * (CARD_W + CARD_GAP) + (Math.random() - 0.5) * 10,
+        y: GRID_PAD + row * (CARD_H + CARD_GAP) + (Math.random() - 0.5) * 8,
+        vx: (Math.random() - 0.5) * 0.08,
+        vy: (Math.random() - 0.5) * 0.08,
         w: CARD_W, h: CARD_H, colliding: false,
       });
     }
+    // Update container height to fit all rows
+    const neededH = GRID_PAD * 2 + rows * CARD_H + (rows - 1) * CARD_GAP;
+    containerSize.current.h = Math.max(containerSize.current.h, neededH);
+    const el = containerRef.current;
+    if (el) el.style.minHeight = `${neededH}px`;
+
     bodies.current = newBodies;
     setVersion(v => v + 1);
-  }, [count]);
+  }, [count, version]);
 
   useEffect(() => {
     let lastCollision = 0;
@@ -185,7 +193,7 @@ function usePhysics(count: number, containerRef: React.RefObject<HTMLDivElement 
     };
     raf.current = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf.current);
-  }, [count]);
+  }, [count, version]);
 
   return { bodies: bodies.current, dragging };
 }
@@ -342,7 +350,16 @@ export function Gallery() {
     return sorted;
   })();
 
-  const { bodies, dragging: draggingRef } = usePhysics(sketches.length, canvasRef);
+  // Version key so physics reinits when the filtered set changes (not just count)
+  const sketchKey = sketches.map(s => s.id).join(',');
+  const [physicsVersion, setPhysicsVersion] = useState(0);
+  const lastKeyRef = useRef(sketchKey);
+  if (lastKeyRef.current !== sketchKey) {
+    lastKeyRef.current = sketchKey;
+    // Use a ref+state bump to trigger physics reinit without extra effect
+    setPhysicsVersion(v => v + 1);
+  }
+  const { bodies, dragging: draggingRef } = usePhysics(sketches.length, physicsVersion, canvasRef);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
@@ -359,7 +376,7 @@ export function Gallery() {
       color: theme.text,
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'hidden',
+      overflow: 'auto',
       position: 'relative',
     }}>
       <RiverCanvas mode={mode} />
@@ -437,7 +454,7 @@ export function Gallery() {
       </div>
 
       {/* Floating cards canvas */}
-      <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'visible' }}>
         {loading && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.4, fontSize: '16px' }}>
             loading...
