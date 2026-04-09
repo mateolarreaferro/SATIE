@@ -303,22 +303,46 @@ function GalleryCard({ sketch, body, index, draggingRef, onClick, sfx, formatDat
 
 // ── Gallery page ──
 
+type SortKey = 'newest' | 'popular' | 'forks';
+
 export function Gallery() {
   const navigate = useNavigate();
   const sfx = useSFX();
   useBackgroundMusic('/Satie-Theme.wav', 0.08);
   const { theme, mode, setMode } = useDayNightCycle();
-  const [sketches, setSketches] = useState<Sketch[]>([]);
+  const [allSketches, setAllSketches] = useState<Sketch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortKey>('newest');
   const canvasRef = useRef<HTMLDivElement>(null);
-  const { bodies, dragging: draggingRef } = usePhysics(sketches.length, canvasRef);
 
   useEffect(() => {
     getPublicSketches()
-      .then(setSketches)
+      .then(setAllSketches)
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  // Filter + sort
+  const sketches = (() => {
+    let filtered = allSketches;
+    if (search.trim()) {
+      const q = search.toLowerCase().trim();
+      filtered = allSketches.filter(s =>
+        (s.title ?? '').toLowerCase().includes(q) ||
+        (s.script ?? '').toLowerCase().includes(q)
+      );
+    }
+    const sorted = [...filtered];
+    switch (sort) {
+      case 'popular': sorted.sort((a, b) => (b.like_count ?? 0) - (a.like_count ?? 0)); break;
+      case 'forks': sorted.sort((a, b) => (b.fork_count ?? 0) - (a.fork_count ?? 0)); break;
+      case 'newest': default: sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()); break;
+    }
+    return sorted;
+  })();
+
+  const { bodies, dragging: draggingRef } = usePhysics(sketches.length, canvasRef);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);
@@ -340,6 +364,77 @@ export function Gallery() {
     }}>
       <RiverCanvas mode={mode} />
       <Header theme={theme} mode={mode} setMode={setMode} />
+
+      {/* Search + sort bar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 20px',
+        position: 'relative',
+        zIndex: 10,
+      }}>
+        {/* Search input */}
+        <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.3 }}>
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            placeholder="search sketches..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px 12px 8px 34px',
+              fontSize: '14px',
+              fontFamily: "'Inter', system-ui, sans-serif",
+              background: theme.mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+              border: `1px solid ${theme.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+              borderRadius: 10,
+              color: theme.text,
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        {/* Sort buttons */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {([['newest', 'new'], ['popular', 'likes'], ['forks', 'forks']] as [SortKey, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setSort(key)}
+              style={{
+                padding: '6px 14px',
+                fontSize: '13px',
+                fontFamily: "'Inter', system-ui, sans-serif",
+                background: sort === key
+                  ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.08)')
+                  : 'transparent',
+                border: `1px solid ${sort === key
+                  ? (theme.mode === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)')
+                  : 'transparent'}`,
+                borderRadius: 8,
+                color: theme.text,
+                opacity: sort === key ? 0.9 : 0.4,
+                cursor: 'pointer',
+                fontWeight: sort === key ? 600 : 400,
+                transition: 'all 0.15s',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Result count */}
+        {search.trim() && (
+          <span style={{ fontSize: '13px', opacity: 0.3 }}>
+            {sketches.length} result{sketches.length !== 1 ? 's' : ''}
+          </span>
+        )}
+      </div>
 
       {/* Floating cards canvas */}
       <div ref={canvasRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
