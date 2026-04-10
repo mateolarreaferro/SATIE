@@ -871,7 +871,7 @@ function FlyControls() {
 
   useEffect(() => {
     resetRef.current = () => {
-      camera.position.set(0, 0, 0);
+      camera.position.set(-1, 1, 0);
       euler.current.set(0, 0, 0, 'YXZ');
       camera.quaternion.setFromEuler(euler.current);
     };
@@ -1291,8 +1291,8 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
 
       <Canvas
         camera={overlayMode
-          ? { position: [0, 0, 0], fov: 65 }
-          : { position: [0, 0, 0], fov: 55 }
+          ? { position: [-1, 1, 0], fov: 65 }
+          : { position: [-1, 1, 0], fov: 55 }
         }
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
         resize={{ scroll: false, debounce: 0, offsetSize: true }}
