@@ -167,18 +167,21 @@ VARIATION THROUGH MULTIPLICATION (the idiomatic way):
   → Creates 3 voices, each with different random volume, pitch, position, timing
 
 LAYERING (building texture):
-  group
-      volume 0.5
-      reverb wet 0.3 size 0.7 damping 0.5
-      move fly speed 1to2
+  group pad
+  volume 0.5
+  reverb wet 0.3 size 0.7 damping 0.5
 
       loop gen warm pad drone
           volume 0.3
           pitch 0.5
+          move fly speed 1to2
+          visual trail sphere
 
       loop gen bright shimmer texture
           volume 0.15
           pitch 2.0
+          move fly speed 1to2
+          visual trail
   endgroup
 
 EVOLVING PARAMETERS (temporal change):
@@ -231,20 +234,26 @@ MOVEMENT (only valid types: walk, fly, spiral, orbit, lorenz, gen):
   move fly                                         # random walk in 3D
   move walk speed 2                                # walk with speed
   move fly speed 1to3                              # fly with speed range
-  move fly x -6to6 y 0to4 z -6to6 speed 2         # constrained fly area
-  move walk x -4to4 z -4to4 speed 1               # constrained walk area
   move spiral speed 1 noise 0.3                    # spiral trajectory
   move orbit speed 1to2                            # orbit trajectory
   move lorenz speed 2                              # lorenz attractor trajectory
   move gen flying bird speed 1                     # AI-generated trajectory
-  Speed range is 1 to 10. Keep spatial bounds within 1–8 meters.
+  Speed range is 1 to 10. DO NOT specify x/y/z bounds on walk or fly — defaults are musical.
 
-GROUPS:
-  group
-      volume 0.5
-      reverb wet 0.3 size 0.7 damping 0.5
+GROUPS (always name the group; group-level properties go at the SAME indent as 'group', not indented under it):
+  group ambience
+  volume 0.5
+  reverb wet 0.3 size 0.7 damping 0.5
+
       loop sound1
+          volume 0.3
+          move fly speed 1to2
+          visual trail
+
       loop sound2
+          volume 0.4
+          move fly speed 1to3
+          visual trail sphere
   endgroup
 
 EFFECTS (use only when requested or musically relevant):
@@ -393,12 +402,12 @@ CRITICAL SYNTAX RULES (NO COLONS, NO QUOTES, NO EQUALS):
 - Interpolation: volume fade 0 1 every 3 OR volume fade 0.2 0.8 every 5 loop bounce OR pitch jump 0.5 1.0 1.5 every 2 loop restart
 - NEVER use goto, gobetween, or interpolate — they do NOT exist. Only "fade" and "jump"
 - Loop modes on interpolation: "loop bounce" (oscillate) or "loop restart" (cycle)
-- Movement: move walk OR move fly speed 1to3 OR move fly x -10to10 y 0to15 z -10to5 speed 2
+- Movement: move walk OR move fly speed 1to3 (do NOT specify x/y/z bounds on walk or fly — use the defaults)
 - Movement types: ONLY walk, fly, spiral, orbit, lorenz, gen — NEVER "fixed", "random", "position", "pos"
 - Static voices: omit the move property entirely — voice stays at origin
 - Trajectories: move spiral OR move orbit OR move lorenz OR move gen flying bird
 - Trajectory gen blocks: gen name + prompt/duration/smoothing/ground/variation (indented)
-- Groups: group ... endgroup (volume/pitch multiply with parent)
+- Groups: ALWAYS give the group a name (e.g. "group ambience"). Group-level properties sit at the SAME indent as the "group" keyword, NOT indented under it. Child statements ARE indented.
 - Multi-clip: oneshot bird and rain every 5
 - Color: color red fade 0 255 every 5 green 0to255 blue 100
 - Alpha: alpha 0.5 OR alpha fade 0 1 every 5 loop bounce

@@ -32,6 +32,82 @@ const SUGGESTIONS = [
   )},
 ];
 
+// Hand-crafted preset scripts for the example buttons. These bypass AI generation
+// so the landing-page demos are instant, reliable, and high-quality.
+const SUGGESTION_PRESETS: Record<string, string> = {
+  'Forest at dawn': `group forest
+volume 0.9
+reverb wet 0.3 size 0.8 damping 0.6
+
+    loop gen birds calling at dawn
+        volume 0.4to0.6
+        pitch 1.2to2.0
+        move fly speed 1to5
+        visual trail sphere
+        color white
+
+    3 * loop gen wind through forest leaves
+        volume 0.2to0.4
+        pitch 0.6to1.2
+        move fly speed 1to3
+        visual trail
+        color blue
+
+    loop gen distant forest stream babbling
+        volume 0.15to0.25
+        pitch 0.4to0.6
+        move fly speed 0.5to1.5
+        visual sphere
+        color yellow
+endgroup
+`,
+  'Rain on a tin roof': `group rain
+volume 0.9
+reverb wet 0.4 size 0.7 damping 0.7
+
+    4 * loop gen rhythmic rain drops on tin roof
+        volume 0.3to0.5
+        pitch 0.9to1.3
+        move fly speed 1to3
+        visual trail
+        color blue
+
+    loop gen distant rolling thunder
+        volume 0.2to0.4
+        pitch 0.3to0.6
+        move fly speed 0.3to0.8
+        visual trail sphere
+        color purple
+
+    2 * loop gen quiet night crickets ambience
+        volume 0.1to0.2
+        pitch 1.0to1.4
+        move fly speed 0.5to1.5
+        visual sphere
+        color green
+endgroup
+`,
+  'Celestial choir': `group cosmos
+volume 0.9
+reverb wet 0.7 size 1.0 damping 0.2
+
+    3 * loop gen ethereal celestial choir voices
+        volume 0.3to0.5
+        pitch 0.8to1.2
+        move orbit speed 0.1to0.3
+        visual trail sphere
+        color white
+
+    loop gen deep space drone ambience
+        volume 0.2to0.3
+        pitch 0.4to0.6
+        move fly speed 0.2to0.5
+        visual trail
+        color purple
+endgroup
+`,
+};
+
 export function Chat() {
   const navigate = useNavigate();
   const { user, signInWithGitHub, signInWithGoogle } = useAuth();
@@ -241,6 +317,31 @@ export function Chat() {
     }
   }, [isGenerating, user, messages, currentScript, loadScript, play, uiState.isPlaying, nextId]);
 
+  const sendPreset = useCallback((title: string, desc: string) => {
+    if (isGenerating) return;
+    const script = SUGGESTION_PRESETS[title];
+    if (!script) {
+      sendMessage(`${title.toLowerCase()} — ${desc}`);
+      return;
+    }
+    if (!user) {
+      setShowSignInPrompt(true);
+      return;
+    }
+    stopBackgroundMusic();
+    const prompt = `${title.toLowerCase()} — ${desc}`;
+    const userId = nextId();
+    const assistantId = nextId();
+    setMessages(prev => [
+      ...prev,
+      { id: userId, role: 'user', content: prompt, status: 'done' },
+      { id: assistantId, role: 'assistant', content: prompt, script, status: 'playing' as const },
+    ]);
+    setCurrentScript(script);
+    loadScript(script);
+    if (!uiState.isPlaying) play();
+  }, [isGenerating, user, nextId, loadScript, play, uiState.isPlaying, sendMessage]);
+
   const handleSaveAsSketch = useCallback(async (script: string, prompt: string) => {
     if (!user) return;
     try {
@@ -423,7 +524,7 @@ export function Chat() {
                   {SUGGESTIONS.map(s => (
                     <button
                       key={s.title}
-                      onClick={() => sendMessage(`${s.title.toLowerCase()} — ${s.desc}`)}
+                      onClick={() => sendPreset(s.title, s.desc)}
                       disabled={isGenerating}
                       style={{
                         padding: '12px 18px',
