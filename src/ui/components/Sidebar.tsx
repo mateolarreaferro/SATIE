@@ -72,13 +72,14 @@ export function Sidebar({
   const iconBtnStyle = (active: boolean): React.CSSProperties => ({
     width: 36,
     height: 30,
-    background: 'none',
+    background: active ? '#1a3a2a10' : 'none',
     border: 'none',
+    borderRadius: 6,
     cursor: 'pointer',
     color: '#1a3a2a',
-    opacity: active ? 0.6 : 0.15,
+    opacity: active ? 0.85 : 0.4,
     padding: 0,
-    transition: 'opacity 0.15s',
+    transition: 'opacity 0.15s, background 0.15s',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -87,15 +88,16 @@ export function Sidebar({
   const smallBtnStyle = (active?: boolean): React.CSSProperties => ({
     width: 36,
     height: 28,
-    background: 'none',
+    background: active ? '#1a3a2a10' : 'none',
     border: 'none',
+    borderRadius: 6,
     cursor: 'pointer',
-    opacity: active ? 0.6 : 0.2,
+    opacity: active ? 0.85 : 0.4,
     padding: 0,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    transition: 'opacity 0.15s',
+    transition: 'opacity 0.15s, background 0.15s',
   });
 
   return (
@@ -265,12 +267,13 @@ export function Sidebar({
           onClick={() => { sfx.toggle(); onTogglePanel('samples'); }}
           onMouseEnter={sfx.hover}
           title={`${panels.samples ? 'Hide' : 'Show'} assets`}
-          style={iconBtnStyle(panels.samples)}
+          style={{ ...iconBtnStyle(panels.samples), flexDirection: 'column', height: 'auto', gap: 2, padding: '4px 0' }}
         >
-          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+          <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
             <path d="M3 1.5 L3 12.5 L11.5 12.5 L11.5 4.5 L8.5 1.5 Z" strokeLinejoin="round"/>
             <path d="M8.5 1.5 L8.5 4.5 L11.5 4.5" strokeLinejoin="round"/>
           </svg>
+          <span style={{ fontSize: '9px', fontWeight: 500, letterSpacing: '0.02em' }}>samples</span>
         </button>
 
         {/* Voices */}
@@ -279,13 +282,14 @@ export function Sidebar({
           onClick={() => { sfx.toggle(); onTogglePanel('voices'); }}
           onMouseEnter={sfx.hover}
           title={`${panels.voices ? 'Hide' : 'Show'} voices`}
-          style={iconBtnStyle(panels.voices)}
+          style={{ ...iconBtnStyle(panels.voices), flexDirection: 'column', height: 'auto', gap: 2, padding: '4px 0' }}
         >
-          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+          <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
             <line x1="2" y1="3.5" x2="12" y2="3.5" strokeLinecap="round"/>
             <line x1="2" y1="7" x2="12" y2="7" strokeLinecap="round"/>
             <line x1="2" y1="10.5" x2="12" y2="10.5" strokeLinecap="round"/>
           </svg>
+          <span style={{ fontSize: '9px', fontWeight: 500, letterSpacing: '0.02em' }}>voices</span>
         </button>
 
         {/* AI */}
@@ -294,14 +298,15 @@ export function Sidebar({
           onClick={() => { sfx.toggle(); onTogglePanel('ai'); }}
           onMouseEnter={sfx.hover}
           title={`${panels.ai ? 'Hide' : 'Show'} AI`}
-          style={iconBtnStyle(panels.ai)}
+          style={{ ...iconBtnStyle(panels.ai), flexDirection: 'column', height: 'auto', gap: 2, padding: '4px 0' }}
         >
-          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
+          <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2">
             <path d="M7 1.5 C7 1.5 3 1.5 3 5 C3 7 4.5 7.5 4.5 9.5 L9.5 9.5 C9.5 7.5 11 7 11 5 C11 1.5 7 1.5 7 1.5 Z" strokeLinejoin="round"/>
             <line x1="5" y1="9.5" x2="5" y2="11.5" strokeLinecap="round"/>
             <line x1="9" y1="9.5" x2="9" y2="11.5" strokeLinecap="round"/>
             <path d="M5 11.5 Q7 13 9 11.5" strokeLinecap="round"/>
           </svg>
+          <span style={{ fontSize: '9px', fontWeight: 500, letterSpacing: '0.02em' }}>AI</span>
         </button>
       </div>
 
@@ -423,7 +428,7 @@ export function Sidebar({
           fontSize: '16px',
           fontWeight: 500,
           color: '#1a3a2a',
-          opacity: activePopover === 'docs' ? 0.7 : 0.25,
+          opacity: activePopover === 'docs' ? 0.85 : 0.4,
           fontFamily: "'SF Mono', monospace",
           transition: 'all 0.15s',
           marginBottom: '4px',

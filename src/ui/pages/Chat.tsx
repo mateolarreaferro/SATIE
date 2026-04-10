@@ -50,6 +50,8 @@ export function Chat() {
   const [sketchAuthors, setSketchAuthors] = useState<Record<string, Profile>>({});
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
   const [mouseLookActive, setMouseLookActive] = useState(false);
+  const [showControlsToast, setShowControlsToast] = useState(false);
+  const hasShownToast = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
@@ -73,6 +75,12 @@ export function Chat() {
     const interval = setInterval(() => {
       const count = tracksRef.current?.length ?? 0;
       setHasActiveTracks(count > 0);
+      // Show controls toast on first generation
+      if (count > 0 && !hasShownToast.current) {
+        hasShownToast.current = true;
+        setShowControlsToast(true);
+        setTimeout(() => setShowControlsToast(false), 6000);
+      }
     }, 500);
     return () => clearInterval(interval);
   }, [tracksRef]);
@@ -320,6 +328,38 @@ export function Chat() {
         </div>
       )}
 
+      {/* Controls toast — appears after first generation */}
+      {showControlsToast && (
+        <div style={{
+          position: 'absolute',
+          bottom: 100,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10,
+          background: `${theme.invertedBg}e6`,
+          color: theme.invertedText,
+          padding: '10px 20px',
+          borderRadius: 10,
+          fontSize: '13px',
+          fontFamily: "'Inter', system-ui, sans-serif",
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          backdropFilter: 'blur(8px)',
+          animation: 'satie-fade-in 0.4s ease',
+          pointerEvents: 'auto',
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+        }}
+        onClick={() => setShowControlsToast(false)}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
+          <span>put on headphones</span>
+          <span style={{ opacity: 0.4 }}>·</span>
+          <span style={{ opacity: 0.7 }}>click + drag to look around · WASD to move</span>
+        </div>
+      )}
+
       {/* Layer 3: Chat UI */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex', flexDirection: 'column', pointerEvents: 'none' }}>
         <Header theme={theme} mode={mode} setMode={setMode} rightExtra={stopButton} />
@@ -362,14 +402,24 @@ export function Chat() {
                 </h1>
                 <p style={{
                   fontSize: '16px',
-                  opacity: 0.4,
+                  opacity: 0.5,
+                  margin: '0 0 8px',
+                }}>
+                  type what you want to hear — satie composes it in 3D space around you
+                </p>
+                <p style={{
+                  fontSize: '13px',
+                  opacity: 0.3,
                   margin: '0 0 28px',
                 }}>
-                  satie turns your words into spatial audio you can explore
+                  best with headphones
                 </p>
 
                 {/* Suggestion cards */}
                 <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <div style={{ width: '100%', fontSize: '12px', opacity: 0.35, marginBottom: 2, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                    try one
+                  </div>
                   {SUGGESTIONS.map(s => (
                     <button
                       key={s.title}
@@ -387,15 +437,18 @@ export function Chat() {
                         color: theme.text,
                         textAlign: 'left',
                         maxWidth: 200,
-                        opacity: 0.8,
-                        transition: 'opacity 0.15s, transform 0.15s',
+                        opacity: 0.85,
+                        transition: 'opacity 0.15s, transform 0.15s, border-color 0.15s',
                       }}
-                      onMouseEnter={(e) => { if (!isGenerating) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(-2px)'; } }}
-                      onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.8'; e.currentTarget.style.transform = 'translateY(0)'; }}
+                      onMouseEnter={(e) => { if (!isGenerating) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = `${theme.text}40`; } }}
+                      onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = theme.border; }}
                     >
                       <div style={{ fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ opacity: 0.5 }}>{s.icon(theme.text)}</span>
                         {s.title}
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3, marginLeft: 'auto' }}>
+                          <path d="M5 12h14M12 5l7 7-7 7"/>
+                        </svg>
                       </div>
                       <div style={{ fontSize: '13px', opacity: 0.5, lineHeight: 1.3 }}>{s.desc}</div>
                     </button>
