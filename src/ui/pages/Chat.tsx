@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { createSketch, getPublicSketches } from '../../lib/sketches';
+import { uploadSketchSamples } from '../../lib/sampleStorage';
+import { encodeWAV } from '../../engine/export/WAVEncoder';
 import { getProfile } from '../../lib/profiles';
 import { generateCode } from '../../lib/aiGenerate';
 import { createFeedbackEntry, saveFeedback, updateFeedback } from '../../lib/feedbackStore';
@@ -112,7 +114,7 @@ export function Chat() {
   const navigate = useNavigate();
   const { user, signInWithGitHub, signInWithGoogle } = useAuth();
   const { mode, theme, setMode } = useDayNightCycle();
-  const { uiState, tracksRef, loadScript, play, stop, setListenerPosition, setListenerOrientation, setOnMissingBuffer, setOnSearchCommunity, setPreferCommunity } = useSatieEngine();
+  const { uiState, tracksRef, engine: engineRef, loadScript, play, stop, setListenerPosition, setListenerOrientation, setOnMissingBuffer, setOnSearchCommunity, setPreferCommunity } = useSatieEngine();
   const sfx = useSFX();
 
   // Background music — plays until first prompt is sent
@@ -347,11 +349,27 @@ export function Chat() {
     try {
       const title = prompt.slice(0, 50) || 'untitled';
       const sketch = await createSketch(user.id, title, script);
+
+      // Capture engine audio buffers (including gen audio) and upload as samples
+      if (engineRef.current) {
+        const engineBuffers = engineRef.current.getAudioBuffers();
+        if (engineBuffers.size > 0) {
+          const sampleMap = new Map<string, ArrayBuffer>();
+          for (const [name, audioBuf] of engineBuffers) {
+            const wavBlob = encodeWAV(audioBuf, 16);
+            sampleMap.set(name, await wavBlob.arrayBuffer());
+          }
+          uploadSketchSamples(user.id, sketch.id, sampleMap).catch(e =>
+            console.error('[Chat] Failed to upload samples:', e),
+          );
+        }
+      }
+
       navigate(`/editor/${sketch.id}`);
     } catch (e: any) {
       console.error('Failed to save sketch:', e);
     }
-  }, [user, navigate]);
+  }, [user, navigate, engineRef]);
 
   const handleRate = useCallback((messageId: string, rating: 1 | -1) => {
     setMessages(prev => prev.map(m => {
