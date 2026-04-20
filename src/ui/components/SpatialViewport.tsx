@@ -105,14 +105,18 @@ void main() {
   float core = 1.0 - smoothstep(0.0, 0.35, dist);
   // Soft exponential glow
   float glow = exp(-dist * dist * 3.5);
-  float alpha = (core * 0.9 + glow * 0.5) * uOpacity;
-  if (alpha < 0.005) discard;
+  // Smooth fade to 0 at the geometry edge so Bloom never sees a hard outline
+  float edgeFade = 1.0 - smoothstep(0.78, 1.0, dist);
+  float alpha = (core * 0.9 + glow * 0.5) * uOpacity * edgeFade;
+  if (alpha < 0.002) discard;
   // Brighten center, tint glow with voice color
   vec3 col = uColor * (1.0 + core * 0.6);
   gl_FragColor = vec4(col, alpha);
 }`;
 
-const sharedPlaneGeo = new THREE.PlaneGeometry(1, 1);
+// Circular disc (not a square plane) so the shader's radial falloff matches
+// the geometry boundary — avoids Bloom picking up the square plane corners.
+const sharedPlaneGeo = new THREE.CircleGeometry(0.5, 64);
 
 function makeOrbMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
@@ -1090,7 +1094,7 @@ const SceneInner = memo(function SceneInner({ tracksRef, bgColor, listenerSync, 
         {overlayMode ? <OverlayFlyControls /> : <FlyControls />}
         {!overlayMode && <AxisGizmo />}
         {!overlayMode && (
-          <EffectComposer>
+          <EffectComposer multisampling={8} frameBufferType={THREE.HalfFloatType}>
             <Bloom
               luminanceThreshold={0.2}
               luminanceSmoothing={0.8}
