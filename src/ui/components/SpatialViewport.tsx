@@ -4,8 +4,7 @@ import { Grid, Trail } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
 import * as THREE from 'three';
 import type { TrackState } from '../../engine';
-import { useHeadTracking } from '../hooks/useHeadTracking';
-import { useFaceTracking, type FaceMeshData } from '../hooks/useFaceTracking';
+import { type FaceMeshData } from '../hooks/useFaceTracking';
 
 const ViewportFocusContext = createContext<{ focused: boolean }>({ focused: false });
 const CameraResetContext = createContext<React.MutableRefObject<(() => void) | null>>({ current: null });
@@ -54,6 +53,15 @@ interface SpatialViewportProps {
   onListenerRotate?: (fx: number, fy: number, fz: number, ux: number, uy: number, uz: number) => void;
   /** When true: transparent bg, no grid/controls/pointer-events — for layering over other content */
   overlayMode?: boolean;
+  /** External face tracking state — when provided, lights up the listener face mesh and flags external tracking.
+   *  If `toggle` is provided, SpatialViewport also renders a built-in camera toggle pill. */
+  faceTracking?: {
+    enabled: boolean;
+    meshRef: React.MutableRefObject<FaceMeshData | null>;
+    toggle?: () => void;
+    loading?: boolean;
+    error?: string | null;
+  };
 }
 
 function BgColorUpdater({ color, transparent }: { color: string; transparent?: boolean }) {
@@ -1224,7 +1232,7 @@ function HeadingIndicator({ forwardRef, color, faceTrackingActive }: {
   );
 }
 
-export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColor = '#f4f3ee', onBgColorChange, onListenerMove, onListenerRotate, overlayMode }: SpatialViewportProps) {
+export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColor = '#f4f3ee', onBgColorChange, onListenerMove, onListenerRotate, overlayMode, faceTracking }: SpatialViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [focused, setFocused] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
@@ -1232,6 +1240,7 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
   const [gridVisible, setGridVisible] = useState(true);
   const listenerPosRef = useRef(new THREE.Vector3(0, 0, 0));
   const listenerForwardRef = useRef(new THREE.Vector3(0, 0, -1));
+  const emptyFaceMeshRef = useRef<FaceMeshData | null>(null);
   const cameraResetRef = useRef<(() => void) | null>(null);
   const cameraZoomRef = useRef<((dir: number) => void) | null>(null);
   const cameraFitRef = useRef<(() => void) | null>(null);
@@ -1242,8 +1251,8 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
     onListenerRotate?.(fx, fy, fz, ux, uy, uz);
   }, [onListenerRotate]);
 
-  const headTracking = useHeadTracking(handleOrientationChange);
-  const faceTracking = useFaceTracking(handleOrientationChange);
+  const faceTrackingEnabled = faceTracking?.enabled ?? false;
+  const faceMeshRef = faceTracking?.meshRef ?? emptyFaceMeshRef;
 
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
@@ -1272,9 +1281,9 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
     linked: false,
     listenerPosRef,
     listenerForwardRef,
-    externalTrackingActive: faceTracking.enabled || headTracking.enabled,
-    faceMeshRef: faceTracking.meshRef,
-  }), [onListenerMove, handleOrientationChange, faceTracking.enabled, headTracking.enabled, faceTracking.meshRef]);
+    externalTrackingActive: faceTrackingEnabled,
+    faceMeshRef,
+  }), [onListenerMove, handleOrientationChange, faceTrackingEnabled, faceMeshRef]);
 
   return (
     <div
@@ -1291,7 +1300,41 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Heading indicator — always shows listener direction */}
-      {!overlayMode && <HeadingIndicator forwardRef={listenerForwardRef} color={uiColor} faceTrackingActive={faceTracking.enabled} />}
+      {!overlayMode && <HeadingIndicator forwardRef={listenerForwardRef} color={uiColor} faceTrackingActive={faceTrackingEnabled} />}
+
+      {/* Camera (webcam face-tracking) toggle — bottom-left, non-overlay only */}
+      {!overlayMode && faceTracking?.toggle && (
+        <button
+          onClick={faceTracking.toggle}
+          disabled={faceTracking.loading}
+          title={faceTracking.enabled ? 'Disable camera head tracking' : faceTracking.error ? faceTracking.error : 'Enable camera head tracking (rotate with your head)'}
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: 8,
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '4px 10px 4px 8px',
+            background: faceTracking.enabled ? uiColor : 'transparent',
+            color: faceTracking.enabled ? bgColor : uiColor,
+            border: `1.5px solid ${faceTracking.error ? '#8b0000' : uiColor + '40'}`,
+            borderRadius: 16,
+            cursor: faceTracking.loading ? 'wait' : 'pointer',
+            fontSize: 12,
+            fontFamily: "'Inter', system-ui, sans-serif",
+            fontWeight: 500,
+            opacity: faceTracking.enabled ? 1 : 0.7,
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="10" r="3" />
+            <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
+          </svg>
+          {faceTracking.loading ? 'Loading…' : 'Camera'}
+        </button>
+      )}
 
       <Canvas
         camera={overlayMode
@@ -1372,67 +1415,6 @@ export const SpatialViewport = memo(function SpatialViewport({ tracksRef, bgColo
         >
           +
         </button>
-        {/* Webcam face tracking toggle + error display */}
-        <div style={{ position: 'relative' }}>
-          {faceTracking.error && (
-            <div style={{
-              position: 'absolute',
-              bottom: 26,
-              right: 0,
-              background: '#8b0000',
-              color: '#fff',
-              fontSize: 12,
-              fontFamily: "'SF Mono', monospace",
-              padding: '3px 6px',
-              borderRadius: 4,
-              whiteSpace: 'nowrap',
-              maxWidth: 200,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}>
-              {faceTracking.error}
-            </div>
-          )}
-          {faceTracking.loading && (
-            <div style={{
-              position: 'absolute',
-              bottom: 26,
-              right: 0,
-              background: uiColor,
-              color: bgColor,
-              fontSize: 12,
-              fontFamily: "'SF Mono', monospace",
-              padding: '3px 6px',
-              borderRadius: 4,
-              whiteSpace: 'nowrap',
-            }}>
-              Loading model...
-            </div>
-          )}
-          <button
-            onClick={faceTracking.toggle}
-            title={faceTracking.enabled ? 'Disable face tracking' : faceTracking.loading ? 'Loading...' : 'Enable face tracking (webcam)'}
-            disabled={faceTracking.loading}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 4,
-              background: faceTracking.error ? '#8b0000' : faceTracking.enabled ? uiColor : 'none',
-              border: `1.5px solid ${faceTracking.error ? '#8b0000' : uiColor + '40'}`,
-              cursor: faceTracking.loading ? 'wait' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 0,
-              opacity: faceTracking.enabled ? 1 : faceTracking.loading ? 0.4 : 0.7,
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={faceTracking.enabled || faceTracking.error ? bgColor : uiColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="10" r="3" />
-              <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
-            </svg>
-          </button>
-        </div>
         {onBgColorChange && (
           <div>
             <div

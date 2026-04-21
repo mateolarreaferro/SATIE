@@ -6,8 +6,9 @@ import { likeSketch, unlikeSketch, hasUserLiked } from '../../lib/likes';
 import { getProfile } from '../../lib/profiles';
 import { loadSketchSamples } from '../../lib/sampleStorage';
 import { useSatieEngine } from '../hooks/useSatieEngine';
-import { useHeadTracking } from '../hooks/useHeadTracking';
+import { useFaceTracking } from '../hooks/useFaceTracking';
 import { SpatialViewport } from '../components/SpatialViewport';
+import { SatieScriptViewer } from '../components/SatieScriptViewer';
 import type { Sketch, Profile } from '../../lib/supabase';
 
 export function SketchView() {
@@ -38,7 +39,7 @@ export function SketchView() {
     setListenerOrientation,
   } = useSatieEngine();
 
-  const { enabled: headTrackingEnabled, available: headTrackingAvailable, toggle: toggleHeadTracking } = useHeadTracking(setListenerOrientation);
+  const faceTracking = useFaceTracking(setListenerOrientation);
 
   const samplesLoaded = useRef(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -217,6 +218,7 @@ export function SketchView() {
               bgColor={bgColor}
               onListenerMove={setListenerPosition}
               onListenerRotate={setListenerOrientation}
+              faceTracking={{ enabled: faceTracking.enabled, meshRef: faceTracking.meshRef }}
             />
           </div>
 
@@ -252,36 +254,41 @@ export function SketchView() {
               )}
             </button>
 
-            {headTrackingAvailable && (
-              <button
-                onClick={toggleHeadTracking}
-                style={{
-                  ...styles.controlBtnOutline,
-                  background: headTrackingEnabled ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.4)',
-                }}
-              >
-                Head Tracking Audio
+            <button
+              onClick={faceTracking.toggle}
+              disabled={faceTracking.loading}
+              title={faceTracking.enabled ? 'Disable camera head tracking' : 'Enable camera head tracking (rotate with your head)'}
+              style={{
+                ...styles.controlBtnOutline,
+                background: faceTracking.enabled ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.4)',
+                cursor: faceTracking.loading ? 'wait' : 'pointer',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="10" r="3" />
+                <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
+              </svg>
+              {faceTracking.loading ? 'Loading…' : faceTracking.error ? 'Camera blocked' : 'Camera'}
+              <div style={{
+                width: 32,
+                height: 18,
+                borderRadius: 9,
+                background: faceTracking.enabled ? '#faf9f6' : 'rgba(255,255,255,0.3)',
+                position: 'relative',
+                transition: 'background 0.2s',
+              }}>
                 <div style={{
-                  width: 32,
-                  height: 18,
-                  borderRadius: 9,
-                  background: headTrackingEnabled ? '#faf9f6' : 'rgba(255,255,255,0.3)',
-                  position: 'relative',
-                  transition: 'background 0.2s',
-                }}>
-                  <div style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: 7,
-                    background: headTrackingEnabled ? '#0a0a0a' : '#faf9f6',
-                    position: 'absolute',
-                    top: 2,
-                    left: headTrackingEnabled ? 16 : 2,
-                    transition: 'left 0.2s, background 0.2s',
-                  }} />
-                </div>
-              </button>
-            )}
+                  width: 14,
+                  height: 14,
+                  borderRadius: 7,
+                  background: faceTracking.enabled ? '#0a0a0a' : '#faf9f6',
+                  position: 'absolute',
+                  top: 2,
+                  left: faceTracking.enabled ? 16 : 2,
+                  transition: 'left 0.2s, background 0.2s',
+                }} />
+              </div>
+            </button>
 
             {/* More menu */}
             <div style={{ position: 'relative' }} ref={moreMenuRef}>
@@ -402,9 +409,7 @@ export function SketchView() {
         <div style={styles.scriptSection}>
           <div style={styles.sectionLabel}>Satie Script</div>
           <div style={{ position: 'relative' }}>
-            <pre style={styles.script}>
-              {sketch.script}
-            </pre>
+            <SatieScriptViewer script={sketch.script} style={styles.script} />
 
             {/* Prompt an edit — floating input at bottom of script */}
             {user && (
@@ -457,8 +462,10 @@ export function SketchView() {
 
 const styles: Record<string, React.CSSProperties> = {
   container: {
-    width: '100vw',
-    minHeight: '100vh',
+    width: '100%',
+    height: '100vh',
+    overflowY: 'auto',
+    overflowX: 'hidden',
     background: '#f4f3ee',
     fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
     color: '#0a0a0a',

@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useSatieEngine } from '../hooks/useSatieEngine';
+import { useFaceTracking } from '../hooks/useFaceTracking';
 import { SatieEditor } from '../components/SatieEditor';
 import { SpatialViewport } from '../components/SpatialViewport';
 import { AssetPanel } from '../components/AssetPanel';
@@ -245,6 +246,7 @@ export function Editor() {
     setPreferCommunity,
   } = useSatieEngine();
 
+  const faceTracking = useFaceTracking(setListenerOrientation);
   const sfx = useSFX();
   // First-time experience: show a demo composition on first visit
   const isFirstTime = !sketchId && !templateState?.templateScript && !localStorage.getItem(FIRST_TIME_KEY);
@@ -815,7 +817,20 @@ export function Editor() {
           minHeight={200}
         >
           <ErrorBoundary name="Space">
-            <SpatialViewport tracksRef={tracksRef} bgColor={spaceBgColor} onBgColorChange={handleBgColorChange} onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
+            <SpatialViewport
+              tracksRef={tracksRef}
+              bgColor={spaceBgColor}
+              onBgColorChange={handleBgColorChange}
+              onListenerMove={setListenerPosition}
+              onListenerRotate={setListenerOrientation}
+              faceTracking={{
+                enabled: faceTracking.enabled,
+                meshRef: faceTracking.meshRef,
+                toggle: faceTracking.toggle,
+                loading: faceTracking.loading,
+                error: faceTracking.error,
+              }}
+            />
             {showViewportHint && (
               <div
                 onClick={() => setShowViewportHint(false)}
