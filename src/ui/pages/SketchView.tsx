@@ -8,7 +8,8 @@ import { loadSketchSamples } from '../../lib/sampleStorage';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { useFaceTracking } from '../hooks/useFaceTracking';
 import { SpatialViewport } from '../components/SpatialViewport';
-import { SatieScriptViewer } from '../components/SatieScriptViewer';
+import { SatieEditor } from '../components/SatieEditor';
+import { updateSketch } from '../../lib/sketches';
 import type { Sketch, Profile } from '../../lib/supabase';
 
 export function SketchView() {
@@ -27,6 +28,9 @@ export function SketchView() {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [editPrompt, setEditPrompt] = useState('');
   const [forking, setForking] = useState(false);
+  const [editedScript, setEditedScript] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const {
     uiState,
@@ -92,15 +96,51 @@ export function SketchView() {
       .finally(() => setLoading(false));
   }, [id, user, engineRef]);
 
+  const currentScript = editedScript ?? sketch?.script ?? '';
+  const isDirty = editedScript !== null && sketch !== null && editedScript !== sketch.script;
+  const isOwner = user?.id === sketch?.user_id;
+
   const handlePlay = useCallback(() => {
     if (!sketch) return;
     if (uiState.isPlaying) {
       stop();
     } else {
-      loadScript(sketch.script);
+      loadScript(currentScript);
       play();
     }
-  }, [sketch, uiState.isPlaying, loadScript, play, stop]);
+  }, [sketch, uiState.isPlaying, loadScript, play, stop, currentScript]);
+
+  // Hot-reload script while playing (mirrors Editor behavior)
+  useEffect(() => {
+    if (uiState.isPlaying) {
+      loadScript(currentScript);
+    }
+  }, [currentScript, uiState.isPlaying, loadScript]);
+
+  const handleSave = useCallback(async () => {
+    if (!sketch || !user || !editedScript) return;
+    setSaveError(null);
+    setSaving(true);
+    try {
+      if (isOwner) {
+        const updated = await updateSketch(sketch.id, { script: editedScript });
+        setSketch(updated);
+        setEditedScript(null);
+      } else {
+        const forked = await forkSketch(user.id, { ...sketch, script: editedScript });
+        navigate(`/editor/${forked.id}`);
+      }
+    } catch (e: any) {
+      setSaveError(e?.message ?? 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }, [sketch, user, editedScript, isOwner, navigate]);
+
+  const handleDiscardEdits = useCallback(() => {
+    setEditedScript(null);
+    setSaveError(null);
+  }, []);
 
   const handleLike = useCallback(async () => {
     if (!user || !sketch) return;
@@ -143,7 +183,6 @@ export function SketchView() {
     if (!editPrompt.trim() || !sketch) return;
     if (!user) return; // must be signed in
 
-    const isOwner = user.id === sketch.user_id;
     if (isOwner) {
       // Owner goes directly to editor
       navigate(`/editor/${sketch.id}`);
@@ -158,7 +197,7 @@ export function SketchView() {
         setForking(false);
       }
     }
-  }, [editPrompt, sketch, user, navigate]);
+  }, [editPrompt, sketch, user, isOwner, navigate]);
 
   if (loading) {
     return (
@@ -183,8 +222,6 @@ export function SketchView() {
       </div>
     );
   }
-
-  const isOwner = user?.id === sketch.user_id;
 
   return (
     <div style={styles.container}>
@@ -407,16 +444,55 @@ export function SketchView() {
 
         {/* Script section */}
         <div style={styles.scriptSection}>
-          <div style={styles.sectionLabel}>Satie Script</div>
-          <div style={{ position: 'relative' }}>
-            <SatieScriptViewer script={sketch.script} style={styles.script} />
+          <div style={styles.scriptHeader}>
+            <div style={styles.sectionLabel}>Satie Script</div>
+            {isDirty && (
+              <div style={styles.dirtyControls}>
+                <span style={styles.dirtyBadge}>unsaved edits</span>
+                <button
+                  onClick={handleDiscardEdits}
+                  disabled={saving}
+                  style={styles.discardBtn}
+                >
+                  Discard
+                </button>
+                {user ? (
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    style={styles.saveBtn}
+                  >
+                    {saving
+                      ? 'Saving…'
+                      : isOwner
+                        ? 'Save'
+                        : 'Fork & save'}
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 13, opacity: 0.5 }}>Sign in to save</span>
+                )}
+              </div>
+            )}
+          </div>
+          <div style={styles.editorShell}>
+            <SatieEditor
+              value={currentScript}
+              onChange={setEditedScript}
+              onRun={handlePlay}
+              errors={null}
+            />
+          </div>
+          {saveError && (
+            <div style={{ color: '#8b0000', fontSize: 13, marginTop: 6 }}>{saveError}</div>
+          )}
 
-            {/* Prompt an edit — floating input at bottom of script */}
-            {user && (
-              <div style={styles.editInputWrapper}>
+          {/* Prompt an edit — input below the editor */}
+          <div style={styles.promptRow}>
+            {user ? (
+              <>
                 <input
                   type="text"
-                  placeholder="Prompt an edit"
+                  placeholder="Or prompt an edit — opens the full editor"
                   value={editPrompt}
                   onChange={(e) => setEditPrompt(e.target.value)}
                   onKeyDown={(e) => {
@@ -438,19 +514,16 @@ export function SketchView() {
                     <polyline points="5 12 12 5 19 12" />
                   </svg>
                 </button>
-              </div>
-            )}
-            {!user && (
-              <div style={styles.editInputWrapper}>
-                <div style={{
-                  ...styles.editInput,
-                  opacity: 0.5,
-                  cursor: 'default',
-                  display: 'flex',
-                  alignItems: 'center',
-                }}>
-                  Sign in to edit or fork this sketch
-                </div>
+              </>
+            ) : (
+              <div style={{
+                ...styles.editInput,
+                opacity: 0.5,
+                cursor: 'default',
+                display: 'flex',
+                alignItems: 'center',
+              }}>
+                Sign in to edit or fork this sketch
               </div>
             )}
           </div>
@@ -653,42 +726,73 @@ const styles: Record<string, React.CSSProperties> = {
   scriptSection: {
     marginBottom: '32px',
   },
+  scriptHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '10px',
+    gap: 8,
+  },
   sectionLabel: {
     fontSize: '13px',
     fontWeight: 600,
     textTransform: 'uppercase' as const,
     letterSpacing: '0.08em',
     opacity: 0.25,
-    marginBottom: '10px',
   },
-  script: {
-    fontSize: '14px',
-    fontFamily: "'SF Mono', 'Consolas', monospace",
-    background: '#faf9f6',
-    border: '1px solid #e0ddd4',
-    borderRadius: 12,
-    padding: '16px 16px 64px',
-    overflow: 'auto',
-    maxHeight: 500,
-    whiteSpace: 'pre-wrap' as const,
-    margin: 0,
-    color: '#1a1a1a',
-    lineHeight: 1.6,
-  },
-  editInputWrapper: {
-    position: 'absolute' as const,
-    bottom: 12,
-    left: 12,
-    right: 12,
+  dirtyControls: {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
   },
+  dirtyBadge: {
+    fontSize: 12,
+    fontFamily: "'SF Mono', 'Consolas', monospace",
+    color: '#8b6914',
+    background: '#fefbf0',
+    border: '1px solid #e8d890',
+    borderRadius: 4,
+    padding: '2px 8px',
+  },
+  discardBtn: {
+    padding: '6px 14px',
+    background: 'none',
+    border: '1px solid #d0cdc4',
+    borderRadius: 8,
+    cursor: 'pointer',
+    fontSize: 13,
+    fontFamily: "'Inter', system-ui, sans-serif",
+    color: '#0a0a0a',
+    fontWeight: 500,
+  },
+  saveBtn: {
+    padding: '6px 14px',
+    background: '#0a0a0a',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+    fontSize: 13,
+    fontFamily: "'Inter', system-ui, sans-serif",
+    color: '#faf9f6',
+    fontWeight: 600,
+  },
+  editorShell: {
+    background: '#faf9f6',
+    border: '1px solid #e0ddd4',
+    borderRadius: 12,
+    overflow: 'hidden',
+    height: 420,
+  },
+  promptRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
   editInput: {
     flex: 1,
     padding: '10px 14px',
-    background: 'rgba(244,243,238,0.85)',
-    backdropFilter: 'blur(12px)',
+    background: '#faf9f6',
     border: '1px solid #e0ddd4',
     borderRadius: 10,
     fontSize: '14px',
