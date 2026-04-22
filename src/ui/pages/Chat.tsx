@@ -684,7 +684,7 @@ export function Chat() {
                 <div style={{ fontSize: '12px', opacity: 0.25, marginBottom: 24, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600 }}>
                   from the community
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, maxWidth: 720, width: '100%' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, maxWidth: 680, width: '100%' }}>
                   {featuredSketches.map(sketch => (
                     <button
                       key={sketch.id}
