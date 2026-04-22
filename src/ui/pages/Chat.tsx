@@ -568,7 +568,7 @@ export function Chat() {
                         opacity: 0.85,
                         transition: 'opacity 0.15s, transform 0.15s, border-color 0.15s',
                       }}
-                      onMouseEnter={(e) => { if (!isGenerating) { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = `${theme.text}40`; } }}
+                      onMouseEnter={(e) => { if (!isGenerating) { sfx.hover(); e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = `${theme.text}40`; } }}
                       onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = theme.border; }}
                     >
                       <div style={{ fontWeight: 600, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -704,7 +704,7 @@ export function Chat() {
                         opacity: 0.6,
                         transition: 'opacity 0.15s, transform 0.15s',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                      onMouseEnter={(e) => { sfx.hover(); e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
                       onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; e.currentTarget.style.transform = 'translateY(0)'; }}
                     >
                       <div style={{ fontWeight: 500, fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>

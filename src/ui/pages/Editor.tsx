@@ -665,8 +665,6 @@ export function Editor() {
         onTogglePanel={togglePanel}
         activePopover={activePopover}
         onTogglePopover={togglePopover}
-        sketchTitle={sketchTitle}
-        onSketchTitleChange={setSketchTitle}
         onSave={user ? handleSave : undefined}
         canSave={!!user}
         isSaved={!!currentSketchId}
@@ -680,6 +678,44 @@ export function Editor() {
         position: 'relative',
         overflow: 'hidden',
       }}>
+        {/* Sketch title — editable inline at top-right of workspace */}
+        <div style={{
+          position: 'absolute',
+          top: 12,
+          right: 12,
+          zIndex: 200,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: '#faf9f6',
+          border: '1px solid #d0cdc4',
+          borderRadius: 6,
+          padding: '4px 10px',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+          maxWidth: 320,
+        }}>
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2" style={{ opacity: 0.5, flexShrink: 0 }}>
+            <path d="M2.5 1.5h7l2.5 2.5v8h-10v-10.5z" strokeLinejoin="round"/>
+          </svg>
+          <input
+            value={sketchTitle}
+            onChange={(e) => setSketchTitle(e.target.value)}
+            placeholder="Untitled"
+            title="Sketch title"
+            style={{
+              width: 220,
+              fontSize: '13px',
+              fontFamily: "'Inter', system-ui, sans-serif",
+              color: '#1a3a2a',
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              padding: 0,
+              fontWeight: 500,
+            }}
+          />
+        </div>
+
         {/* Workspace zoom controls */}
         <div style={{
           position: 'absolute',

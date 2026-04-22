@@ -1,4 +1,3 @@
-import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { useSFX } from '../hooks/useSFX';
@@ -22,8 +21,6 @@ interface SidebarProps {
   onTogglePanel: (panel: keyof PanelVisibility) => void;
   activePopover: PopoverType;
   onTogglePopover: (p: 'docs' | 'export' | 'versions') => void;
-  sketchTitle?: string;
-  onSketchTitleChange?: (title: string) => void;
   onSave?: () => void;
   canSave?: boolean;
   isSaved?: boolean;
@@ -43,8 +40,6 @@ export function Sidebar({
   onTogglePanel,
   activePopover,
   onTogglePopover,
-  sketchTitle,
-  onSketchTitleChange,
   onSave,
   canSave,
   isSaved,
@@ -55,12 +50,6 @@ export function Sidebar({
   const { user, signInWithGitHub, signOut } = useAuth();
   const navigate = useNavigate();
   const sfx = useSFX();
-  const [editingTitle, setEditingTitle] = useState(false);
-  const titleInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (editingTitle && titleInputRef.current) titleInputRef.current.focus();
-  }, [editingTitle]);
 
   const formatTime = (t: number) => {
     const mins = Math.floor(t / 60);
@@ -133,54 +122,6 @@ export function Sidebar({
       >
         satie
       </div>
-
-      {/* Sketch title — editable on double click */}
-      {sketchTitle !== undefined && onSketchTitleChange && (
-        editingTitle ? (
-          <input
-            ref={titleInputRef}
-            value={sketchTitle}
-            onChange={(e) => onSketchTitleChange(e.target.value)}
-            onBlur={() => setEditingTitle(false)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditingTitle(false); }}
-            style={{
-              width: 48,
-              fontSize: '16px',
-              fontFamily: "'SF Mono', monospace",
-              color: '#1a3a2a',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: '1px solid #1a3a2a',
-              outline: 'none',
-              textAlign: 'center',
-              padding: '0 0 2px',
-              marginBottom: '8px',
-            }}
-          />
-        ) : (
-          <div
-            onDoubleClick={() => setEditingTitle(true)}
-            title={`${sketchTitle || 'Untitled'} — double-click to rename`}
-            style={{
-              fontSize: '16px',
-              fontFamily: "'SF Mono', monospace",
-              color: '#1a3a2a',
-              opacity: 0.35,
-              writingMode: 'vertical-rl',
-              textOrientation: 'mixed',
-              transform: 'rotate(180deg)',
-              maxHeight: 120,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              cursor: 'text',
-              marginBottom: '8px',
-            }}
-          >
-            {sketchTitle || 'Untitled'}
-          </div>
-        )
-      )}
 
       {/* Play/Stop */}
       <button
