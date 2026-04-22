@@ -160,7 +160,7 @@ export function Sidebar({
         ) : (
           <div
             onDoubleClick={() => setEditingTitle(true)}
-            title="Double-click to rename"
+            title={`${sketchTitle || 'Untitled'} — double-click to rename`}
             style={{
               fontSize: '16px',
               fontFamily: "'SF Mono', monospace",
@@ -169,7 +169,8 @@ export function Sidebar({
               writingMode: 'vertical-rl',
               textOrientation: 'mixed',
               transform: 'rotate(180deg)',
-              maxHeight: 80,
+              maxHeight: 120,
+              whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               cursor: 'text',
