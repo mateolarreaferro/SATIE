@@ -89,11 +89,13 @@ export async function getSketchSamples(sketchId: string): Promise<SketchSample[]
  * Checks IndexedDB cache first, then falls back to Supabase Storage.
  */
 export async function downloadSample(sample: SketchSample): Promise<ArrayBuffer> {
-  // Check local cache first
-  const cached = await getCachedSample(sample.filename);
+  // Key by storage_path (userId/sketchId/clipName) so two sketches with the
+  // same clip name don't collide in the shared IndexedDB cache.
+  const cacheKey = sample.storage_path;
+
+  const cached = await getCachedSample(cacheKey);
   if (cached) return cached;
 
-  // Download from Supabase Storage
   const { data, error } = await supabase.storage
     .from(BUCKET)
     .download(sample.storage_path);
@@ -103,8 +105,7 @@ export async function downloadSample(sample: SketchSample): Promise<ArrayBuffer>
 
   const arrayBuffer = await data.arrayBuffer();
 
-  // Cache locally for next time
-  await cacheSample(sample.filename, arrayBuffer);
+  await cacheSample(cacheKey, arrayBuffer);
 
   return arrayBuffer;
 }

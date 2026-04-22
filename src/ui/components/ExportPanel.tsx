@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { renderOffline, encodeWAV, downloadBlob, type RenderMode, type RenderProgress } from '../../engine/export';
 import type { SatieEngine } from '../../engine';
 
@@ -33,8 +33,30 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
   // Cancel support
   const cancelledRef = useRef(false);
 
+  // Close any open preview AudioContext when the panel unmounts so we don't
+  // leak contexts across repeated renders (browsers cap ~6 per tab).
+  useEffect(() => {
+    return () => {
+      try {
+        previewSourceRef.current?.stop();
+      } catch { /* already stopped */ }
+      previewSourceRef.current = null;
+      if (previewCtxRef.current && previewCtxRef.current.state !== 'closed') {
+        previewCtxRef.current.close().catch(() => {});
+      }
+      previewCtxRef.current = null;
+    };
+  }, []);
+
   const handleExportAudio = useCallback(async () => {
     if (format === 'video') return;
+    // Stop any still-playing preview before we throw away its buffer — otherwise
+    // the source keeps running with no UI to stop it.
+    if (previewSourceRef.current) {
+      try { previewSourceRef.current.stop(); } catch { /* already stopped */ }
+      previewSourceRef.current = null;
+    }
+    setPreviewing(false);
     setExporting(true);
     setError(null);
     setProgress(null);
@@ -75,7 +97,7 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
     } finally {
       setExporting(false);
     }
-  }, [format, script, sampleBuffers, duration, sampleRate, bitDepth]);
+  }, [format, script, sampleBuffers, engineRef, duration, sampleRate]);
 
   const handleCancel = useCallback(() => {
     cancelledRef.current = true;

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { createSketch, getPublicSketches } from '../../lib/sketches';
@@ -127,6 +127,7 @@ export function Chat() {
   const [featuredSketches, setFeaturedSketches] = useState<Sketch[]>([]);
   const [sketchAuthors, setSketchAuthors] = useState<Record<string, Profile>>({});
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
+  const [savingSketchId, setSavingSketchId] = useState<string | null>(null);
   const [mouseLookActive, setMouseLookActive] = useState(false);
   const [showControlsToast, setShowControlsToast] = useState(false);
   const hasShownToast = useRef(false);
@@ -211,8 +212,9 @@ export function Chat() {
     };
   }, [sfx]);
 
-  // Auto-scroll on new messages
-  useEffect(() => {
+  // Auto-scroll on new messages — useLayoutEffect so we read scrollHeight
+  // after the new message has been committed to the DOM.
+  useLayoutEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
@@ -344,13 +346,17 @@ export function Chat() {
     if (!uiState.isPlaying) play();
   }, [isGenerating, user, nextId, loadScript, play, uiState.isPlaying, sendMessage]);
 
-  const handleSaveAsSketch = useCallback(async (script: string, prompt: string) => {
+  const handleSaveAsSketch = useCallback(async (script: string, prompt: string, messageId: string) => {
     if (!user) return;
+    if (savingSketchId) return; // guard re-entry while upload is in flight
+    setSavingSketchId(messageId);
     try {
       const title = prompt.slice(0, 50) || 'untitled';
       const sketch = await createSketch(user.id, title, script);
 
-      // Capture engine audio buffers (including gen audio) and upload as samples
+      // Capture engine audio buffers (including gen audio) and upload as samples.
+      // We await the upload so the editor can load samples from storage on mount —
+      // otherwise the user lands on /editor/:id with silent audio.
       if (engineRef.current) {
         const engineBuffers = engineRef.current.getAudioBuffers();
         if (engineBuffers.size > 0) {
@@ -359,17 +365,20 @@ export function Chat() {
             const wavBlob = encodeWAV(audioBuf, 16);
             sampleMap.set(name, await wavBlob.arrayBuffer());
           }
-          uploadSketchSamples(user.id, sketch.id, sampleMap).catch(e =>
-            console.error('[Chat] Failed to upload samples:', e),
-          );
+          try {
+            await uploadSketchSamples(user.id, sketch.id, sampleMap);
+          } catch (e) {
+            console.error('[Chat] Failed to upload samples:', e);
+          }
         }
       }
 
       navigate(`/editor/${sketch.id}`);
     } catch (e: any) {
       console.error('Failed to save sketch:', e);
+      setSavingSketchId(null);
     }
-  }, [user, navigate, engineRef]);
+  }, [user, navigate, engineRef, savingSketchId]);
 
   const handleRate = useCallback((messageId: string, rating: 1 | -1) => {
     setMessages(prev => prev.map(m => {
@@ -755,7 +764,8 @@ export function Chat() {
                     key={msg.id}
                     message={msg}
                     theme={theme}
-                    onSaveAsSketch={handleSaveAsSketch}
+                    onSaveAsSketch={(script, prompt) => handleSaveAsSketch(script, prompt, msg.id)}
+                    savingSketch={savingSketchId === msg.id}
                     onRate={handleRate}
                     onScriptEdit={handleScriptEdit}
                   />

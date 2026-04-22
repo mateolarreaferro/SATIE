@@ -62,6 +62,10 @@ export function SketchView() {
 
   useEffect(() => {
     if (!id) return;
+    // React Router reuses this component when :id changes — reset the
+    // per-sketch sample-load guard so the new sketch's samples are fetched.
+    samplesLoaded.current = false;
+    setSamplesReady(false);
     getPublicSketch(id)
       .then(async (s) => {
         if (s) {
@@ -160,16 +164,17 @@ export function SketchView() {
   }, [user, sketch, liked]);
 
   const handleFork = useCallback(async () => {
-    if (!user || !sketch) return;
+    if (!user || !sketch || forking) return;
+    setForking(true);
     try {
-      setForking(true);
       const forked = await forkSketch(user.id, sketch);
       navigate(`/editor/${forked.id}`);
     } catch (e) {
       console.error('Failed to fork sketch:', e);
+    } finally {
       setForking(false);
     }
-  }, [user, sketch, navigate]);
+  }, [user, sketch, forking, navigate]);
 
   const handleShare = useCallback(() => {
     const url = window.location.href;
@@ -182,22 +187,24 @@ export function SketchView() {
   const handleEditSubmit = useCallback(async () => {
     if (!editPrompt.trim() || !sketch) return;
     if (!user) return; // must be signed in
+    if (forking) return;
 
     if (isOwner) {
       // Owner goes directly to editor
       navigate(`/editor/${sketch.id}`);
     } else {
       // Non-owner: fork first, then open in editor
+      setForking(true);
       try {
-        setForking(true);
         const forked = await forkSketch(user.id, sketch);
         navigate(`/editor/${forked.id}`);
       } catch (e) {
         console.error('Failed to fork for edit:', e);
+      } finally {
         setForking(false);
       }
     }
-  }, [editPrompt, sketch, user, isOwner, navigate]);
+  }, [editPrompt, sketch, user, isOwner, forking, navigate]);
 
   if (loading) {
     return (

@@ -19,6 +19,7 @@ interface ChatMessageProps {
   message: ChatMessageData;
   theme: Theme;
   onSaveAsSketch?: (script: string, prompt: string) => void;
+  savingSketch?: boolean;
   onRate?: (messageId: string, rating: 1 | -1) => void;
   onScriptEdit?: (messageId: string, newScript: string) => void;
 }
@@ -356,7 +357,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
   );
 }
 
-export function ChatMessage({ message, theme, onSaveAsSketch, onRate, onScriptEdit }: ChatMessageProps) {
+export function ChatMessage({ message, theme, onSaveAsSketch, savingSketch, onRate, onScriptEdit }: ChatMessageProps) {
   if (message.role === 'user') {
     return (
       <div style={{
@@ -474,6 +475,7 @@ export function ChatMessage({ message, theme, onSaveAsSketch, onRate, onScriptEd
                 {onSaveAsSketch && (
                   <button
                     onClick={() => onSaveAsSketch(message.script!, message.content)}
+                    disabled={savingSketch}
                     style={{
                       padding: '4px 12px',
                       fontSize: '13px',
@@ -481,21 +483,21 @@ export function ChatMessage({ message, theme, onSaveAsSketch, onRate, onScriptEd
                       background: 'none',
                       border: `1px solid ${theme.border}`,
                       borderRadius: 6,
-                      cursor: 'pointer',
+                      cursor: savingSketch ? 'wait' : 'pointer',
                       color: theme.text,
-                      opacity: 0.6,
+                      opacity: savingSketch ? 0.4 : 0.6,
                       transition: 'opacity 0.15s',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 5,
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6'; }}
+                    onMouseEnter={(e) => { if (!savingSketch) e.currentTarget.style.opacity = '1'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = savingSketch ? '0.4' : '0.6'; }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
                     </svg>
-                    save as sketch
+                    {savingSketch ? 'saving…' : 'save as sketch'}
                   </button>
                 )}
 
