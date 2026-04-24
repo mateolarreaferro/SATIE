@@ -66,21 +66,26 @@ export function Panel({
   const startRect = useRef({ x: 0, y: 0, w: 0, h: 0, scale: 1 });
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Clamp panel into viewport so it's always reachable (at least 40px visible).
-  // Clamp in layout-pixel space to match the ancestor's CSS scale (workspace zoom).
-  const clampToViewport = useCallback(() => {
+  // Compute clamp bounds in the panel's own layout coord system (which is the
+  // scaled workspace's pre-transform space). Using parentElement.offsetWidth/
+  // Height avoids every CSS transform / zoom / browser-chrome pitfall of
+  // deriving from window.innerWidth/innerHeight.
+  const getClampBounds = useCallback(() => {
     const margin = 40;
-    const el = panelRef.current;
-    const rect = el?.getBoundingClientRect();
-    const offsetW = el?.offsetWidth ?? 1;
-    const scale = rect && offsetW > 0 ? (rect.width / offsetW) || 1 : 1;
-    const maxX = window.innerWidth / scale - margin;
-    const maxY = window.innerHeight / scale - margin;
+    const parent = panelRef.current?.parentElement;
+    const pw = parent?.offsetWidth ?? window.innerWidth;
+    const ph = parent?.offsetHeight ?? window.innerHeight;
+    return { margin, maxX: pw - margin, maxY: ph - margin };
+  }, []);
+
+  // Clamp panel into viewport so it's always reachable (at least 40px visible).
+  const clampToViewport = useCallback(() => {
+    const { margin, maxX, maxY } = getClampBounds();
     setPos(p => ({
       x: Math.max(-size.w + margin, Math.min(maxX, p.x)),
       y: Math.max(0, Math.min(maxY, p.y)),
     }));
-  }, [size.w]);
+  }, [size.w, getClampBounds]);
 
   // Clamp on mount and window resize
   useEffect(() => {
@@ -175,12 +180,7 @@ export function Panel({
         // screen delta ÷ scale → layout delta (px in parent's coord system)
         const layoutDx = (e.clientX - dragStart.current.mouseX) / s;
         const layoutDy = (e.clientY - dragStart.current.mouseY) / s;
-        const margin = 40;
-        // Clamp bounds in layout-pixel space: the workspace extends beyond the
-        // viewport when zoom < 1 (width/height = 100/zoom%), so dividing window
-        // dimensions by the ancestor scale gives the true clamp range.
-        const maxX = window.innerWidth / s - margin;
-        const maxY = window.innerHeight / s - margin;
+        const { margin, maxX, maxY } = getClampBounds();
         pendingX = Math.max(-size.w + margin, Math.min(maxX, dragStart.current.posX + layoutDx));
         pendingY = Math.max(0, Math.min(maxY, dragStart.current.posY + layoutDy));
         schedule();
