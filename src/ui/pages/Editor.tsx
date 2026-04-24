@@ -175,15 +175,21 @@ const PatchCord = memo(function PatchCord({ target }: { target: AITarget }) {
         const targetEl = document.querySelector(`[data-panel-id="${targetId}"]`) as HTMLElement | null;
 
         if (aiEl && targetEl) {
-          const aiRect = aiEl.getBoundingClientRect();
-          const tRect = targetEl.getBoundingClientRect();
-          const parent = aiEl.parentElement;
-          const pRect = parent?.getBoundingClientRect() ?? { left: 0, top: 0 };
+          // Use offset* (pre-transform layout coords) so the cord aligns with the
+          // panels inside the CSS-scaled workspace. getBoundingClientRect returns
+          // post-transform screen coords and would double-scale inside the SVG.
+          const aiLeft = aiEl.offsetLeft;
+          const aiTop = aiEl.offsetTop;
+          const aiH = aiEl.offsetHeight;
+          const tLeft = targetEl.offsetLeft;
+          const tTop = targetEl.offsetTop;
+          const tW = targetEl.offsetWidth;
+          const tH = targetEl.offsetHeight;
 
-          const x1 = aiRect.left - pRect.left;
-          const y1 = aiRect.top - pRect.top + aiRect.height * 0.35;
-          const x2 = tRect.right - pRect.left;
-          const y2 = tRect.top - pRect.top + tRect.height * 0.5;
+          const x1 = aiLeft;
+          const y1 = aiTop + aiH * 0.35;
+          const x2 = tLeft + tW;
+          const y2 = tTop + tH * 0.5;
 
           const dx = Math.abs(x2 - x1) * 0.5;
           setPath(`M${x1},${y1} C${x1 - dx},${y1} ${x2 + dx},${y2} ${x2},${y2}`);
@@ -265,11 +271,11 @@ export function Editor() {
   const [generatingTrajectory, setGeneratingTrajectory] = useState<string | null>(null);
   const [communitySampleNames, setCommunitySampleNames] = useState<string[]>([]);
   const [spaceBgColor, setSpaceBgColor] = useState(() => {
-    // Per-sketch color, keyed by sketch ID; fall back to default
+    // Per-sketch color, keyed by sketch ID; fall back to black default
     if (sketchId) {
-      return localStorage.getItem(`satie-bg-${sketchId}`) || '#f4f3ee';
+      return localStorage.getItem(`satie-bg-${sketchId}`) || '#000000';
     }
-    return '#f4f3ee';
+    return '#000000';
   });
   const handleBgColorChange = useCallback((color: string) => {
     setSpaceBgColor(color);

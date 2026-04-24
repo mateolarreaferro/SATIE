@@ -111,13 +111,35 @@ export function Panel({
   useEffect(() => {
     if (!isDragging && !resizeEdge) return;
 
+    // Mouse moves fire faster than requestAnimationFrame; write the latest
+    // position directly to the element's style and coalesce state commits to
+    // a single rAF per frame to avoid re-render thrash during drag.
+    let pendingX = pos.x, pendingY = pos.y, pendingW = size.w, pendingH = size.h;
+    let rafPending = false;
+    const applyStyle = () => {
+      rafPending = false;
+      const el = panelRef.current;
+      if (!el) return;
+      el.style.left = `${pendingX}px`;
+      el.style.top = `${pendingY}px`;
+      if (resizeEdge) {
+        el.style.width = `${pendingW}px`;
+        el.style.height = `${pendingH}px`;
+      }
+    };
+    const schedule = () => {
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(applyStyle);
+      }
+    };
+
     const onMove = (e: MouseEvent) => {
       if (isDragging) {
         const margin = 40;
-        setPos({
-          x: Math.max(-size.w + margin, Math.min(window.innerWidth - margin, e.clientX - dragOffset.current.x)),
-          y: Math.max(0, Math.min(window.innerHeight - margin, e.clientY - dragOffset.current.y)),
-        });
+        pendingX = Math.max(-size.w + margin, Math.min(window.innerWidth - margin, e.clientX - dragOffset.current.x));
+        pendingY = Math.max(0, Math.min(window.innerHeight - margin, e.clientY - dragOffset.current.y));
+        schedule();
       }
       if (resizeEdge) {
         const dx = e.clientX - dragOffset.current.x;
@@ -139,12 +161,19 @@ export function Panel({
           newH = r.h - dh;
         }
 
-        setPos({ x: newX, y: newY });
-        setSize({ w: newW, h: newH });
+        pendingX = newX; pendingY = newY; pendingW = newW; pendingH = newH;
+        schedule();
       }
     };
 
-    const onUp = () => { setIsDragging(false); setResizeEdge(null); };
+    const onUp = () => {
+      // Commit the final DOM-written position back into state so persistence,
+      // clamping, and re-renders pick up the new layout.
+      setPos({ x: pendingX, y: pendingY });
+      if (resizeEdge) setSize({ w: pendingW, h: pendingH });
+      setIsDragging(false);
+      setResizeEdge(null);
+    };
 
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -152,6 +181,9 @@ export function Panel({
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
+    // pos/size intentionally omitted — we seed pending values at effect start
+    // and drive updates via refs + direct DOM writes to avoid re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDragging, resizeEdge, minWidth, minHeight]);
 
   const EDGE = 8;
