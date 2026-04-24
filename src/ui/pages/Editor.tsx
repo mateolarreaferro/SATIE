@@ -175,21 +175,22 @@ const PatchCord = memo(function PatchCord({ target }: { target: AITarget }) {
         const targetEl = document.querySelector(`[data-panel-id="${targetId}"]`) as HTMLElement | null;
 
         if (aiEl && targetEl) {
-          // Use offset* (pre-transform layout coords) so the cord aligns with the
-          // panels inside the CSS-scaled workspace. getBoundingClientRect returns
-          // post-transform screen coords and would double-scale inside the SVG.
-          const aiLeft = aiEl.offsetLeft;
-          const aiTop = aiEl.offsetTop;
-          const aiH = aiEl.offsetHeight;
-          const tLeft = targetEl.offsetLeft;
-          const tTop = targetEl.offsetTop;
-          const tW = targetEl.offsetWidth;
-          const tH = targetEl.offsetHeight;
+          // Panels use transform during drag, so offsetLeft/Top stay at the
+          // pre-drag layout position. Read getBoundingClientRect to follow the
+          // visual position, then divide by the parent's CSS scale to convert
+          // from screen pixels back into the SVG's layout coord space.
+          const parent = aiEl.parentElement;
+          const pRect = parent?.getBoundingClientRect() ?? new DOMRect(0, 0, 1, 1);
+          const pOffsetW = parent?.offsetWidth || 1;
+          const scale = pRect.width / pOffsetW || 1;
 
-          const x1 = aiLeft;
-          const y1 = aiTop + aiH * 0.35;
-          const x2 = tLeft + tW;
-          const y2 = tTop + tH * 0.5;
+          const aiRect = aiEl.getBoundingClientRect();
+          const tRect = targetEl.getBoundingClientRect();
+
+          const x1 = (aiRect.left - pRect.left) / scale;
+          const y1 = (aiRect.top - pRect.top + aiRect.height * 0.35) / scale;
+          const x2 = (tRect.right - pRect.left) / scale;
+          const y2 = (tRect.top - pRect.top + tRect.height * 0.5) / scale;
 
           const dx = Math.abs(x2 - x1) * 0.5;
           setPath(`M${x1},${y1} C${x1 - dx},${y1} ${x2 + dx},${y2} ${x2},${y2}`);

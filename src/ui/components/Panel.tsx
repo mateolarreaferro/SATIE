@@ -62,8 +62,8 @@ export function Panel({
   const [size, setSize] = useState({ w: saved.current?.w ?? defaultWidth, h: saved.current?.h ?? defaultHeight });
   const [isDragging, setIsDragging] = useState(false);
   const [resizeEdge, setResizeEdge] = useState<string | null>(null);
-  const dragOffset = useRef({ x: 0, y: 0 });
-  const startRect = useRef({ x: 0, y: 0, w: 0, h: 0 });
+  const dragStart = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0, scale: 1 });
+  const startRect = useRef({ x: 0, y: 0, w: 0, h: 0, scale: 1 });
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Clamp panel into viewport so it's always reachable (at least 40px visible)
@@ -93,36 +93,64 @@ export function Panel({
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [panelId, pos.x, pos.y, size.w, size.h]);
 
+  // Read the current CSS transform scale applied by ancestor(s) — needed so
+  // screen-pixel mouse deltas map to layout-pixel positions inside the scaled
+  // workspace. Without this, panel drag drifts relative to the cursor when the
+  // workspace is zoomed.
+  const getAncestorScale = useCallback((): number => {
+    const el = panelRef.current;
+    if (!el) return 1;
+    const rect = el.getBoundingClientRect();
+    const w = el.offsetWidth;
+    if (w <= 0) return 1;
+    const s = rect.width / w;
+    return s > 0.001 ? s : 1;
+  }, []);
+
   const onDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-edge]')) return;
+    const scale = getAncestorScale();
+    dragStart.current = { mouseX: e.clientX, mouseY: e.clientY, posX: pos.x, posY: pos.y, scale };
+    // Promote to a composite layer so moves are GPU-only — no layout/repaint.
+    const el = panelRef.current;
+    if (el) el.style.willChange = 'transform';
     setIsDragging(true);
-    dragOffset.current = { x: e.clientX - pos.x, y: e.clientY - pos.y };
     e.preventDefault();
-  }, [pos]);
+  }, [pos, getAncestorScale]);
 
   const onEdgeStart = useCallback((edge: string) => (e: React.MouseEvent) => {
+    const scale = getAncestorScale();
+    dragStart.current = { mouseX: e.clientX, mouseY: e.clientY, posX: pos.x, posY: pos.y, scale };
+    startRect.current = { x: pos.x, y: pos.y, w: size.w, h: size.h, scale };
     setResizeEdge(edge);
-    dragOffset.current = { x: e.clientX, y: e.clientY };
-    startRect.current = { x: pos.x, y: pos.y, w: size.w, h: size.h };
     e.preventDefault();
     e.stopPropagation();
-  }, [pos, size]);
+  }, [pos, size, getAncestorScale]);
 
   useEffect(() => {
     if (!isDragging && !resizeEdge) return;
 
-    // Mouse moves fire faster than requestAnimationFrame; write the latest
-    // position directly to the element's style and coalesce state commits to
-    // a single rAF per frame to avoid re-render thrash during drag.
+    // Drag path: apply CSS transform instead of touching left/top. Transforms
+    // don't invalidate layout and the element is promoted to its own composite
+    // layer (via will-change), so moves are essentially free — no repaint of
+    // Monaco/WebGL children. We commit the final position to state on mouseup.
+    //
+    // Resize path: width/height still change layout (content reflows), so we
+    // just write directly to the element and coalesce via rAF.
     let pendingX = pos.x, pendingY = pos.y, pendingW = size.w, pendingH = size.h;
     let rafPending = false;
     const applyStyle = () => {
       rafPending = false;
       const el = panelRef.current;
       if (!el) return;
-      el.style.left = `${pendingX}px`;
-      el.style.top = `${pendingY}px`;
-      if (resizeEdge) {
+      if (isDragging) {
+        // Panel's own transform composes with the ancestor scale, so we
+        // translate in layout-pixel space (pendingX - posX). The visible
+        // movement is (pendingX - posX) * ancestorScale = screen-pixel delta.
+        el.style.transform = `translate3d(${pendingX - pos.x}px, ${pendingY - pos.y}px, 0)`;
+      } else if (resizeEdge) {
+        el.style.left = `${pendingX}px`;
+        el.style.top = `${pendingY}px`;
         el.style.width = `${pendingW}px`;
         el.style.height = `${pendingH}px`;
       }
@@ -136,14 +164,19 @@ export function Panel({
 
     const onMove = (e: MouseEvent) => {
       if (isDragging) {
+        const s = dragStart.current.scale;
+        // screen delta ÷ scale → layout delta (px in parent's coord system)
+        const layoutDx = (e.clientX - dragStart.current.mouseX) / s;
+        const layoutDy = (e.clientY - dragStart.current.mouseY) / s;
         const margin = 40;
-        pendingX = Math.max(-size.w + margin, Math.min(window.innerWidth - margin, e.clientX - dragOffset.current.x));
-        pendingY = Math.max(0, Math.min(window.innerHeight - margin, e.clientY - dragOffset.current.y));
+        pendingX = Math.max(-size.w + margin, Math.min(window.innerWidth - margin, dragStart.current.posX + layoutDx));
+        pendingY = Math.max(0, Math.min(window.innerHeight - margin, dragStart.current.posY + layoutDy));
         schedule();
       }
       if (resizeEdge) {
-        const dx = e.clientX - dragOffset.current.x;
-        const dy = e.clientY - dragOffset.current.y;
+        const s = startRect.current.scale;
+        const dx = (e.clientX - dragStart.current.mouseX) / s;
+        const dy = (e.clientY - dragStart.current.mouseY) / s;
         const r = startRect.current;
 
         let newX = r.x, newY = r.y, newW = r.w, newH = r.h;
@@ -167,8 +200,15 @@ export function Panel({
     };
 
     const onUp = () => {
-      // Commit the final DOM-written position back into state so persistence,
-      // clamping, and re-renders pick up the new layout.
+      const el = panelRef.current;
+      if (el && isDragging) {
+        // Atomically swap transform → left/top so there's no visual jump
+        // before React re-renders with the new state.
+        el.style.left = `${pendingX}px`;
+        el.style.top = `${pendingY}px`;
+        el.style.transform = '';
+        el.style.willChange = '';
+      }
       setPos({ x: pendingX, y: pendingY });
       if (resizeEdge) setSize({ w: pendingW, h: pendingH });
       setIsDragging(false);
@@ -181,8 +221,10 @@ export function Panel({
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-    // pos/size intentionally omitted — we seed pending values at effect start
-    // and drive updates via refs + direct DOM writes to avoid re-renders.
+    // pos/size intentionally omitted — we capture the starting values at
+    // drag/resize start (in dragStart.current / startRect.current) and never
+    // re-read them during the move; including them would re-run the effect
+    // on every state commit and detach the listeners mid-drag.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDragging, resizeEdge, minWidth, minHeight]);
 
