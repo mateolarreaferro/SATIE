@@ -742,6 +742,20 @@ export function Chat() {
               </div>
             </div>
 
+            {/* Controls hint — sits inline above the input so it never
+                overlaps the prompt bar at any input height. */}
+            {hasActiveTracks && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'flex-start',
+                paddingLeft: 20,
+                paddingBottom: 8,
+                pointerEvents: 'none',
+              }}>
+                <ControlsHint position={{ position: 'static' }} />
+              </div>
+            )}
+
             {/* Input bar */}
             <ChatInput
               onSend={sendMessage}
@@ -750,10 +764,6 @@ export function Chat() {
             />
           </>
         )}
-
-        {/* Unified controls hint — same pill rendered inside SpatialViewport
-            for the editor's Space panel, so the gesture set is identical. */}
-        {hasActiveTracks && <ControlsHint />}
       </div>
     </div>
   );

@@ -318,7 +318,11 @@ export function SketchView() {
     );
   }
 
-  const viewportBg = bgColor ?? theme.bg;
+  // Sketch bg must NOT track the viewer's page theme — switching light/dark
+  // would otherwise repaint the canvas mid-view. Fall back to the Editor's
+  // initial default so sketches authored without an explicit @bg look the same
+  // here as in the editor.
+  const viewportBg = bgColor ?? '#000000';
   const isDark = resolvedMode === 'dark';
 
   return (
@@ -492,15 +496,17 @@ export function SketchView() {
             </button>
           )}
 
-          {/* Bottom-left overlay controls */}
+          {/* Top-right overlay controls — moved out of the way so the
+              ControlsHint pill can sit cleanly along the bottom edge. */}
           <div style={{
             position: 'absolute',
-            bottom: 12,
-            left: 12,
+            top: 12,
+            right: 12,
             display: 'flex',
             alignItems: 'center',
             gap: 8,
             flexWrap: 'wrap',
+            justifyContent: 'flex-end',
           }}>
             <Pill
               variant="overlay"

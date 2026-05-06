@@ -45,9 +45,11 @@ export function Embed() {
     }
   }, [sketch, uiState.isPlaying, loadScript, play, stop]);
 
-  // Extract @bg metadata from script (preserves author's chosen viewport bg) — fall back to theme bg.
+  // Extract @bg metadata from script (preserves author's chosen viewport bg).
+  // Fall back to the Editor's initial default — embedding the player on a
+  // light page must not repaint the sketch's canvas to match.
   const bgMatch = sketch?.script.match(/^- @bg (#[0-9a-fA-F]{6})/m) ?? sketch?.script.match(/^# @bg (#[0-9a-fA-F]{6})/m);
-  const viewportBg = bgMatch?.[1] ?? theme.bg;
+  const viewportBg = bgMatch?.[1] ?? '#000000';
 
   const containerStyle: React.CSSProperties = {
     width: '100vw',
