@@ -8,7 +8,7 @@ import { getProfile } from '../../lib/profiles';
 import { generateCode } from '../../lib/aiGenerate';
 import { createFeedbackEntry, saveFeedback, updateFeedback } from '../../lib/feedbackStore';
 import { createProvider, checkBudget } from '../../lib/aiProvider';
-import { useDayNightCycle } from '../hooks/useDayNightCycle';
+import { useTheme } from '../theme/ThemeContext';
 import { useSFX } from '../hooks/useSFX';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { useBackgroundMusic, stopBackgroundMusic } from '../hooks/useBackgroundMusic';
@@ -21,6 +21,43 @@ import type { Sketch, Profile } from '../../lib/supabase';
 import { downloadCommunitySampleByName } from '../../lib/communitySamples';
 import { findCommunityMatch } from '../../lib/communitySearch';
 import { getPreferCommunitySamples } from '../../lib/userSettings';
+
+/** Stop-words to strip from the trailing edge of an auto-generated title. */
+const TITLE_TRAILING_STOPWORDS = new Set([
+  'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for',
+  'with', 'and', 'or', 'but', 'into', 'over', 'under',
+  'from', 'by', 'as', 'is', 'are', 'was', 'were',
+]);
+
+/**
+ * Generate a clean sketch title from a free-form prompt.
+ * Trims whitespace, walks back to the last word boundary so we never end
+ * mid-word, drops dangling articles/prepositions, and capitalizes the first
+ * letter. Falls back to 'Untitled sketch' when nothing useful is left.
+ */
+function cleanSketchTitle(prompt: string): string {
+  const MAX = 60;
+  let raw = prompt.trim();
+  if (!raw) return 'Untitled sketch';
+
+  if (raw.length > MAX) {
+    raw = raw.slice(0, MAX);
+    const lastSpace = raw.lastIndexOf(' ');
+    if (lastSpace > 20) raw = raw.slice(0, lastSpace);
+  }
+  raw = raw.replace(/[\s.,;:!?\-—–]+$/g, '').trim();
+  if (!raw) return 'Untitled sketch';
+
+  // Drop dangling stop-words.
+  let parts = raw.split(/\s+/);
+  while (parts.length > 1 && TITLE_TRAILING_STOPWORDS.has(parts[parts.length - 1].toLowerCase())) {
+    parts.pop();
+  }
+  raw = parts.join(' ');
+  if (!raw) return 'Untitled sketch';
+
+  return raw[0].toUpperCase() + raw.slice(1);
+}
 
 const SUGGESTIONS = [
   { title: 'Forest at dawn', desc: 'birds calling, wind through leaves, a distant stream', icon: (c: string) => (
@@ -113,7 +150,7 @@ endgroup
 export function Chat() {
   const navigate = useNavigate();
   const { user, signInWithGitHub, signInWithGoogle } = useAuth();
-  const { mode, theme, setMode } = useDayNightCycle();
+  const { mode, theme, setMode } = useTheme();
   const { uiState, tracksRef, engine: engineRef, loadScript, play, stop, setListenerPosition, setListenerOrientation, setOnMissingBuffer, setOnSearchCommunity, setPreferCommunity } = useSatieEngine();
   const sfx = useSFX();
 
@@ -351,7 +388,7 @@ export function Chat() {
     if (savingSketchId) return; // guard re-entry while upload is in flight
     setSavingSketchId(messageId);
     try {
-      const title = prompt.slice(0, 50) || 'untitled';
+      const title = cleanSketchTitle(prompt);
       const sketch = await createSketch(user.id, title, script);
 
       // Capture engine audio buffers (including gen audio) and upload as samples.

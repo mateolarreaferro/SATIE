@@ -3,10 +3,14 @@ import { useParams } from 'react-router-dom';
 import { getPublicSketch } from '../../lib/sketches';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { SpatialViewport } from '../components/SpatialViewport';
+import { useTheme } from '../theme/ThemeContext';
+import { Spinner } from '../components/primitives';
+import { RADIUS, FONT } from '../theme/tokens';
 import type { Sketch } from '../../lib/supabase';
 
 export function Embed() {
   const { id } = useParams<{ id: string }>();
+  const { theme } = useTheme();
   const [sketch, setSketch] = useState<Sketch | null>(null);
   const [loading, setLoading] = useState(true);
   const [started, setStarted] = useState(false);
@@ -40,40 +44,121 @@ export function Embed() {
     }
   }, [sketch, uiState.isPlaying, loadScript, play, stop]);
 
+  // Extract @bg metadata from script (preserves author's chosen viewport bg) — fall back to theme bg.
+  const bgMatch = sketch?.script.match(/^- @bg (#[0-9a-fA-F]{6})/m) ?? sketch?.script.match(/^# @bg (#[0-9a-fA-F]{6})/m);
+  const viewportBg = bgMatch?.[1] ?? theme.bg;
+
+  const containerStyle: React.CSSProperties = {
+    width: '100vw',
+    height: '100vh',
+    position: 'relative',
+    overflow: 'hidden',
+    background: theme.bg,
+    margin: 0,
+    padding: 0,
+  };
+
   if (loading) {
-    return <div style={styles.container}><div style={styles.loadingText}>loading...</div></div>;
+    return (
+      <div style={{ ...containerStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Spinner size={24} />
+      </div>
+    );
   }
 
   if (!sketch) {
-    return <div style={styles.container}><div style={styles.loadingText}>not found</div></div>;
+    return (
+      <div style={{ ...containerStyle, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ color: theme.textMuted, fontSize: FONT.size.md, fontFamily: "'Inter', system-ui, sans-serif" }}>
+          not found
+        </span>
+      </div>
+    );
   }
 
   return (
-    <div style={styles.container}>
-      {/* Viewport fills the embed */}
+    <div style={containerStyle}>
       <SpatialViewport
         tracksRef={tracksRef}
-        bgColor="#f4f3ee"
+        bgColor={viewportBg}
         onListenerMove={setListenerPosition}
         onListenerRotate={setListenerOrientation}
       />
 
       {/* Play button overlay */}
       {!started && (
-        <div style={styles.overlay} onClick={handlePlay}>
-          <div style={styles.playCircle}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="#faf9f6">
+        <button
+          onClick={handlePlay}
+          aria-label={`Play ${sketch.title}`}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            background: theme.overlayBg,
+            backdropFilter: 'blur(4px)',
+            zIndex: 10,
+            border: 'none',
+            color: theme.overlayText,
+            padding: 0,
+          }}
+        >
+          <span style={{
+            width: 56,
+            height: 56,
+            borderRadius: 28,
+            background: theme.overlayText,
+            color: theme.overlayBg,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingLeft: 3,
+            marginBottom: 12,
+          }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
               <polygon points="8,5 20,12 8,19" />
             </svg>
-          </div>
-          <div style={styles.title}>{sketch.title}</div>
-        </div>
+          </span>
+          <span style={{
+            fontSize: FONT.size.md,
+            fontWeight: FONT.weight.semibold,
+            fontFamily: "'Inter', system-ui, sans-serif",
+            color: theme.overlayText,
+            opacity: 0.85,
+          }}>
+            {sketch.title}
+          </span>
+        </button>
       )}
 
-      {/* Stop button (small, bottom left) */}
+      {/* Stop button */}
       {started && uiState.isPlaying && (
-        <button onClick={handlePlay} style={styles.stopBtn}>
-          <svg width="10" height="10" viewBox="0 0 10 10" fill="#faf9f6">
+        <button
+          onClick={handlePlay}
+          aria-label="Stop playback"
+          style={{
+            position: 'absolute',
+            bottom: 12,
+            left: 12,
+            width: 28,
+            height: 28,
+            borderRadius: 14,
+            background: theme.overlayBg,
+            color: theme.overlayText,
+            border: `1px solid ${theme.overlayBorder}`,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: 0.85,
+            zIndex: 10,
+            backdropFilter: 'blur(6px)',
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
             <rect x="1" y="1" width="8" height="8" />
           </svg>
         </button>
@@ -84,91 +169,25 @@ export function Embed() {
         href={`${window.location.origin}/s/${sketch.id}`}
         target="_blank"
         rel="noopener noreferrer"
-        style={styles.watermark}
+        aria-label="Made with Satie — open sketch"
+        style={{
+          position: 'absolute',
+          bottom: 8,
+          right: 12,
+          fontSize: FONT.size.md,
+          fontWeight: 700,
+          fontFamily: "'Inter', system-ui, sans-serif",
+          color: theme.text,
+          opacity: 0.25,
+          textDecoration: 'none',
+          letterSpacing: '0.04em',
+          zIndex: 10,
+          padding: '4px 8px',
+          borderRadius: RADIUS.sm,
+        }}
       >
         satie
       </a>
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    width: '100vw',
-    height: '100vh',
-    position: 'relative',
-    overflow: 'hidden',
-    background: '#f4f3ee',
-    margin: 0,
-    padding: 0,
-  },
-  loadingText: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    fontSize: '16px',
-    fontFamily: "'Inter', system-ui, sans-serif",
-    opacity: 0.4,
-    color: '#0a0a0a',
-  },
-  overlay: {
-    position: 'absolute',
-    inset: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    background: 'rgba(244, 243, 238, 0.6)',
-    backdropFilter: 'blur(2px)',
-    zIndex: 10,
-  },
-  playCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    background: '#0a0a0a',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingLeft: 3,
-    marginBottom: 12,
-  },
-  title: {
-    fontSize: '15px',
-    fontWeight: 600,
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#0a0a0a',
-    opacity: 0.7,
-  },
-  stopBtn: {
-    position: 'absolute',
-    bottom: 12,
-    left: 12,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    background: '#0a0a0a',
-    border: 'none',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    opacity: 0.6,
-    zIndex: 10,
-  },
-  watermark: {
-    position: 'absolute',
-    bottom: 8,
-    right: 12,
-    fontSize: '15px',
-    fontWeight: 700,
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#0a0a0a',
-    opacity: 0.15,
-    textDecoration: 'none',
-    letterSpacing: '0.04em',
-    zIndex: 10,
-  },
-};

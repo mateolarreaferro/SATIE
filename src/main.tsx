@@ -2,6 +2,7 @@ import { StrictMode, lazy, Suspense, useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './lib/AuthContext';
+import { ThemeProvider } from './ui/theme/ThemeContext';
 import { SplashScreen } from './ui/components/SplashScreen';
 import { Chat } from './ui/pages/Chat';
 import { Editor } from './ui/pages/Editor';
@@ -13,6 +14,7 @@ const SketchView = lazy(() => import('./ui/pages/SketchView').then(m => ({ defau
 const Embed = lazy(() => import('./ui/pages/Embed').then(m => ({ default: m.Embed })));
 const UserProfile = lazy(() => import('./ui/pages/UserProfile').then(m => ({ default: m.UserProfile })));
 const Library = lazy(() => import('./ui/pages/Library').then(m => ({ default: m.Library })));
+const NotFound = lazy(() => import('./ui/pages/NotFound').then(m => ({ default: m.NotFound })));
 
 function App() {
   const [splashDone, setSplashDone] = useState(false);
@@ -41,6 +43,7 @@ function App() {
         <Route path="/embed/:id" element={<Embed />} />
         <Route path="/library" element={<Library />} />
         <Route path="/u/:username" element={<UserProfile />} />
+        <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>
   );
@@ -50,7 +53,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <App />
+        <ThemeProvider>
+          <App />
+        </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

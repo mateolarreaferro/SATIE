@@ -1,4 +1,5 @@
 import { useState, memo } from 'react';
+import { useTheme } from '../theme/ThemeContext';
 
 interface Section {
   title: string;
@@ -313,6 +314,7 @@ const contentStyle: React.CSSProperties = {
 };
 
 export const DocsPanel = memo(function DocsPanel() {
+  const { theme } = useTheme();
   const [activeSection, setActiveSection] = useState('quickstart');
 
   const section = SECTIONS.find(s => s.id === activeSection) ?? SECTIONS[0];
@@ -343,6 +345,7 @@ export const DocsPanel = memo(function DocsPanel() {
 // ── Minimal markdown renderer ────────────────────────────────
 
 function MarkdownRenderer({ content }: { content: string }) {
+  const { theme } = useTheme();
   const lines = content.split('\n');
   const elements: React.ReactNode[] = [];
   let i = 0;
@@ -353,7 +356,7 @@ function MarkdownRenderer({ content }: { content: string }) {
     // Heading
     if (line.startsWith('# ')) {
       elements.push(
-        <h2 key={i} style={{ fontSize: '16px', fontWeight: 600, color: '#1a3a2a', margin: '0 0 12px', letterSpacing: '-0.01em' }}>
+        <h2 key={i} style={{ fontSize: '16px', fontWeight: 600, color: theme.accent, margin: '0 0 12px', letterSpacing: '-0.01em' }}>
           {line.slice(2)}
         </h2>
       );
@@ -455,6 +458,7 @@ function InlineMarkdown({ text }: { text: string }) {
 }
 
 function SimpleTable({ lines }: { lines: string[] }) {
+  const { theme } = useTheme();
   // Parse markdown table: | h1 | h2 | ... then |---| then rows
   const parseRow = (line: string) =>
     line.split('|').slice(1, -1).map(c => c.trim());
@@ -480,7 +484,7 @@ function SimpleTable({ lines }: { lines: string[] }) {
               padding: '4px 8px',
               borderBottom: '1.5px solid #d0cdc4',
               fontWeight: 600,
-              color: '#1a3a2a',
+              color: theme.accent,
               fontSize: '15px',
             }}>
               <InlineMarkdown text={h} />

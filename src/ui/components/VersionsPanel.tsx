@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getVersions } from '../../lib/versions';
+import { useTheme } from '../theme/ThemeContext';
+import { Spinner } from './primitives';
+import { RADIUS } from '../theme/tokens';
 import type { SketchVersion } from '../../lib/supabase';
 
 interface VersionsPanelProps {
@@ -11,6 +14,7 @@ export function VersionsPanel({ sketchId, onRestore }: VersionsPanelProps) {
   const [versions, setVersions] = useState<SketchVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const { theme } = useTheme();
 
   useEffect(() => {
     if (!sketchId) return;
@@ -33,46 +37,107 @@ export function VersionsPanel({ sketchId, onRestore }: VersionsPanelProps) {
       ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
+  const emptyStyle: React.CSSProperties = {
+    padding: '16px',
+    fontSize: '15px',
+    opacity: 0.45,
+    textAlign: 'center',
+    fontFamily: "'Inter', system-ui, sans-serif",
+    color: theme.text,
+  };
+
   if (!sketchId) {
-    return (
-      <div style={styles.empty}>
-        Save your sketch first to enable versioning.
-      </div>
-    );
+    return <div style={emptyStyle}>Save your sketch first to enable versioning.</div>;
   }
 
   return (
-    <div style={styles.container}>
-      {loading && <div style={styles.empty}>loading...</div>}
+    <div style={{
+      padding: '6px 10px',
+      fontFamily: "'SF Mono', 'Consolas', monospace",
+      fontSize: '16px',
+      color: theme.text,
+      overflow: 'auto',
+      height: '100%',
+    }}>
+      {loading && (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 16 }}>
+          <Spinner size={20} />
+        </div>
+      )}
 
       {!loading && versions.length === 0 && (
-        <div style={styles.empty}>
+        <div style={emptyStyle}>
           No versions yet. Versions are saved each time you hit Save.
         </div>
       )}
 
       {versions.map((v) => (
-        <div key={v.id} style={styles.item}>
+        <div key={v.id} style={{
+          borderBottom: `1px solid ${theme.cardBorder}`,
+          paddingBottom: 6,
+          marginBottom: 6,
+        }}>
           <div
-            style={styles.itemHeader}
             onClick={() => setExpanded(expanded === v.id ? null : v.id)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              padding: '4px 0',
+            }}
           >
-            <div style={styles.versionBadge}>v{v.version_number}</div>
+            <div style={{
+              fontSize: '16px',
+              fontWeight: 700,
+              background: theme.accent,
+              color: theme.accentText,
+              padding: '1px 6px',
+              borderRadius: 4,
+              flexShrink: 0,
+            }}>
+              v{v.version_number}
+            </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '16px', fontWeight: 500 }}>{v.title}</div>
-              <div style={{ fontSize: '16px', opacity: 0.35 }}>{formatDate(v.created_at)}</div>
+              <div style={{ fontSize: '16px', opacity: 0.55 }}>{formatDate(v.created_at)}</div>
             </div>
             <button
               onClick={(e) => { e.stopPropagation(); handleRestore(v); }}
-              style={styles.restoreBtn}
+              aria-label={`Restore version ${v.version_number}`}
+              style={{
+                padding: '2px 8px',
+                background: 'none',
+                border: `1px solid ${theme.cardBorder}`,
+                borderRadius: RADIUS.sm,
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontFamily: "'Inter', system-ui, sans-serif",
+                color: theme.text,
+                opacity: 0.7,
+                flexShrink: 0,
+              }}
             >
               restore
             </button>
           </div>
 
           {expanded === v.id && (
-            <pre style={styles.scriptPreview}>
-              {v.script.slice(0, 500)}{v.script.length > 500 ? '\n...' : ''}
+            <pre style={{
+              fontSize: '16px',
+              fontFamily: "'SF Mono', monospace",
+              background: theme.cardBgSubtle,
+              border: `1px solid ${theme.cardBorder}`,
+              borderRadius: RADIUS.sm,
+              padding: '8px',
+              overflow: 'auto',
+              maxHeight: 120,
+              whiteSpace: 'pre-wrap',
+              margin: '6px 0 0',
+              opacity: 0.85,
+              color: theme.text,
+            }}>
+              {v.script.slice(0, 500)}{v.script.length > 500 ? '\n…' : ''}
             </pre>
           )}
         </div>
@@ -80,67 +145,3 @@ export function VersionsPanel({ sketchId, onRestore }: VersionsPanelProps) {
     </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    padding: '6px 10px',
-    fontFamily: "'SF Mono', 'Consolas', monospace",
-    fontSize: '16px',
-    color: '#1a3a2a',
-    overflow: 'auto',
-    height: '100%',
-  },
-  empty: {
-    padding: '16px',
-    fontSize: '15px',
-    opacity: 0.3,
-    textAlign: 'center',
-    fontFamily: "'Inter', system-ui, sans-serif",
-  },
-  item: {
-    borderBottom: '1px solid #e8e0d8',
-    paddingBottom: '6px',
-    marginBottom: '6px',
-  },
-  itemHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    cursor: 'pointer',
-    padding: '4px 0',
-  },
-  versionBadge: {
-    fontSize: '16px',
-    fontWeight: 700,
-    background: '#1a3a2a',
-    color: '#faf9f6',
-    padding: '1px 6px',
-    borderRadius: 4,
-    flexShrink: 0,
-  },
-  restoreBtn: {
-    padding: '2px 8px',
-    background: 'none',
-    border: '1px solid #d0cdc4',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: '16px',
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#1a3a2a',
-    opacity: 0.5,
-    flexShrink: 0,
-  },
-  scriptPreview: {
-    fontSize: '16px',
-    fontFamily: "'SF Mono', monospace",
-    background: '#faf9f6',
-    border: '1px solid #e8e0d8',
-    borderRadius: 6,
-    padding: '8px',
-    overflow: 'auto',
-    maxHeight: 120,
-    whiteSpace: 'pre-wrap',
-    margin: '6px 0 0',
-    opacity: 0.5,
-  },
-};

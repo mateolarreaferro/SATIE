@@ -100,7 +100,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
     return (0.299 * r + 0.587 * g + 0.114 * b) < 0.5;
   })();
 
-  const monacoTheme = isDark ? 'vs-dark' : 'satie-light';
+  const monacoTheme = isDark ? 'satie-dark' : 'satie-light';
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
     registerSatieLanguage(monaco);
@@ -120,11 +120,11 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
     setTimeout(() => editor.focus(), 80);
   }, [monacoTheme]);
 
-  // Modal card colors from theme
-  const cardBg = isDark ? '#1e1e1e' : '#faf9f6';
-  const cardText = isDark ? '#d4d4d4' : '#1a1a1a';
-  const cardBorder = isDark ? '#333' : '#e8e0d8';
-  const accentBg = isDark ? '#2d5a3d' : '#1a3a2a';
+  // Modal card colors from theme tokens — no more ad-hoc isDark ternaries.
+  const cardBg = theme.cardBg;
+  const cardText = theme.text;
+  const cardBorder = theme.cardBorder;
+  const accentBg = theme.accent;
 
   return (
     <>
@@ -185,7 +185,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
             left: 0,
             right: 0,
             height: 32,
-            background: `linear-gradient(transparent, ${theme.cardBg || '#f4f3ee'})`,
+            background: `linear-gradient(transparent, ${theme.cardBg})`,
             pointerEvents: 'none',
           }} />
         </pre>
@@ -423,7 +423,7 @@ export function ChatMessage({ message, theme, onSaveAsSketch, savingSketch, onRa
 
         {/* Error */}
         {message.status === 'error' && (
-          <div style={{ color: '#8b0000', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ color: theme.danger, display: 'flex', alignItems: 'center', gap: 6 }}>
             {/* Alert circle icon */}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
               <circle cx="12" cy="12" r="10" />
@@ -533,7 +533,7 @@ export function ChatMessage({ message, theme, onSaveAsSketch, savingSketch, onRa
                         transition: 'opacity 0.15s',
                       }}
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill={message.rating === -1 ? '#8b0000' : 'none'} stroke="#8b0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill={message.rating === -1 ? theme.danger : 'none'} stroke={theme.danger} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
                         <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
                       </svg>

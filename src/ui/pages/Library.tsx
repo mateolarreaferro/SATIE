@@ -3,7 +3,7 @@
  * Route: /library
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useDayNightCycle } from '../hooks/useDayNightCycle';
+import { useTheme } from '../theme/ThemeContext';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { useSFX } from '../hooks/useSFX';
 import { useSamplePreview } from '../hooks/useSamplePreview';
@@ -36,7 +36,7 @@ function getDecodeCtx(): AudioContext {
 const ACCEPTED_AUDIO = /\.(wav|mp3|ogg|flac|m4a|webm)$/i;
 
 export function Library() {
-  const { theme, mode, setMode } = useDayNightCycle();
+  const { theme, mode, setMode } = useTheme();
   useBackgroundMusic('/Satie-Theme.wav', 0.08);
   const sfx = useSFX();
   const preview = useSamplePreview();
@@ -475,7 +475,7 @@ export function Library() {
 
 function DropZoneCard({ dragOver, theme, sfx, onDragOver, onDragLeave, onDrop, onClick }: {
   dragOver: boolean;
-  theme: ReturnType<typeof useDayNightCycle>['theme'];
+  theme: ReturnType<typeof useTheme>['theme'];
   sfx: ReturnType<typeof useSFX>;
   onDragOver: (e: React.DragEvent) => void;
   onDragLeave: () => void;
@@ -532,7 +532,7 @@ function DropZoneCard({ dragOver, theme, sfx, onDragOver, onDragLeave, onDrop, o
 
 function SampleCard({ sample, theme, sfx, isSelected, isPlaying, onSelect, onPreview, formatDuration }: {
   sample: CommunitySample;
-  theme: ReturnType<typeof useDayNightCycle>['theme'];
+  theme: ReturnType<typeof useTheme>['theme'];
   sfx: ReturnType<typeof useSFX>;
   isSelected: boolean;
   isPlaying: boolean;
@@ -678,7 +678,7 @@ function MiniWaveform({ peaks, color }: { peaks: number[]; color: string }) {
 
 function SampleDetailPanel({ sample, theme, isPlaying, onClose, onPreview, formatDuration }: {
   sample: CommunitySample;
-  theme: ReturnType<typeof useDayNightCycle>['theme'];
+  theme: ReturnType<typeof useTheme>['theme'];
   isPlaying: boolean;
   onClose: () => void;
   onPreview: () => void;

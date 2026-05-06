@@ -52,6 +52,7 @@ export function ChatInput({ onSend, disabled, theme }: ChatInputProps) {
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="a forest at dawn with birds circling overhead..."
+          aria-label="Describe a soundscape"
           disabled={disabled}
           style={{
             flex: 1,
@@ -67,6 +68,7 @@ export function ChatInput({ onSend, disabled, theme }: ChatInputProps) {
         <button
           onClick={handleSend}
           disabled={!value.trim() || disabled}
+          aria-label="Send message"
           style={{
             width: 32,
             height: 32,

@@ -2,6 +2,8 @@ import { useRef, useCallback, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { parseWithWarnings, SatieSyntaxError } from '../../engine';
 import type { ParseWarning } from '../../engine';
+import { useTheme } from '../theme/ThemeContext';
+import { LIGHT, DARK, type MonacoTheme } from '../theme/tokens';
 
 interface SatieEditorProps {
   value: string;
@@ -80,6 +82,54 @@ const DISTORTION_MODES = ['softclip', 'hardclip', 'tanh', 'cubic', 'asymmetric']
 
 let languageRegistered = false;
 
+/** Strip a leading '#' so Monaco's `foreground` field (no '#') is happy. */
+function rgb(hex: string): string {
+  return hex.startsWith('#') ? hex.slice(1) : hex;
+}
+
+/** Register a Monaco theme using a MonacoTheme token block. */
+function defineMonacoTheme(
+  monaco: any,
+  name: string,
+  base: 'vs' | 'vs-dark',
+  m: MonacoTheme,
+) {
+  monaco.editor.defineTheme(name, {
+    base,
+    inherit: true,
+    rules: [
+      { token: 'keyword', foreground: rgb(m.tokens.keyword), fontStyle: 'bold' },
+      { token: 'keyword.control', foreground: rgb(m.tokens.keyword), fontStyle: 'bold' },
+      { token: 'keyword.let', foreground: rgb(m.tokens.keywordLet), fontStyle: 'bold' },
+      { token: 'keyword.gen', foreground: rgb(m.tokens.keywordGen), fontStyle: 'italic' },
+      { token: 'keyword.every', foreground: rgb(m.tokens.keywordEvery) },
+      { token: 'keyword.operator', foreground: rgb(m.tokens.keywordOperator) },
+      { token: 'variable', foreground: rgb(m.tokens.variable) },
+      { token: 'variable.dsp', foreground: rgb(m.tokens.variableDsp) },
+      { token: 'variable.param', foreground: rgb(m.tokens.variableParam) },
+      { token: 'number', foreground: rgb(m.tokens.number) },
+      { token: 'number.range', foreground: rgb(m.tokens.numberRange), fontStyle: 'italic' },
+      { token: 'function', foreground: rgb(m.tokens.function) },
+      { token: 'type.move', foreground: rgb(m.tokens.typeMove) },
+      { token: 'type.mode', foreground: rgb(m.tokens.typeMode) },
+      { token: 'string.easing', foreground: rgb(m.tokens.stringEasing) },
+      { token: 'string.path', foreground: rgb(m.tokens.stringPath) },
+      { token: 'string.color', foreground: rgb(m.tokens.stringColor) },
+      { token: 'comment', foreground: rgb(m.tokens.comment) },
+    ],
+    colors: {
+      'editor.background': m.background,
+      'editor.foreground': m.foreground,
+      'editor.lineHighlightBackground': m.lineHighlight,
+      'editorLineNumber.foreground': m.lineNumber,
+      'editorLineNumber.activeForeground': m.lineNumberActive,
+      'editor.selectionBackground': m.selection,
+      'editorCursor.foreground': m.cursor,
+      'editorIndentGuide.background': m.indentGuide,
+    },
+  });
+}
+
 export function registerSatieLanguage(monaco: any) {
   if (languageRegistered) return;
   languageRegistered = true;
@@ -118,40 +168,10 @@ export function registerSatieLanguage(monaco: any) {
     },
   });
 
-  monaco.editor.defineTheme('satie-light', {
-    base: 'vs',
-    inherit: true,
-    rules: [
-      { token: 'keyword', foreground: '1a3a2a', fontStyle: 'bold' },
-      { token: 'keyword.control', foreground: '1a3a2a', fontStyle: 'bold' },
-      { token: 'keyword.let', foreground: '6a4a8a', fontStyle: 'bold' },
-      { token: 'keyword.gen', foreground: '8b4513', fontStyle: 'italic' },
-      { token: 'keyword.every', foreground: '2b5a3a' },
-      { token: 'keyword.operator', foreground: '999999' },
-      { token: 'variable', foreground: '4a7a5a' },
-      { token: 'variable.dsp', foreground: '8b0000' },
-      { token: 'variable.param', foreground: '8b0000' },
-      { token: 'number', foreground: '2b2b8a' },
-      { token: 'number.range', foreground: '2b2b8a', fontStyle: 'italic' },
-      { token: 'function', foreground: '6a4a8a' },
-      { token: 'type.move', foreground: '2b5a8a' },
-      { token: 'type.mode', foreground: '2b5a8a' },
-      { token: 'string.easing', foreground: '8a6a3a' },
-      { token: 'string.path', foreground: '8a6a3a' },
-      { token: 'string.color', foreground: '8b4513' },
-      { token: 'comment', foreground: 'aaaaaa' },
-    ],
-    colors: {
-      'editor.background': '#faf9f6',
-      'editor.foreground': '#1a1a1a',
-      'editor.lineHighlightBackground': '#f0efe8',
-      'editorLineNumber.foreground': '#cccccc',
-      'editorLineNumber.activeForeground': '#999999',
-      'editor.selectionBackground': '#d4e8d0',
-      'editorCursor.foreground': '#1a3a2a',
-      'editorIndentGuide.background': '#e8e8e0',
-    },
-  });
+  // Themes are sourced from the design tokens (theme.monaco) so editor theming
+  // stays in lockstep with the rest of the design system.
+  defineMonacoTheme(monaco, 'satie-light', 'vs', LIGHT.monaco);
+  defineMonacoTheme(monaco, 'satie-dark', 'vs-dark', DARK.monaco);
 
   // ── Completion provider ──────────────────────────────────
 
@@ -314,18 +334,27 @@ export function SatieEditor({ value, onChange, onRun, errors, runtimeWarnings, c
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
   const validateTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { resolvedMode } = useTheme();
+  const themeName = resolvedMode === 'dark' ? 'satie-dark' : 'satie-light';
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     registerSatieLanguage(monaco);
-    monaco.editor.setTheme('satie-light');
+    monaco.editor.setTheme(themeName);
 
     // Cmd+Enter / Ctrl+Enter to run
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       onRunRef.current?.();
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Switch the active Monaco theme when the app theme changes.
+  useEffect(() => {
+    if (!monacoRef.current) return;
+    monacoRef.current.editor.setTheme(themeName);
+  }, [themeName]);
 
   // ── Live validation (debounced) ────────────────────────────
 
@@ -394,7 +423,7 @@ export function SatieEditor({ value, onChange, onRun, errors, runtimeWarnings, c
       <Editor
         height="100%"
         language={SATIE_LANG_ID}
-        theme="satie-light"
+        theme={themeName}
         value={value}
         onChange={(v) => onChange(v ?? '')}
         onMount={handleMount}

@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react';
 import { SamplesTab, type SampleEntry } from './SamplesTab';
 import { TrajectoriesTab } from './TrajectoriesTab';
 import { CommunityTab } from './CommunityTab';
+import { useTheme } from '../theme/ThemeContext';
+import { RADIUS } from '../theme/tokens';
 
 export type AssetTab = 'samples' | 'trajectories' | 'community';
 
@@ -23,20 +25,21 @@ export function AssetPanel({
   generatingTrajectory,
 }: AssetPanelProps) {
   const [tab, setTab] = useState<AssetTab>('samples');
+  const { theme } = useTheme();
 
   const tabBtnStyle = useCallback((active: boolean): React.CSSProperties => ({
     padding: '2px 8px',
-    background: active ? '#1a3a2a' : 'none',
-    color: active ? '#faf9f6' : '#1a3a2a',
-    border: `1px solid ${active ? '#1a3a2a' : '#d0cdc4'}`,
-    borderRadius: 6,
+    background: active ? theme.accent : 'none',
+    color: active ? theme.accentText : theme.accent,
+    border: `1px solid ${active ? theme.accent : theme.cardBorder}`,
+    borderRadius: RADIUS.sm,
     cursor: 'pointer',
     fontSize: '16px',
     fontFamily: "'Inter', system-ui, sans-serif",
     fontWeight: 500,
     letterSpacing: '0.03em',
     transition: 'all 0.15s',
-  }), []);
+  }), [theme]);
 
   return (
     <div style={{
@@ -45,7 +48,7 @@ export function AssetPanel({
       flexDirection: 'column',
       fontFamily: "'Inter', system-ui, sans-serif",
       fontSize: '16px',
-      color: '#1a3a2a',
+      color: theme.text,
     }}>
       {/* Tab bar */}
       <div style={{

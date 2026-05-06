@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { ThemeMode } from '../hooks/useDayNightCycle';
+import type { ThemeMode } from '../theme/tokens';
 
 /**
  * Ambient particle canvas — unique visual personality per theme mode.
@@ -175,9 +175,12 @@ type CreateFn = (w: number, h: number) => Particle;
 type DrawFn = (c: CanvasRenderingContext2D, particles: Particle[], cw: number, ch: number, t: number, dpr: number) => void;
 
 const MODE_CONFIG: Record<ThemeMode, { create: CreateFn; draw: DrawFn }> = {
-  light: { create: createLightParticle, draw: drawLight },
-  dark:  { create: createDarkParticle,  draw: drawDark },
-  fade:  { create: createFadeParticle,  draw: drawFade },
+  light:  { create: createLightParticle, draw: drawLight },
+  dark:   { create: createDarkParticle,  draw: drawDark },
+  fade:   { create: createFadeParticle,  draw: drawFade },
+  // 'system' falls back to light particles — callers should normally pass
+  // resolvedMode here so this branch is rarely hit.
+  system: { create: createLightParticle, draw: drawLight },
 };
 
 export function RiverCanvas({ mode = 'light' }: { mode?: ThemeMode }) {

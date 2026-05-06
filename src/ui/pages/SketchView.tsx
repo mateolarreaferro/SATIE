@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
-import { getPublicSketch, forkSketch } from '../../lib/sketches';
+import { getPublicSketch, forkSketch, updateSketch } from '../../lib/sketches';
 import { likeSketch, unlikeSketch, hasUserLiked } from '../../lib/likes';
 import { getProfile } from '../../lib/profiles';
 import { loadSketchSamples } from '../../lib/sampleStorage';
@@ -9,23 +9,84 @@ import { useSatieEngine } from '../hooks/useSatieEngine';
 import { useFaceTracking } from '../hooks/useFaceTracking';
 import { SpatialViewport } from '../components/SpatialViewport';
 import { SatieEditor } from '../components/SatieEditor';
-import { updateSketch } from '../../lib/sketches';
+import { Header } from '../components/Header';
+import { Button, IconButton, Card, Pill, SectionLabel, Spinner, EmptyState } from '../components/primitives';
+import { useTheme } from '../theme/ThemeContext';
+import { RADIUS, SHADOW, FONT } from '../theme/tokens';
 import type { Sketch, Profile } from '../../lib/supabase';
+
+// ── Icons (24×24, stroke=currentColor) ─────────────────────────
+const HeartIcon = ({ filled }: { filled?: boolean }) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+  </svg>
+);
+const ForkIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="6" y1="3" x2="6" y2="15" />
+    <circle cx="18" cy="6" r="3" />
+    <circle cx="6" cy="18" r="3" />
+    <path d="M18 9a9 9 0 0 1-9 9" />
+  </svg>
+);
+const EditIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+);
+const CodeIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 18 22 12 16 6" />
+    <polyline points="8 6 2 12 8 18" />
+  </svg>
+);
+const LinkIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </svg>
+);
+const PlayIcon = ({ size = 12 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <polygon points="5 3 19 12 5 21 5 3" />
+  </svg>
+);
+const StopIcon = ({ size = 12 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+  </svg>
+);
+const CopyIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+const CheckIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
 
 export function SketchView() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { theme, mode, setMode, resolvedMode } = useTheme();
+
   const [sketch, setSketch] = useState<Sketch | null>(null);
   const [author, setAuthor] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
-  const [bgColor, setBgColor] = useState('#f4f3ee');
+  const [bgColor, setBgColor] = useState<string | null>(null);
   const [samplesReady, setSamplesReady] = useState(false);
   const [showShareToast, setShowShareToast] = useState(false);
-  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showEmbedPopover, setShowEmbedPopover] = useState(false);
+  const [embedCopied, setEmbedCopied] = useState(false);
+  const [scriptCopied, setScriptCopied] = useState(false);
   const [editPrompt, setEditPrompt] = useState('');
   const [forking, setForking] = useState(false);
   const [editedScript, setEditedScript] = useState<string | null>(null);
@@ -46,24 +107,29 @@ export function SketchView() {
   const faceTracking = useFaceTracking(setListenerOrientation);
 
   const samplesLoaded = useRef(false);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
+  const embedPopoverRef = useRef<HTMLDivElement>(null);
 
-  // Close more menu on outside click
+  // Close embed popover on outside click + Escape
   useEffect(() => {
-    if (!showMoreMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
-        setShowMoreMenu(false);
+    if (!showEmbedPopover) return;
+    const onClick = (e: MouseEvent) => {
+      if (embedPopoverRef.current && !embedPopoverRef.current.contains(e.target as Node)) {
+        setShowEmbedPopover(false);
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showMoreMenu]);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowEmbedPopover(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showEmbedPopover]);
 
   useEffect(() => {
     if (!id) return;
-    // React Router reuses this component when :id changes — reset the
-    // per-sketch sample-load guard so the new sketch's samples are fetched.
     samplesLoaded.current = false;
     setSamplesReady(false);
     getPublicSketch(id)
@@ -78,7 +144,6 @@ export function SketchView() {
           if (user) {
             hasUserLiked(user.id, s.id).then(setLiked).catch(() => {});
           }
-          // Load samples for this sketch so audio can play
           if (!samplesLoaded.current && engineRef.current) {
             samplesLoaded.current = true;
             loadSketchSamples(s.id, (name, data) =>
@@ -87,7 +152,7 @@ export function SketchView() {
               .then(() => setSamplesReady(true))
               .catch(e => {
                 console.warn('[SketchView] Failed to load samples:', e);
-                setSamplesReady(true); // allow play attempt anyway
+                setSamplesReady(true);
               });
           } else {
             setSamplesReady(true);
@@ -114,7 +179,7 @@ export function SketchView() {
     }
   }, [sketch, uiState.isPlaying, loadScript, play, stop, currentScript]);
 
-  // Hot-reload script while playing (mirrors Editor behavior)
+  // Hot-reload while playing
   useEffect(() => {
     if (uiState.isPlaying) {
       loadScript(currentScript);
@@ -184,16 +249,31 @@ export function SketchView() {
     }).catch(() => {});
   }, []);
 
+  const handleCopyEmbed = useCallback(() => {
+    if (!sketch) return;
+    const code = `<iframe src="${window.location.origin}/embed/${sketch.id}" width="600" height="400" frameborder="0"></iframe>`;
+    navigator.clipboard.writeText(code).then(() => {
+      setEmbedCopied(true);
+      setTimeout(() => setEmbedCopied(false), 1600);
+    }).catch(() => {});
+  }, [sketch]);
+
+  const handleCopyScript = useCallback(() => {
+    if (!currentScript) return;
+    navigator.clipboard.writeText(currentScript).then(() => {
+      setScriptCopied(true);
+      setTimeout(() => setScriptCopied(false), 1600);
+    }).catch(() => {});
+  }, [currentScript]);
+
   const handleEditSubmit = useCallback(async () => {
-    if (!editPrompt.trim() || !sketch) return;
-    if (!user) return; // must be signed in
+    if (!sketch) return;
+    if (!user) return;
     if (forking) return;
 
     if (isOwner) {
-      // Owner goes directly to editor
       navigate(`/editor/${sketch.id}`);
     } else {
-      // Non-owner: fork first, then open in editor
       setForking(true);
       try {
         const forked = await forkSketch(user.id, sketch);
@@ -204,62 +284,177 @@ export function SketchView() {
         setForking(false);
       }
     }
-  }, [editPrompt, sketch, user, isOwner, forking, navigate]);
+  }, [sketch, user, isOwner, forking, navigate]);
+
+  // Strip the leading metadata @bg comment from the displayed script — it's
+  // implementation detail, not user content.
+  const displayScript = currentScript
+    .replace(/^- @bg #[0-9a-fA-F]{6}\n?/m, '')
+    .replace(/^# @bg #[0-9a-fA-F]{6}\n?/m, '');
+  const lineCount = displayScript.split('\n').length;
 
   if (loading) {
     return (
-      <div style={styles.container}>
-        <div style={styles.center}>loading...</div>
+      <div style={{ ...containerStyle(theme), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Spinner size={32} />
       </div>
     );
   }
 
   if (notFound || !sketch) {
     return (
-      <div style={styles.container}>
-        <div style={styles.center}>
-          <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>
-            Sketch not found
-          </div>
-          <p style={{ fontSize: '15px', opacity: 0.4, marginBottom: '20px' }}>
-            This sketch may be private or may have been deleted.
-          </p>
-          <Link to="/explore" style={styles.linkBtn}>Browse public sketches</Link>
-        </div>
+      <div style={{ ...containerStyle(theme), display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <EmptyState
+          title="Sketch not found"
+          description="It may be private or have been deleted."
+          action={
+            <Button variant="primary" onClick={() => navigate('/explore')}>
+              Browse public sketches
+            </Button>
+          }
+        />
       </div>
     );
   }
 
-  return (
-    <div style={styles.container}>
-      {/* Header */}
-      <header style={styles.header}>
-        <Link to="/" style={{ textDecoration: 'none', color: '#0a0a0a', fontSize: '22px', fontWeight: 700, letterSpacing: '0.06em' }}>
-          satie
-        </Link>
+  const viewportBg = bgColor ?? theme.bg;
+  const isDark = resolvedMode === 'dark';
 
-        <button onClick={handleShare} style={styles.shareBtn}>
-          Share
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-          </svg>
-        </button>
-      </header>
+  return (
+    <div style={containerStyle(theme)}>
+      <Header
+        theme={theme}
+        mode={mode}
+        setMode={setMode}
+        rightExtra={
+          <Button
+            variant="inverted"
+            size="sm"
+            rounded="pill"
+            iconLeft={<LinkIcon />}
+            onClick={handleShare}
+            aria-label="Copy sketch link"
+          >
+            Share
+          </Button>
+        }
+      />
 
       {/* Share toast */}
       {showShareToast && (
-        <div style={styles.toast}>Link copied to clipboard</div>
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            top: 20,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: theme.invertedBg,
+            color: theme.invertedText,
+            padding: '8px 20px',
+            borderRadius: RADIUS.md,
+            fontSize: FONT.size.body,
+            fontWeight: 500,
+            zIndex: 9999,
+            fontFamily: "'Inter', system-ui, sans-serif",
+            boxShadow: SHADOW.lg,
+          }}
+        >
+          Link copied to clipboard
+        </div>
       )}
 
-      {/* Main content */}
-      <div style={styles.main}>
+      {/* Main */}
+      <div style={{
+        maxWidth: 960,
+        margin: '0 auto',
+        padding: '8px 32px 60px',
+        boxSizing: 'border-box',
+      }}>
+        {/* HERO — title + meta ABOVE the viewport so it's never below the fold */}
+        <section style={{ marginBottom: 20 }}>
+          <h1 style={{
+            fontSize: 'clamp(28px, 4vw, 36px)',
+            fontWeight: FONT.weight.semibold,
+            margin: '0 0 10px',
+            letterSpacing: '-0.015em',
+            lineHeight: 1.15,
+            color: theme.text,
+          }}>
+            {sketch.title}
+          </h1>
+          <div style={{
+            fontSize: FONT.size.body,
+            color: theme.text,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}>
+            {author && (
+              <Link
+                to={`/u/${author.username}`}
+                style={{
+                  color: theme.text,
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  opacity: 0.85,
+                }}
+              >
+                <span style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 10,
+                  background: avatarGradient(author.username),
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#fff',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  textShadow: '0 0 4px rgba(0,0,0,0.3)',
+                }}>
+                  {author.username[0]?.toUpperCase()}
+                </span>
+                @{author.username}
+              </Link>
+            )}
+            {author && <span style={{ opacity: 0.3 }}>·</span>}
+            <span style={{ opacity: 0.55 }}>
+              {new Date(sketch.updated_at).toLocaleDateString('en-US', {
+                month: 'long', day: 'numeric', year: 'numeric',
+              })}
+            </span>
+            {sketch.forked_from && (
+              <>
+                <span style={{ opacity: 0.3 }}>·</span>
+                <span style={{ opacity: 0.55, fontStyle: 'italic' }}>
+                  forked from <Link to={`/s/${sketch.forked_from}`} style={{ color: theme.text }}>another sketch</Link>
+                </span>
+              </>
+            )}
+          </div>
+        </section>
+
         {/* Viewport with overlay controls */}
-        <div style={styles.viewportWrapper}>
-          <div style={styles.viewport}>
+        <div style={{
+          position: 'relative',
+          width: '100%',
+          aspectRatio: '16/9',
+          borderRadius: RADIUS.xl,
+          overflow: 'hidden',
+          border: `1px solid ${theme.cardBorder}`,
+          background: viewportBg,
+          marginBottom: 16,
+          boxShadow: SHADOW.md,
+        }}>
+          <div style={{ width: '100%', height: '100%' }}>
             <SpatialViewport
               tracksRef={tracksRef}
-              bgColor={bgColor}
+              bgColor={viewportBg}
               onListenerMove={setListenerPosition}
               onListenerRotate={setListenerOrientation}
               faceTracking={{ enabled: faceTracking.enabled, meshRef: faceTracking.meshRef }}
@@ -267,221 +462,288 @@ export function SketchView() {
           </div>
 
           {/* Big centered play button when not playing */}
-          {!uiState.isPlaying && (
-            <button onClick={handlePlay} style={styles.bigPlayBtn} aria-label="Play">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="#faf9f6" stroke="none">
-                <polygon points="5 3 19 12 5 21 5 3" />
-              </svg>
-            </button>
-          )}
-
-          {/* Bottom overlay controls */}
-          <div style={styles.viewportControls}>
+          {!uiState.isPlaying && samplesReady && (
             <button
               onClick={handlePlay}
-              style={styles.controlBtn}
+              aria-label="Play sketch"
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: 64,
+                height: 64,
+                borderRadius: 32,
+                background: theme.overlayBg,
+                backdropFilter: 'blur(8px)',
+                border: `1.5px solid ${theme.overlayBorder}`,
+                color: theme.overlayText,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'transform 0.12s, background 0.15s',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.transform = 'translate(-50%, -50%) scale(1.05)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = 'translate(-50%, -50%)'; }}
             >
-              {uiState.isPlaying ? (
-                <>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#faf9f6" stroke="none">
-                    <rect x="4" y="4" width="16" height="16" rx="2" />
-                  </svg>
-                  Stop
-                </>
-              ) : (
-                <>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="#faf9f6" stroke="none">
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                  Play
-                </>
-              )}
+              <PlayIcon size={28} />
             </button>
+          )}
 
-            <button
+          {/* Bottom-left overlay controls */}
+          <div style={{
+            position: 'absolute',
+            bottom: 12,
+            left: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}>
+            <Pill
+              variant="overlay"
+              size="sm"
+              iconLeft={uiState.isPlaying ? <StopIcon /> : <PlayIcon />}
+              onClick={handlePlay}
+              aria-label={uiState.isPlaying ? 'Stop playback' : 'Play sketch'}
+            >
+              {uiState.isPlaying ? 'Stop' : 'Play'}
+            </Pill>
+
+            <Pill
+              variant="overlay"
+              size="sm"
               onClick={faceTracking.toggle}
               disabled={faceTracking.loading}
-              title={faceTracking.enabled ? 'Disable camera head tracking' : 'Enable camera head tracking (rotate with your head)'}
-              style={{
-                ...styles.controlBtnOutline,
-                background: faceTracking.enabled ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.4)',
-                cursor: faceTracking.loading ? 'wait' : 'pointer',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="10" r="3" />
-                <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
-              </svg>
-              {faceTracking.loading ? 'Loading…' : faceTracking.error ? 'Camera blocked' : 'Camera'}
-              <div style={{
-                width: 32,
-                height: 18,
-                borderRadius: 9,
-                background: faceTracking.enabled ? '#faf9f6' : 'rgba(255,255,255,0.3)',
-                position: 'relative',
-                transition: 'background 0.2s',
-              }}>
-                <div style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  background: faceTracking.enabled ? '#0a0a0a' : '#faf9f6',
-                  position: 'absolute',
-                  top: 2,
-                  left: faceTracking.enabled ? 16 : 2,
-                  transition: 'left 0.2s, background 0.2s',
-                }} />
-              </div>
-            </button>
-
-            {/* More menu */}
-            <div style={{ position: 'relative' }} ref={moreMenuRef}>
-              <button
-                onClick={() => setShowMoreMenu(v => !v)}
-                style={styles.controlBtnIcon}
-                aria-label="More options"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="#faf9f6" stroke="none">
-                  <circle cx="12" cy="5" r="2" />
-                  <circle cx="12" cy="12" r="2" />
-                  <circle cx="12" cy="19" r="2" />
+              title={faceTracking.enabled ? 'Disable camera head tracking' : 'Enable camera head tracking'}
+              aria-label={faceTracking.enabled ? 'Disable head tracking' : 'Enable head tracking'}
+              aria-pressed={faceTracking.enabled}
+              iconLeft={
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="10" r="3" />
+                  <path d="M2 8l3-3h4l2-2 2 2h4l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8z" />
                 </svg>
-              </button>
-
-              {showMoreMenu && (
-                <div style={styles.moreMenu}>
-                  {user && (
-                    <button onClick={handleLike} style={styles.menuItem}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill={liked ? '#8b0000' : 'none'} stroke={liked ? '#8b0000' : '#0a0a0a'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                      </svg>
-                      {liked ? 'Unlike' : 'Like'}{likeCount > 0 ? ` (${likeCount})` : ''}
-                    </button>
-                  )}
-                  {user && !isOwner && (
-                    <button onClick={handleFork} disabled={forking} style={styles.menuItem}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="6" y1="3" x2="6" y2="15" />
-                        <circle cx="18" cy="6" r="3" />
-                        <circle cx="6" cy="18" r="3" />
-                        <path d="M18 9a9 9 0 0 1-9 9" />
-                      </svg>
-                      {forking ? 'Forking...' : 'Fork'}{(sketch.fork_count ?? 0) > 0 ? ` (${sketch.fork_count})` : ''}
-                    </button>
-                  )}
-                  {isOwner && (
-                    <button onClick={() => navigate(`/editor/${sketch.id}`)} style={styles.menuItem}>
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                      </svg>
-                      Edit in editor
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      const embedCode = `<iframe src="${window.location.origin}/embed/${sketch.id}" width="600" height="400" frameborder="0"></iframe>`;
-                      navigator.clipboard.writeText(embedCode).catch(() => {});
-                      setShowMoreMenu(false);
-                    }}
-                    style={styles.menuItem}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="16 18 22 12 16 6" />
-                      <polyline points="8 6 2 12 8 18" />
-                    </svg>
-                    Copy embed code
-                  </button>
-                </div>
-              )}
-            </div>
+              }
+            >
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {faceTracking.loading ? 'Loading…' : faceTracking.error ? 'Camera blocked' : 'Camera'}
+                <span style={{
+                  width: 28,
+                  height: 16,
+                  borderRadius: 8,
+                  background: faceTracking.enabled ? theme.overlayText : 'rgba(255,255,255,0.25)',
+                  position: 'relative',
+                  transition: 'background 0.2s',
+                  display: 'inline-block',
+                }}>
+                  <span style={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: 6,
+                    background: faceTracking.enabled ? theme.overlayBg : theme.overlayText,
+                    position: 'absolute',
+                    top: 2,
+                    left: faceTracking.enabled ? 14 : 2,
+                    transition: 'left 0.2s, background 0.2s',
+                    display: 'block',
+                  }} />
+                </span>
+              </span>
+            </Pill>
           </div>
         </div>
 
-        {/* Title + meta */}
-        <div style={styles.titleSection}>
-          <h1 style={styles.title}>{sketch.title}</h1>
-          <div style={styles.metaRow}>
-            {author ? (
-              <Link
-                to={`/u/${author.username}`}
-                style={{ color: '#0a0a0a', textDecoration: 'none', opacity: 0.5 }}
-              >
-                @{author.username}
-              </Link>
-            ) : null}
-            {author ? <span style={{ opacity: 0.3 }}> · </span> : ''}
-            <span style={{ opacity: 0.35 }}>
-              {new Date(sketch.updated_at).toLocaleDateString('en-US', {
-                month: 'long', day: 'numeric', year: 'numeric',
-              })}
-            </span>
-            {likeCount > 0 && (
-              <>
-                <span style={{ opacity: 0.3 }}> · </span>
-                <span style={{ opacity: 0.35, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                  </svg>
-                  {likeCount}
-                </span>
-              </>
-            )}
-            {(sketch.fork_count ?? 0) > 0 && (
-              <>
-                <span style={{ opacity: 0.3 }}> · </span>
-                <span style={{ opacity: 0.35, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                  {sketch.fork_count}
-                </span>
-              </>
-            )}
-          </div>
-          {sketch.forked_from && (
-            <div style={{ fontSize: '14px', opacity: 0.25, fontStyle: 'italic', marginTop: 2 }}>
-              forked from <Link to={`/s/${sketch.forked_from}`} style={{ color: '#0a0a0a' }}>another sketch</Link>
-            </div>
+        {/* ACTION CLUSTER — first-class, replaces the kebab menu */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexWrap: 'wrap',
+          marginBottom: 28,
+        }}>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconLeft={<HeartIcon filled={liked} />}
+            onClick={handleLike}
+            disabled={!user}
+            title={user ? (liked ? 'Unlike' : 'Like') : 'Sign in to like'}
+            aria-label={liked ? 'Unlike sketch' : 'Like sketch'}
+            aria-pressed={liked}
+            style={{ color: liked ? theme.danger : theme.text }}
+          >
+            {likeCount > 0 ? `${likeCount}` : 'Like'}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            iconLeft={<ForkIcon />}
+            onClick={handleFork}
+            disabled={!user || forking || isOwner}
+            title={isOwner ? 'You own this sketch' : (user ? 'Fork to your account' : 'Sign in to fork')}
+            aria-label="Fork sketch"
+          >
+            {forking ? 'Forking…' : (sketch.fork_count ?? 0) > 0 ? `${sketch.fork_count}` : 'Fork'}
+          </Button>
+
+          {isOwner && (
+            <Button
+              variant="ghost"
+              size="sm"
+              iconLeft={<EditIcon />}
+              onClick={() => navigate(`/editor/${sketch.id}`)}
+              aria-label="Open in editor"
+            >
+              Edit
+            </Button>
           )}
+
+          <div style={{ position: 'relative' }} ref={embedPopoverRef}>
+            <Button
+              variant="ghost"
+              size="sm"
+              iconLeft={<CodeIcon />}
+              onClick={() => setShowEmbedPopover(v => !v)}
+              aria-label="Show embed code"
+              aria-expanded={showEmbedPopover}
+              aria-haspopup="dialog"
+            >
+              Embed
+            </Button>
+            {showEmbedPopover && (
+              <Card
+                role="dialog"
+                aria-modal="true"
+                aria-label="Embed code"
+                padding={14}
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  width: 360,
+                  zIndex: 50,
+                  boxShadow: SHADOW.lg,
+                }}
+              >
+                <div style={{
+                  fontSize: FONT.size.xs,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  fontWeight: 500,
+                  opacity: 0.5,
+                  marginBottom: 8,
+                  color: theme.text,
+                }}>
+                  Embed code
+                </div>
+                <code style={{
+                  display: 'block',
+                  background: theme.cardBgSubtle,
+                  border: `1px solid ${theme.cardBorder}`,
+                  borderRadius: RADIUS.md,
+                  padding: '8px 10px',
+                  fontSize: FONT.size.sm,
+                  fontFamily: "'SF Mono', 'Consolas', monospace",
+                  color: theme.text,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  lineHeight: 1.5,
+                }}>
+                  {`<iframe src="${window.location.origin}/embed/${sketch.id}" width="600" height="400" frameborder="0"></iframe>`}
+                </code>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    iconLeft={embedCopied ? <CheckIcon /> : <CopyIcon />}
+                    onClick={handleCopyEmbed}
+                  >
+                    {embedCopied ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+              </Card>
+            )}
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            iconLeft={<LinkIcon />}
+            onClick={handleShare}
+            aria-label="Copy share link"
+          >
+            Share
+          </Button>
         </div>
 
-        {/* Script section */}
-        <div style={styles.scriptSection}>
-          <div style={styles.scriptHeader}>
-            <div style={styles.sectionLabel}>Satie Script</div>
-            {isDirty && (
-              <div style={styles.dirtyControls}>
-                <span style={styles.dirtyBadge}>unsaved edits</span>
-                <button
-                  onClick={handleDiscardEdits}
-                  disabled={saving}
-                  style={styles.discardBtn}
+        {/* Script section — terminal-style */}
+        <section>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 10,
+            gap: 8,
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <SectionLabel>script.satie</SectionLabel>
+              <span style={{
+                fontSize: FONT.size.xs,
+                opacity: 0.4,
+                fontFamily: "'SF Mono', 'Consolas', monospace",
+                color: theme.text,
+              }}>
+                {lineCount} {lineCount === 1 ? 'line' : 'lines'}
+              </span>
+            </div>
+            {isDirty ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Pill
+                  size="sm"
+                  variant="outline"
+                  style={{
+                    background: 'rgba(139,105,20,0.10)',
+                    borderColor: theme.warn,
+                    color: theme.warn,
+                  }}
                 >
+                  unsaved edits
+                </Pill>
+                <Button variant="ghost" size="sm" onClick={handleDiscardEdits} disabled={saving}>
                   Discard
-                </button>
+                </Button>
                 {user ? (
-                  <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    style={styles.saveBtn}
-                  >
-                    {saving
-                      ? 'Saving…'
-                      : isOwner
-                        ? 'Save'
-                        : 'Fork & save'}
-                  </button>
+                  <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
+                    {saving ? 'Saving…' : isOwner ? 'Save' : 'Fork & save'}
+                  </Button>
                 ) : (
-                  <span style={{ fontSize: 13, opacity: 0.5 }}>Sign in to save</span>
+                  <span style={{ fontSize: FONT.size.body, opacity: 0.5, color: theme.text }}>Sign in to save</span>
                 )}
               </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                iconLeft={scriptCopied ? <CheckIcon /> : <CopyIcon />}
+                onClick={handleCopyScript}
+                aria-label="Copy script"
+              >
+                {scriptCopied ? 'Copied' : 'Copy'}
+              </Button>
             )}
           </div>
-          <div style={styles.editorShell}>
+
+          <div style={{
+            background: isDark ? theme.monaco.background : theme.invertedBg,
+            border: `1px solid ${theme.cardBorder}`,
+            borderRadius: RADIUS.lg,
+            overflow: 'hidden',
+            height: 420,
+            boxShadow: SHADOW.sm,
+          }}>
             <SatieEditor
               value={currentScript}
               onChange={setEditedScript}
@@ -490,334 +752,92 @@ export function SketchView() {
             />
           </div>
           {saveError && (
-            <div style={{ color: '#8b0000', fontSize: 13, marginTop: 6 }}>{saveError}</div>
+            <div role="alert" style={{ color: theme.danger, fontSize: FONT.size.body, marginTop: 8 }}>
+              {saveError}
+            </div>
           )}
 
-          {/* Prompt an edit — input below the editor */}
-          <div style={styles.promptRow}>
+          {/* Inline edit prompt */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 14,
+          }}>
             {user ? (
               <>
                 <input
                   type="text"
-                  placeholder="Or prompt an edit — opens the full editor"
+                  placeholder={isOwner ? 'Open in editor for full edit…' : 'Or prompt an edit — opens the full editor'}
                   value={editPrompt}
                   onChange={(e) => setEditPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleEditSubmit();
-                  }}
-                  style={styles.editInput}
-                />
-                <button
-                  onClick={handleEditSubmit}
-                  disabled={!editPrompt.trim() || forking}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleEditSubmit(); }}
+                  aria-label="Prompt an edit"
                   style={{
-                    ...styles.editSubmitBtn,
-                    opacity: editPrompt.trim() ? 1 : 0.3,
+                    flex: 1,
+                    padding: '10px 14px',
+                    background: theme.cardBg,
+                    border: `1px solid ${theme.cardBorder}`,
+                    borderRadius: RADIUS.lg,
+                    fontSize: FONT.size.md,
+                    fontFamily: "'Inter', system-ui, sans-serif",
+                    color: theme.text,
+                    outline: 'none',
+                    boxSizing: 'border-box',
                   }}
-                  aria-label="Submit edit"
+                />
+                <IconButton
+                  variant="solid"
+                  size={40}
+                  onClick={handleEditSubmit}
+                  disabled={forking}
+                  aria-label="Submit edit prompt"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0a0a0a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="12" y1="19" x2="12" y2="5" />
                     <polyline points="5 12 12 5 19 12" />
                   </svg>
-                </button>
+                </IconButton>
               </>
             ) : (
               <div style={{
-                ...styles.editInput,
-                opacity: 0.5,
-                cursor: 'default',
-                display: 'flex',
-                alignItems: 'center',
+                flex: 1,
+                padding: '10px 14px',
+                background: theme.cardBg,
+                border: `1px solid ${theme.cardBorder}`,
+                borderRadius: RADIUS.lg,
+                fontSize: FONT.size.md,
+                color: theme.text,
+                opacity: 0.55,
+                fontFamily: "'Inter', system-ui, sans-serif",
               }}>
                 Sign in to edit or fork this sketch
               </div>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
+function containerStyle(theme: ReturnType<typeof useTheme>['theme']): React.CSSProperties {
+  return {
     width: '100%',
     height: '100vh',
     overflowY: 'auto',
     overflowX: 'hidden',
-    background: '#f4f3ee',
+    background: theme.bg,
     fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-    color: '#0a0a0a',
-  },
-  center: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    textAlign: 'center',
-    fontSize: '16px',
-    opacity: 0.4,
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '16px 32px',
-  },
-  shareBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '6px 16px',
-    background: '#0a0a0a',
-    border: 'none',
-    borderRadius: 20,
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#faf9f6',
-    fontWeight: 600,
-    letterSpacing: '0.02em',
-  },
-  toast: {
-    position: 'fixed' as const,
-    top: 20,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    background: '#0a0a0a',
-    color: '#faf9f6',
-    padding: '8px 20px',
-    borderRadius: 8,
-    fontSize: '13px',
-    fontWeight: 500,
-    zIndex: 9999,
-    fontFamily: "'Inter', system-ui, sans-serif",
-  },
-  linkBtn: {
-    fontSize: '16px',
-    color: '#0a0a0a',
-    textDecoration: 'underline',
-    opacity: 0.5,
-  },
-  main: {
-    maxWidth: 960,
-    margin: '0 auto',
-    padding: '8px 32px 60px',
-  },
-  viewportWrapper: {
-    position: 'relative' as const,
-    width: '100%',
-    aspectRatio: '16/9',
-    borderRadius: 16,
-    overflow: 'hidden',
-    border: '1.5px solid #d0cdc4',
-    background: '#0a0a0a',
-    marginBottom: '20px',
-  },
-  viewport: {
-    width: '100%',
-    height: '100%',
-  },
-  bigPlayBtn: {
-    position: 'absolute' as const,
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    background: 'rgba(0,0,0,0.5)',
-    backdropFilter: 'blur(8px)',
-    border: '1.5px solid rgba(255,255,255,0.15)',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    transition: 'background 0.15s',
-  },
-  viewportControls: {
-    position: 'absolute' as const,
-    bottom: 12,
-    left: 12,
-    right: 12,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  },
-  controlBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '6px 16px',
-    background: 'rgba(0,0,0,0.55)',
-    backdropFilter: 'blur(8px)',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#faf9f6',
-    fontWeight: 600,
-  },
-  controlBtnOutline: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '6px 12px',
-    backdropFilter: 'blur(8px)',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#faf9f6',
-    fontWeight: 500,
-  },
-  controlBtnIcon: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 32,
-    height: 32,
-    background: 'rgba(0,0,0,0.55)',
-    backdropFilter: 'blur(8px)',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: 8,
-    cursor: 'pointer',
-    marginLeft: 'auto',
-  },
-  moreMenu: {
-    position: 'absolute' as const,
-    bottom: 40,
-    right: 0,
-    background: '#faf9f6',
-    border: '1px solid #e0ddd4',
-    borderRadius: 10,
-    padding: '4px 0',
-    minWidth: 180,
-    boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-    zIndex: 10,
-  },
-  menuItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-    padding: '8px 14px',
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#0a0a0a',
-    textAlign: 'left' as const,
-  },
-  titleSection: {
-    marginBottom: '20px',
-  },
-  title: {
-    fontSize: '24px',
-    fontWeight: 700,
-    margin: '0 0 4px',
-    letterSpacing: '-0.01em',
-  },
-  metaRow: {
-    fontSize: '14px',
-    color: '#0a0a0a',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    flexWrap: 'wrap' as const,
-  },
-  scriptSection: {
-    marginBottom: '32px',
-  },
-  scriptHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: '10px',
-    gap: 8,
-  },
-  sectionLabel: {
-    fontSize: '13px',
-    fontWeight: 600,
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.08em',
-    opacity: 0.25,
-  },
-  dirtyControls: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  },
-  dirtyBadge: {
-    fontSize: 12,
-    fontFamily: "'SF Mono', 'Consolas', monospace",
-    color: '#8b6914',
-    background: '#fefbf0',
-    border: '1px solid #e8d890',
-    borderRadius: 4,
-    padding: '2px 8px',
-  },
-  discardBtn: {
-    padding: '6px 14px',
-    background: 'none',
-    border: '1px solid #d0cdc4',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontSize: 13,
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#0a0a0a',
-    fontWeight: 500,
-  },
-  saveBtn: {
-    padding: '6px 14px',
-    background: '#0a0a0a',
-    border: 'none',
-    borderRadius: 8,
-    cursor: 'pointer',
-    fontSize: 13,
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#faf9f6',
-    fontWeight: 600,
-  },
-  editorShell: {
-    background: '#faf9f6',
-    border: '1px solid #e0ddd4',
-    borderRadius: 12,
-    overflow: 'hidden',
-    height: 420,
-  },
-  promptRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-  },
-  editInput: {
-    flex: 1,
-    padding: '10px 14px',
-    background: '#faf9f6',
-    border: '1px solid #e0ddd4',
-    borderRadius: 10,
-    fontSize: '14px',
-    fontFamily: "'Inter', system-ui, sans-serif",
-    color: '#0a0a0a',
-    outline: 'none',
-    boxSizing: 'border-box' as const,
-  },
-  editSubmitBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    background: '#e0ddd4',
-    border: 'none',
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-};
+    color: theme.text,
+  };
+}
+
+/** Deterministic gradient avatar from a username. */
+function avatarGradient(username: string): string {
+  let h = 0;
+  for (let i = 0; i < username.length; i++) h = (h * 31 + username.charCodeAt(i)) >>> 0;
+  const a = h % 360;
+  const b = (a + 60) % 360;
+  return `linear-gradient(135deg, hsl(${a},65%,55%), hsl(${b},65%,45%))`;
+}

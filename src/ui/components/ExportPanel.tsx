@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { renderOffline, encodeWAV, downloadBlob, type RenderMode, type RenderProgress } from '../../engine/export';
+import { useTheme } from '../theme/ThemeContext';
 import type { SatieEngine } from '../../engine';
 
 interface ExportPanelProps {
@@ -13,6 +14,7 @@ interface ExportPanelProps {
 type ExportFormat = 'stereo' | 'binaural' | 'ambisonic-foa' | 'video';
 
 export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, currentTime }: ExportPanelProps) {
+  const { theme } = useTheme();
   const [format, setFormat] = useState<ExportFormat>('stereo');
   const [duration, setDuration] = useState(30);
   const [sampleRate, setSampleRate] = useState(48000);
@@ -209,7 +211,7 @@ export function ExportPanel({ script, sampleBuffers, engineRef, isPlaying, curre
       padding: '10px 14px',
       fontFamily: "'SF Mono', 'Consolas', monospace",
       fontSize: '16px',
-      color: '#1a3a2a',
+      color: theme.accent,
       display: 'flex',
       flexDirection: 'column',
       gap: '10px',
@@ -425,7 +427,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '15px',
     fontFamily: "'SF Mono', monospace",
     background: 'transparent',
-    color: '#1a3a2a',
+    color: 'inherit',
     outline: 'none',
   },
   exportBtn: {

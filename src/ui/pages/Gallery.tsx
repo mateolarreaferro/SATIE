@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getPublicSketches } from '../../lib/sketches';
 import { useSFX } from '../hooks/useSFX';
-import { useDayNightCycle, type Theme } from '../hooks/useDayNightCycle';
+import { useTheme } from '../theme/ThemeContext';
+import type { Theme } from '../theme/tokens';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { RiverCanvas } from '../components/RiverCanvas';
 import { Header } from '../components/Header';
@@ -58,7 +59,13 @@ function collisionSound(speed: number) {
   } catch { /* ok */ }
 }
 
-function usePhysics(count: number, version: number, containerRef: React.RefObject<HTMLDivElement | null>) {
+function usePhysics(
+  count: number,
+  version: number,
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  borderRest: string,
+  borderActive: string,
+) {
   const bodies = useRef<PhysicsBody[]>([]);
   const raf = useRef(0);
   const dragging = useRef(-1);
@@ -186,7 +193,7 @@ function usePhysics(count: number, version: number, containerRef: React.RefObjec
           cards[i].style.transform = b.colliding
             ? `translate3d(${b.x}px, ${b.y}px, 0) scale(0.98)`
             : `translate3d(${b.x}px, ${b.y}px, 0)`;
-          cards[i].style.borderColor = b.colliding ? '#1a3a2a' : '#d0cdc4';
+          cards[i].style.borderColor = b.colliding ? borderActive : borderRest;
         }
       }
       raf.current = requestAnimationFrame(step);
@@ -319,7 +326,7 @@ export function Gallery() {
   const navigate = useNavigate();
   const sfx = useSFX();
   useBackgroundMusic('/Satie-Theme.wav', 0.08);
-  const { theme, mode, setMode } = useDayNightCycle();
+  const { theme, mode, setMode } = useTheme();
   const [allSketches, setAllSketches] = useState<Sketch[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -366,7 +373,7 @@ export function Gallery() {
     lastKeyRef.current = sketchKey;
     setPhysicsVersion(v => v + 1);
   }
-  const { bodies, dragging: draggingRef } = usePhysics(visibleSketches.length, physicsVersion, canvasRef);
+  const { bodies, dragging: draggingRef } = usePhysics(visibleSketches.length, physicsVersion, canvasRef, theme.cardBorder, theme.accent);
 
   const formatDate = (iso: string) => {
     const d = new Date(iso);

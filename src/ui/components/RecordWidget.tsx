@@ -1,10 +1,12 @@
 import { useState, useRef, useCallback, useEffect, type RefObject } from 'react';
+import { useTheme } from '../theme/ThemeContext';
 
 interface RecordWidgetProps {
   onSave: (name: string, buffer: ArrayBuffer) => Promise<void>;
 }
 
 export function RecordWidget({ onSave }: RecordWidgetProps) {
+  const { theme } = useTheme();
   const [state, setState] = useState<'idle' | 'recording' | 'preview'>('idle');
   const [duration, setDuration] = useState(0);
   const [name, setName] = useState('');
@@ -283,7 +285,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
               fontSize: '15px',
               fontFamily: "'SF Mono', monospace",
               background: 'transparent',
-              color: '#1a3a2a',
+              color: theme.accent,
               outline: 'none',
             }}
           />
@@ -297,7 +299,7 @@ export function RecordWidget({ onSave }: RecordWidgetProps) {
               cursor: 'pointer',
               padding: '2px 6px',
               fontSize: '15px',
-              color: '#1a3a2a',
+              color: theme.accent,
               fontFamily: 'inherit',
             }}
           >

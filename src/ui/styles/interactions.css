@@ -1,5 +1,26 @@
 /* Global hover & interaction styles */
 
+/* Global :focus-visible ring — color is set from ThemeProvider via --satie-focus */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--satie-focus, rgba(26, 58, 42, 0.55));
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* Spinner rotation (used by primitives/Spinner.tsx) */
+@keyframes satie-spin {
+  to { transform: rotate(360deg); }
+}
+
+.satie-spin {
+  animation: satie-spin 0.9s linear infinite;
+}
+
 /* Buttons — subtle lift on hover */
 button {
   transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s, border-color 0.15s !important;

@@ -20,6 +20,7 @@ import {
   refineScript,
   type RefinementProgress,
 } from '../../lib/aiGenerate';
+import { useTheme } from '../theme/ThemeContext';
 
 export type AITarget = 'script' | 'sample' | 'trajectory';
 
@@ -139,6 +140,7 @@ export function AIPanel({
   onTargetChange,
   onFeedbackCreated,
 }: AIPanelProps) {
+  const { theme } = useTheme();
   const [prompts, setPrompts] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
   const [input, setInput] = useState('');
@@ -483,7 +485,7 @@ export function AIPanel({
             border: '1px solid #d0cdc4',
             borderRadius: 4,
             padding: '1px 4px',
-            color: '#1a3a2a',
+            color: theme.accent,
             cursor: 'pointer',
             outline: 'none',
           }}
@@ -526,7 +528,7 @@ export function AIPanel({
               style={{
                 padding: '1px 7px',
                 background: 'none',
-                color: '#1a3a2a',
+                color: theme.accent,
                 border: '1px solid #d0cdc4',
                 borderRadius: 5,
                 cursor: (!currentScript || isRefining || isLoading || refineCooldown || budgetExceeded) ? 'default' : 'pointer',
@@ -547,7 +549,7 @@ export function AIPanel({
               borderRadius: 5,
               fontSize: '11px',
               fontFamily: "'SF Mono', monospace",
-              color: '#1a3a2a',
+              color: theme.accent,
               lineHeight: 1.4,
               opacity: 0.7,
             }}>
@@ -577,7 +579,7 @@ export function AIPanel({
         {prompts.map((p, i) => (
           <div key={i} style={{
             padding: '3px 0',
-            color: '#1a3a2a',
+            color: theme.accent,
             opacity: 0.4,
             fontSize: '16px',
             fontStyle: 'italic',
@@ -633,7 +635,7 @@ export function AIPanel({
           {historyIndex >= 0 && (
             <div style={{
               fontSize: '15px',
-              color: '#1a3a2a',
+              color: theme.accent,
               opacity: 0.5,
               fontStyle: 'italic',
               padding: '0 0 3px',
@@ -659,7 +661,7 @@ export function AIPanel({
                 cursor: history.length <= 1 || historyIndex === 0 ? 'default' : 'pointer',
                 opacity: history.length <= 1 || historyIndex === 0 ? 0.15 : 0.5,
                 fontSize: '16px',
-                color: '#1a3a2a',
+                color: theme.accent,
                 padding: '0 4px',
               }}
             >
@@ -687,7 +689,7 @@ export function AIPanel({
                 cursor: (historyIndex < 0 || historyIndex >= history.length - 1) ? 'default' : 'pointer',
                 opacity: (historyIndex < 0 || historyIndex >= history.length - 1) ? 0.15 : 0.5,
                 fontSize: '16px',
-                color: '#1a3a2a',
+                color: theme.accent,
                 padding: '0 4px',
               }}
             >
@@ -712,7 +714,7 @@ export function AIPanel({
                       fontSize: '16px',
                       padding: '0 2px',
                       opacity: currentRating === 1 ? 1 : 0.25,
-                      color: '#1a3a2a',
+                      color: theme.accent,
                       transition: 'opacity 0.15s',
                     }}
                   >
@@ -765,7 +767,7 @@ export function AIPanel({
             background: '#faf9f6',
             outline: 'none',
             resize: 'none',
-            color: '#1a3a2a',
+            color: theme.accent,
             lineHeight: 1.4,
           }}
         />

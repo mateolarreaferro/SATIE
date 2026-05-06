@@ -1,42 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { LIGHT, DARK, PASTELS } from '../theme/tokens';
+import type { Theme as ThemeToken } from '../theme/tokens';
 
+// Re-export for backward compat — existing callers do `import { Theme } from './useDayNightCycle'`.
+export type Theme = ThemeToken;
 export type ThemeMode = 'light' | 'dark' | 'fade';
-
-export interface Theme {
-  bg: string;
-  text: string;
-  textMuted: string;
-  border: string;
-  cardBg: string;
-  cardBorder: string;
-  invertedBg: string;
-  invertedText: string;
-  mode: ThemeMode;
-}
-
-const LIGHT: Theme = {
-  bg: '#f4f3ee',
-  text: '#0a0a0a',
-  textMuted: 'rgba(10,10,10,0.35)',
-  border: '#d0cdc4',
-  cardBg: '#faf9f6',
-  cardBorder: '#d0cdc4',
-  invertedBg: '#0a0a0a',
-  invertedText: '#faf9f6',
-  mode: 'light',
-};
-
-const DARK: Theme = {
-  bg: '#111110',
-  text: '#e8e6e1',
-  textMuted: 'rgba(232,230,225,0.35)',
-  border: '#2a2926',
-  cardBg: '#1a1918',
-  cardBorder: '#2a2926',
-  invertedBg: '#e8e6e1',
-  invertedText: '#111110',
-  mode: 'dark',
-};
 
 // ── Color math ──
 
@@ -58,30 +26,6 @@ function lerpColor(c1: string, c2: string, t: number): string {
   const [r2, g2, b2] = hexToRgb(c2);
   return rgbToHex(lerp(r1, r2, t), lerp(g1, g2, t), lerp(b1, b2, t));
 }
-
-// ── Pastel palette for fade mode ──
-// Each palette defines two gradient stops (bg is a CSS gradient) plus derived UI colors.
-// The cycle drifts through these continuously.
-
-interface PastelPalette {
-  bgFrom: string;   // gradient start
-  bgTo: string;     // gradient end
-  cardBg: string;
-  border: string;
-}
-
-const PASTELS: PastelPalette[] = [
-  { bgFrom: '#f4f3ee', bgTo: '#f4f3ee', cardBg: '#faf9f6', border: '#d0cdc4' },  // warm cream (home base)
-  { bgFrom: '#fce4ec', bgTo: '#f3e5f5', cardBg: '#fef0f5', border: '#e8b4c8' },  // rose → lavender
-  { bgFrom: '#e8eaf6', bgTo: '#e0f2f1', cardBg: '#f0f1fa', border: '#b0b8d6' },  // periwinkle → mint
-  { bgFrom: '#fff8e1', bgTo: '#fff3e0', cardBg: '#fffbf0', border: '#e0d0a8' },  // buttercream → peach
-  { bgFrom: '#e0f7fa', bgTo: '#e8f5e9', cardBg: '#f0fbfc', border: '#a8d8d0' },  // ice blue → sage
-  { bgFrom: '#f3e5f5', bgTo: '#ede7f6', cardBg: '#f8f0fb', border: '#c8b0d8' },  // lilac → wisteria
-  { bgFrom: '#fbe9e7', bgTo: '#fff8e1', cardBg: '#fef2f0', border: '#dcc0b0' },  // blush → cream
-  { bgFrom: '#e8f5e9', bgTo: '#f1f8e9', cardBg: '#f2faf2', border: '#b8d8b0' },  // sage → chartreuse
-  { bgFrom: '#e3f2fd', bgTo: '#e8eaf6', cardBg: '#f0f5fe', border: '#a8c0e0' },  // sky → steel
-  { bgFrom: '#fce4ec', bgTo: '#fff8e1', cardBg: '#fef0f0', border: '#e0c0b0' },  // rose → butter
-];
 
 // Time per palette transition: 10 seconds. Full cycle = PASTELS.length * 10s
 const PALETTE_DURATION_MS = 10_000;
@@ -135,7 +79,11 @@ function buildFadeTheme(progress: number): Theme {
   const border = lerpColor(from.border, to.border, smooth);
   const cardBorder = lerpColor(from.border, to.border, smooth);
 
+  // Build a fade theme by spreading LIGHT (so all the new tokens — accent, danger,
+  // overlayBg, monaco, etc. — are inherited) and overriding the surface colors
+  // that drift across the pastel cycle.
   return {
+    ...LIGHT,
     bg: `linear-gradient(135deg, ${bgFrom}, ${bgTo})`,
     text: '#0a0a0a',
     textMuted: 'rgba(10,10,10,0.5)',

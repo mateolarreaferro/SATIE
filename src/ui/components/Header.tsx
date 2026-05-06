@@ -5,7 +5,7 @@ import { loadSettings, saveKey as saveSettingsKey, getPreferCommunitySamples, se
 import { useSFX } from '../hooks/useSFX';
 import { useMusicEnabled } from '../hooks/useBackgroundMusic';
 import { FeedbackDashboard } from './FeedbackDashboard';
-import type { Theme, ThemeMode } from '../hooks/useDayNightCycle';
+import type { Theme, ThemeMode } from '../theme/tokens';
 
 interface ApiKeys {
   anthropic_key: string;
@@ -102,6 +102,9 @@ const themeIcons: Record<ThemeMode, (color: string) => React.ReactNode> = {
   light: (c) => Icons.sun(c, 13),
   fade: (c) => Icons.sunset(c, 13),
   dark: (c) => Icons.moon(c, 13),
+  // 'system' uses the same sunset glyph so the affordance reads naturally —
+  // most callers don't expose system mode, this is a defensive fallback.
+  system: (c) => Icons.sunset(c, 13),
 };
 
 interface HeaderProps {
@@ -477,7 +480,7 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
                     </span>
                     <span style={{ fontSize: '15px', opacity: 0.35 }}>credits</span>
                     {balanceCents != null && balanceCents < 100 && balanceCents >= 0 && (
-                      <span style={{ fontSize: '16px', color: '#8b0000', opacity: 0.8 }}>
+                      <span style={{ fontSize: '16px', color: theme.danger, opacity: 0.8 }}>
                         {balanceCents === 0 ? 'empty' : 'running low'}
                       </span>
                     )}
@@ -540,7 +543,7 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
                         sfx.click();
                         setPreferCommunityState(e.target.checked);
                       }}
-                      style={{ accentColor: '#1a3a2a' }}
+                      style={{ accentColor: theme.accent }}
                     />
                     Prefer community samples over AI generation
                   </label>
@@ -571,9 +574,9 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
                   justifyContent: 'flex-end',
                 }}>
                   {([
-                    { key: 'keys' as const, label: 'API keys', icon: Icons.key(advancedTab === 'keys' ? '#faf9f6' : theme.text, 11) },
+                    { key: 'keys' as const, label: 'API keys', icon: Icons.key(advancedTab === 'keys' ? theme.accentText : theme.text, 11) },
                     { key: 'learning' as const, label: 'AI learning', icon: (
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={advancedTab === 'learning' ? '#faf9f6' : theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={advancedTab === 'learning' ? theme.accentText : theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                       </svg>
                     )},
@@ -583,9 +586,9 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
                       onClick={() => setAdvancedTab(tab.key)}
                       style={{
                         padding: '2px 8px',
-                        background: advancedTab === tab.key ? '#1a3a2a' : 'none',
-                        color: advancedTab === tab.key ? '#faf9f6' : '#1a3a2a',
-                        border: `1px solid ${advancedTab === tab.key ? '#1a3a2a' : '#d0cdc4'}`,
+                        background: advancedTab === tab.key ? theme.accent : 'none',
+                        color: advancedTab === tab.key ? theme.accentText : theme.accent,
+                        border: `1px solid ${advancedTab === tab.key ? theme.accent : theme.cardBorder}`,
                         borderRadius: 6,
                         cursor: 'pointer',
                         fontSize: '12px',

@@ -33,6 +33,8 @@ import { saveVersion } from '../../lib/versions';
 import { ExportPanel } from '../components/ExportPanel';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import { updateFeedback, editDistanceRatio } from '../../lib/feedbackStore';
+import { useTheme } from '../theme/ThemeContext';
+import { RADIUS, SHADOW, FONT } from '../theme/tokens';
 
 const DEFAULT_SCRIPT = `# satie\n`;
 
@@ -67,6 +69,7 @@ const VoicesPanel = memo(function VoicesPanel({
   onToggleMute: (index: number) => void;
   onToggleSolo: (index: number) => void;
 }) {
+  const { theme } = useTheme();
   const hasSolo = soloedIndices.size > 0;
 
   return (
@@ -74,7 +77,7 @@ const VoicesPanel = memo(function VoicesPanel({
       padding: '4px 14px 8px',
       fontFamily: "'SF Mono', 'Consolas', monospace",
       fontSize: '16px',
-      color: '#1a3a2a',
+      color: theme.text,
       overflow: 'auto',
       height: '100%',
     }}>
@@ -97,10 +100,12 @@ const VoicesPanel = memo(function VoicesPanel({
             <button
               onClick={() => onToggleMute(i)}
               title="Mute"
+              aria-label={isMuted ? `Unmute ${stmt.clip}` : `Mute ${stmt.clip}`}
+              aria-pressed={isMuted}
               style={{
-                background: isMuted ? '#1a3a2a' : 'none',
-                color: isMuted ? '#faf9f6' : '#1a3a2a',
-                border: '1px solid #1a3a2a',
+                background: isMuted ? theme.accent : 'none',
+                color: isMuted ? theme.accentText : theme.accent,
+                border: `1px solid ${theme.accent}`,
                 borderRadius: 3,
                 fontSize: '16px',
                 fontWeight: 700,
@@ -110,7 +115,7 @@ const VoicesPanel = memo(function VoicesPanel({
                 padding: 0,
                 cursor: 'pointer',
                 lineHeight: '20px',
-                opacity: isMuted ? 1 : 0.4,
+                opacity: isMuted ? 1 : 0.5,
                 flexShrink: 0,
               }}
             >
@@ -119,10 +124,12 @@ const VoicesPanel = memo(function VoicesPanel({
             <button
               onClick={() => onToggleSolo(i)}
               title="Solo"
+              aria-label={isSoloed ? `Unsolo ${stmt.clip}` : `Solo ${stmt.clip}`}
+              aria-pressed={isSoloed}
               style={{
-                background: isSoloed ? '#8b6914' : 'none',
-                color: isSoloed ? '#faf9f6' : '#1a3a2a',
-                border: `1px solid ${isSoloed ? '#8b6914' : '#1a3a2a'}`,
+                background: isSoloed ? theme.warn : 'none',
+                color: isSoloed ? theme.accentText : theme.accent,
+                border: `1px solid ${isSoloed ? theme.warn : theme.accent}`,
                 borderRadius: 3,
                 fontSize: '16px',
                 fontWeight: 700,
@@ -132,7 +139,7 @@ const VoicesPanel = memo(function VoicesPanel({
                 padding: 0,
                 cursor: 'pointer',
                 lineHeight: '20px',
-                opacity: isSoloed ? 1 : 0.4,
+                opacity: isSoloed ? 1 : 0.5,
                 flexShrink: 0,
               }}
             >
@@ -145,9 +152,9 @@ const VoicesPanel = memo(function VoicesPanel({
             {!stmt.every.isNull && (
               <span style={{ opacity: 0.4 }}> e:{stmt.every.toString()}</span>
             )}
-            {stmt.reverbParams && <span style={{ color: '#8b0000' }}> rv</span>}
-            {stmt.delayParams && <span style={{ color: '#8b0000' }}> dl</span>}
-            {stmt.filterParams && <span style={{ color: '#8b0000' }}> fl</span>}
+            {stmt.reverbParams && <span style={{ color: theme.danger }}> rv</span>}
+            {stmt.delayParams && <span style={{ color: theme.danger }}> dl</span>}
+            {stmt.filterParams && <span style={{ color: theme.danger }}> fl</span>}
             {stmt.wanderType !== WanderType.None && (
               <span style={{ opacity: 0.4 }}> [{stmt.wanderType}]</span>
             )}
@@ -160,6 +167,7 @@ const VoicesPanel = memo(function VoicesPanel({
 
 /** SVG overlay that draws a bezier "patch cord" from AI panel to its target panel */
 const PatchCord = memo(function PatchCord({ target }: { target: AITarget }) {
+  const { theme } = useTheme();
   const [path, setPath] = useState('');
   const rafRef = useRef(0);
 
@@ -220,10 +228,10 @@ const PatchCord = memo(function PatchCord({ target }: { target: AITarget }) {
       <path
         d={path}
         fill="none"
-        stroke="#000"
+        stroke={theme.accent}
         strokeWidth={1.5}
         strokeDasharray="6 4"
-        opacity={0.2}
+        opacity={0.3}
       />
     </svg>
   );
@@ -255,6 +263,7 @@ export function Editor() {
 
   const faceTracking = useFaceTracking(setListenerOrientation);
   const sfx = useSFX();
+  const { theme } = useTheme();
   // First-time experience: show a demo composition on first visit
   const isFirstTime = !sketchId && !templateState?.templateScript && !localStorage.getItem(FIRST_TIME_KEY);
   const initialScript = templateState?.templateScript ?? (isFirstTime ? FIRST_TIME_SCRIPT : DEFAULT_SCRIPT);
@@ -299,6 +308,33 @@ export function Editor() {
   /** Raw ArrayBuffers for samples loaded this session — used for uploading on save. */
   const sampleBuffers = useRef<Map<string, ArrayBuffer>>(new Map());
 
+  // Dirty tracking — last saved snapshot. Updated on successful save AND on
+  // sketch-load (so freshly-loaded sketches start clean).
+  const [lastSavedScript, setLastSavedScript] = useState(initialScript);
+  const [lastSavedTitle, setLastSavedTitle] = useState(initialTitle);
+  const isDirty = script !== lastSavedScript || sketchTitle !== lastSavedTitle;
+
+  // Mobile gate — workspace requires desktop viewport.
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsNarrow(window.innerWidth < 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
+  // Escape-to-close on popovers.
+  useEffect(() => {
+    if (!activePopover) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setActivePopover(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activePopover]);
+
   // Fetch community sample names for editor autocomplete
   useEffect(() => {
     getPopularSamples(100)
@@ -329,6 +365,9 @@ export function Editor() {
         setSketchTitle(sketch.title);
         setCurrentSketchId(sketch.id);
         setIsPublic(sketch.is_public);
+        // Loaded from DB → mark as clean.
+        setLastSavedScript(sketch.script);
+        setLastSavedTitle(sketch.title);
 
         // Restore viewport background color: first try @bg comment in script, then localStorage
         const bgMatch = sketch.script.match(/^- @bg (#[0-9a-fA-F]{6})/m);
@@ -364,7 +403,13 @@ export function Editor() {
     if (!user || !currentSketchId) return;
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     autosaveTimer.current = setTimeout(() => {
-      updateSketch(currentSketchId, { script, title: sketchTitle }).catch(console.error);
+      updateSketch(currentSketchId, { script, title: sketchTitle })
+        .then(() => {
+          // Mark clean once persisted.
+          setLastSavedScript(script);
+          setLastSavedTitle(sketchTitle);
+        })
+        .catch(console.error);
     }, AUTOSAVE_DELAY);
     return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
   }, [script, sketchTitle, user, currentSketchId]);
@@ -597,6 +642,9 @@ export function Editor() {
       sketchIdForSamples = sketch.id;
       window.history.replaceState(null, '', `/editor/${sketch.id}`);
     }
+    // Mark clean after successful persist.
+    setLastSavedScript(script);
+    setLastSavedTitle(sketchTitle);
 
     // Capture any engine audio buffers (including gen audio) that aren't in sampleBuffers yet
     if (engineRef.current) {
@@ -637,26 +685,71 @@ export function Editor() {
   const zoomBtnStyle: React.CSSProperties = {
     width: 28,
     height: 28,
-    borderRadius: 5,
-    background: '#faf9f6',
-    border: '1px solid #d0cdc4',
+    borderRadius: RADIUS.sm,
+    background: theme.cardBg,
+    border: `1px solid ${theme.cardBorder}`,
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 0,
-    color: '#1a3a2a',
+    color: theme.accent,
     fontSize: '15px',
     fontFamily: "'SF Mono', monospace",
     lineHeight: 1,
-    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    boxShadow: SHADOW.sm,
   };
+
+  // Mobile gate — Editor's floating-panel layout doesn't degrade gracefully under 768px.
+  if (isNarrow) {
+    return (
+      <div style={{
+        width: '100vw',
+        height: '100vh',
+        background: theme.bg,
+        color: theme.text,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px',
+        textAlign: 'center',
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+      }}>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5, marginBottom: 16 }}>
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <h1 style={{ fontSize: FONT.size.xl, fontWeight: FONT.weight.semibold, margin: '0 0 8px' }}>
+          Editor needs a desktop screen
+        </h1>
+        <p style={{ fontSize: FONT.size.md, opacity: 0.65, maxWidth: 320, lineHeight: 1.5, margin: '0 0 20px' }}>
+          The Satie editor uses a wide multi-panel layout that doesn't fit on narrow screens. Open this page on a laptop or desktop to compose.
+        </p>
+        <a
+          href="/explore"
+          style={{
+            background: theme.invertedBg,
+            color: theme.invertedText,
+            padding: '10px 18px',
+            borderRadius: RADIUS.pill,
+            fontSize: FONT.size.body,
+            fontWeight: FONT.weight.medium,
+            textDecoration: 'none',
+          }}
+        >
+          Browse public sketches instead
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div style={{
       width: '100vw',
       height: '100vh',
-      background: '#f4f3ee',
+      background: theme.bg,
       overflow: 'hidden',
       display: 'flex',
       fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
@@ -674,7 +767,7 @@ export function Editor() {
         onTogglePopover={togglePopover}
         onSave={user ? handleSave : undefined}
         canSave={!!user}
-        isSaved={!!currentSketchId}
+        isDirty={isDirty}
         isPublic={isPublic}
         onTogglePublic={handleTogglePublic}
         sketchId={currentSketchId}
@@ -685,7 +778,7 @@ export function Editor() {
         position: 'relative',
         overflow: 'hidden',
       }}>
-        {/* Sketch title — editable inline at top-right of workspace */}
+        {/* Sketch title + saved-state indicator */}
         <div style={{
           position: 'absolute',
           top: 12,
@@ -693,34 +786,58 @@ export function Editor() {
           zIndex: 200,
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
-          background: '#faf9f6',
-          border: '1px solid #d0cdc4',
-          borderRadius: 6,
-          padding: '4px 10px',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-          maxWidth: 320,
+          gap: 8,
         }}>
-          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="#1a3a2a" strokeWidth="1.2" style={{ opacity: 0.5, flexShrink: 0 }}>
-            <path d="M2.5 1.5h7l2.5 2.5v8h-10v-10.5z" strokeLinejoin="round"/>
-          </svg>
-          <input
-            value={sketchTitle}
-            onChange={(e) => setSketchTitle(e.target.value)}
-            placeholder="Untitled"
-            title="Sketch title"
-            style={{
-              width: 220,
-              fontSize: '13px',
-              fontFamily: "'Inter', system-ui, sans-serif",
-              color: '#1a3a2a',
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              padding: 0,
-              fontWeight: 500,
-            }}
-          />
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            background: theme.cardBg,
+            border: `1px solid ${theme.cardBorder}`,
+            borderRadius: RADIUS.sm,
+            padding: '4px 10px',
+            boxShadow: SHADOW.sm,
+            maxWidth: 320,
+          }}>
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke={theme.accent} strokeWidth="1.2" style={{ opacity: 0.5, flexShrink: 0 }}>
+              <path d="M2.5 1.5h7l2.5 2.5v8h-10v-10.5z" strokeLinejoin="round"/>
+            </svg>
+            <input
+              value={sketchTitle}
+              onChange={(e) => setSketchTitle(e.target.value)}
+              placeholder="Untitled"
+              title="Sketch title"
+              aria-label="Sketch title"
+              style={{
+                width: 220,
+                fontSize: FONT.size.body,
+                fontFamily: "'Inter', system-ui, sans-serif",
+                color: theme.text,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                padding: 0,
+                fontWeight: 500,
+              }}
+            />
+          </div>
+          {user && (
+            <span
+              role="status"
+              aria-live="polite"
+              style={{
+                fontSize: FONT.size.xs,
+                fontWeight: 500,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: isDirty ? theme.warn : theme.textMuted,
+                fontFamily: "'Inter', system-ui, sans-serif",
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {isDirty ? 'unsaved' : 'saved'}
+            </span>
+          )}
         </div>
 
         {/* Workspace zoom controls */}
@@ -793,22 +910,23 @@ export function Editor() {
               display: 'flex',
               alignItems: 'center',
               padding: '6px 12px',
-              borderTop: '1px solid #e8e0d8',
+              borderTop: `1px solid ${theme.cardBorder}`,
               gap: '8px',
             }}>
               <button
                 className="run-btn"
                 onClick={() => { sfx.play(); handleRun(); }}
                 onMouseEnter={sfx.hover}
+                aria-label="Run script"
                 style={{
                   padding: '3px 12px',
                   background: 'none',
-                  border: '1.5px solid #1a3a2a',
-                  borderRadius: 8,
+                  border: `1.5px solid ${theme.accent}`,
+                  borderRadius: RADIUS.md,
                   cursor: 'pointer',
                   fontSize: '16px',
                   fontFamily: "'Inter', system-ui, sans-serif",
-                  color: '#1a3a2a',
+                  color: theme.accent,
                   fontWeight: 500,
                 }}
               >
@@ -816,7 +934,8 @@ export function Editor() {
               </button>
               <span style={{
                 fontSize: '16px',
-                opacity: 0.2,
+                opacity: 0.4,
+                color: theme.text,
                 fontFamily: "'SF Mono', monospace",
               }}>
                 Cmd+Enter
@@ -882,10 +1001,10 @@ export function Editor() {
                   bottom: 16,
                   left: '50%',
                   transform: 'translateX(-50%)',
-                  background: '#0a0a0ae6',
-                  color: '#f4f3ee',
+                  background: theme.overlayBg,
+                  color: theme.overlayText,
                   padding: '8px 16px',
-                  borderRadius: 8,
+                  borderRadius: RADIUS.md,
                   fontSize: '12px',
                   fontFamily: "'Inter', system-ui, sans-serif",
                   display: 'flex',
@@ -941,7 +1060,7 @@ export function Editor() {
             defaultHeight={300}
             minWidth={240}
             minHeight={160}
-            borderColor="#1a3a2a"
+            borderColor={theme.accent}
           >
             <ErrorBoundary name="AI">
               <AIPanel
@@ -962,32 +1081,38 @@ export function Editor() {
 
         {/* Popover overlays — rendered outside the scaled workspace so they stay at native size */}
         {activePopover === 'export' && (
-          <div style={{
-            position: 'absolute',
-            left: 16,
-            bottom: 48,
-            width: 340,
-            maxHeight: 'calc(100vh - 100px)',
-            background: '#faf9f6',
-            border: '1.5px solid #1a3a2a',
-            borderRadius: 12,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
-            zIndex: 300,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="export-popover-title"
+            style={{
+              position: 'absolute',
+              left: 16,
+              bottom: 48,
+              width: 340,
+              maxHeight: 'calc(100vh - 100px)',
+              background: theme.cardBg,
+              border: `1.5px solid ${theme.cardBorder}`,
+              borderRadius: RADIUS.lg,
+              boxShadow: SHADOW.lg,
+              zIndex: 300,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '10px 14px 8px',
-              borderBottom: '1px solid #e8e0d8',
+              borderBottom: `1px solid ${theme.cardBorder}`,
             }}>
-              <span style={{ fontSize: '16px', fontWeight: 600, color: '#1a3a2a', fontFamily: "'Inter', system-ui, sans-serif" }}>Export</span>
+              <span id="export-popover-title" style={{ fontSize: '16px', fontWeight: 600, color: theme.text, fontFamily: "'Inter', system-ui, sans-serif" }}>Export</span>
               <button
                 onClick={() => setActivePopover(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#1a3a2a', opacity: 0.4, padding: 0, lineHeight: 1 }}
+                aria-label="Close export panel"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: theme.text, opacity: 0.5, padding: 0, lineHeight: 1 }}
               >&times;</button>
             </div>
             <div style={{ flex: 1, overflow: 'auto' }}>
@@ -1005,32 +1130,38 @@ export function Editor() {
         )}
 
         {activePopover === 'docs' && (
-          <div style={{
-            position: 'absolute',
-            left: 16,
-            bottom: 48,
-            width: 380,
-            height: 'calc(100vh - 100px)',
-            background: '#faf9f6',
-            border: '1.5px solid #1a3a2a',
-            borderRadius: 12,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
-            zIndex: 300,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="docs-popover-title"
+            style={{
+              position: 'absolute',
+              left: 16,
+              bottom: 48,
+              width: 380,
+              height: 'calc(100vh - 100px)',
+              background: theme.cardBg,
+              border: `1.5px solid ${theme.cardBorder}`,
+              borderRadius: RADIUS.lg,
+              boxShadow: SHADOW.lg,
+              zIndex: 300,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '10px 14px 8px',
-              borderBottom: '1px solid #e8e0d8',
+              borderBottom: `1px solid ${theme.cardBorder}`,
             }}>
-              <span style={{ fontSize: '16px', fontWeight: 600, color: '#1a3a2a', fontFamily: "'Inter', system-ui, sans-serif" }}>Reference</span>
+              <span id="docs-popover-title" style={{ fontSize: '16px', fontWeight: 600, color: theme.text, fontFamily: "'Inter', system-ui, sans-serif" }}>Reference</span>
               <button
                 onClick={() => setActivePopover(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#1a3a2a', opacity: 0.4, padding: 0, lineHeight: 1 }}
+                aria-label="Close docs panel"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: theme.text, opacity: 0.5, padding: 0, lineHeight: 1 }}
               >&times;</button>
             </div>
             <div style={{ flex: 1, overflow: 'auto' }}>
@@ -1040,32 +1171,38 @@ export function Editor() {
         )}
 
         {activePopover === 'versions' && (
-          <div style={{
-            position: 'absolute',
-            left: 16,
-            top: 16,
-            width: 280,
-            maxHeight: 340,
-            background: '#faf9f6',
-            border: '1.5px solid #1a3a2a',
-            borderRadius: 12,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.10)',
-            zIndex: 300,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="versions-popover-title"
+            style={{
+              position: 'absolute',
+              left: 16,
+              top: 16,
+              width: 280,
+              maxHeight: 340,
+              background: theme.cardBg,
+              border: `1.5px solid ${theme.cardBorder}`,
+              borderRadius: RADIUS.lg,
+              boxShadow: SHADOW.lg,
+              zIndex: 300,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
             <div style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               padding: '10px 14px 8px',
-              borderBottom: '1px solid #e8e0d8',
+              borderBottom: `1px solid ${theme.cardBorder}`,
             }}>
-              <span style={{ fontSize: '16px', fontWeight: 600, color: '#1a3a2a', fontFamily: "'Inter', system-ui, sans-serif" }}>Versions</span>
+              <span id="versions-popover-title" style={{ fontSize: '16px', fontWeight: 600, color: theme.text, fontFamily: "'Inter', system-ui, sans-serif" }}>Versions</span>
               <button
                 onClick={() => setActivePopover(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: '#1a3a2a', opacity: 0.4, padding: 0, lineHeight: 1 }}
+                aria-label="Close versions panel"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: theme.text, opacity: 0.5, padding: 0, lineHeight: 1 }}
               >&times;</button>
             </div>
             <div style={{ flex: 1, overflow: 'auto' }}>

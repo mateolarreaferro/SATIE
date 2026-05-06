@@ -1,4 +1,6 @@
 import { useRef, useState, useCallback, useEffect, type ReactNode } from 'react';
+import { useTheme } from '../theme/ThemeContext';
+import { RADIUS as TOKEN_RADIUS, SHADOW } from '../theme/tokens';
 
 const LS_PREFIX = 'satie-panel-';
 const SAVE_DELAY = 500;
@@ -53,9 +55,11 @@ export function Panel({
   minWidth = 200,
   minHeight = 150,
   resizable = true,
-  borderColor = '#1a3a2a',
+  borderColor,
   compact = false,
 }: PanelProps) {
+  const { theme } = useTheme();
+  const resolvedBorderColor = borderColor ?? theme.cardBorder;
   const panelRef = useRef<HTMLDivElement>(null);
   const saved = useRef(loadLayout(panelId));
   const [pos, setPos] = useState({ x: saved.current?.x ?? defaultX, y: saved.current?.y ?? defaultY });
@@ -241,7 +245,7 @@ export function Panel({
   }, [isDragging, resizeEdge, minWidth, minHeight]);
 
   const EDGE = 8;
-  const RADIUS = 20;
+  const RADIUS = TOKEN_RADIUS.xl;
 
   const edgeStyle = (cursor: string, extra: React.CSSProperties): React.CSSProperties => ({
     position: 'absolute',
@@ -262,13 +266,13 @@ export function Panel({
         width: size.w,
         height: size.h,
         zIndex: 1,
-        background: '#faf9f6',
+        background: theme.cardBg,
         borderRadius: RADIUS,
-        border: `1.5px solid ${borderColor}`,
+        border: `1.5px solid ${resolvedBorderColor}`,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        boxShadow: '0 2px 20px rgba(0,0,0,0.04)',
+        boxShadow: SHADOW.md,
       }}
     >
       {/* Title bar */}
@@ -286,10 +290,10 @@ export function Panel({
           <span style={{
             fontSize: compact ? '10px' : '13px',
             fontWeight: 500,
-            color: '#1a3a2a',
+            color: theme.text,
             letterSpacing: '0.02em',
             fontFamily: "'Inter', system-ui, sans-serif",
-            opacity: compact ? 0.4 : 1,
+            opacity: compact ? 0.4 : 0.85,
           }}>
             {title}
           </span>

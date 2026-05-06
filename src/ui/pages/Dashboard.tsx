@@ -6,7 +6,8 @@ import { TEMPLATES } from '../../lib/templates';
 import type { Sketch } from '../../lib/supabase';
 import { Header } from '../components/Header';
 import { useSFX } from '../hooks/useSFX';
-import { useDayNightCycle, type Theme } from '../hooks/useDayNightCycle';
+import { useTheme } from '../theme/ThemeContext';
+import type { Theme } from '../theme/tokens';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { RiverCanvas } from '../components/RiverCanvas';
 
@@ -174,7 +175,7 @@ export function Dashboard() {
   const navigate = useNavigate();
   const sfx = useSFX();
   useBackgroundMusic('/Satie-Theme.wav', 0.08);
-  const { theme, mode, setMode } = useDayNightCycle();
+  const { theme, mode, setMode } = useTheme();
   const [sketches, setSketches] = useState<Sketch[]>([]);
   const [loadingSketches, setLoadingSketches] = useState(false);
 
@@ -280,8 +281,8 @@ export function Dashboard() {
             </div>
           )}
 
-          {/* Templates — shown when user has no sketches or is new */}
-          {((!user) || (user && !loadingSketches && sketches.length < 3)) && (
+          {/* Templates — always available so returning users can still scaffold from a template */}
+          {(!user || !loadingSketches) && (
             <div style={{
               display: 'flex',
               gap: '10px',
