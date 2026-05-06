@@ -75,10 +75,15 @@ const SUGGESTIONS = [
 // Hand-crafted preset scripts for the example buttons. These bypass AI generation
 // so the landing-page demos are instant, reliable, and high-quality.
 const SUGGESTION_PRESETS: Record<string, string> = {
-  'Forest at dawn': `group forest
-volume 0.9
-reverb wet 0.3 size 0.8 damping 0.6
+  'Forest at dawn': `- forest at dawn — a starter sketch you can edit and replay
+- everything inside this group shares the volume envelope and reverb below
+group forest
+- group properties sit at the same indent as the \`group\` line
+volume fade 0 1 every 20
+reverb wet 0.5 size 0.8 damping 0.6
 
+    - voice 1 — \`gen <prompt>\` asks the AI to generate a fresh sample
+    - lines indented under a voice become its properties
     loop gen birds calling at dawn
         volume 0.4to0.6
         pitch 1.2to2.0
@@ -86,6 +91,12 @@ reverb wet 0.3 size 0.8 damping 0.6
         visual trail sphere
         color white
 
+    - voice 2 — without \`gen\`, the name plays an existing community sample
+    - \`and <prop>\` lets you set a property on the same line as the voice
+    loop forest and volume 0.1
+
+    - voice 3 — \`N * loop\` spawns N independent copies of the voice
+    - each copy rolls its own random value from the ranges below
     3 * loop gen wind through forest leaves
         volume 0.2to0.4
         pitch 0.6to1.2
@@ -93,13 +104,13 @@ reverb wet 0.3 size 0.8 damping 0.6
         visual trail
         color blue
 
+    - voice 4 — try editing any prompt or number to hear it change live
     loop gen distant forest stream babbling
         volume 0.15to0.25
         pitch 0.4to0.6
         move fly speed 0.5to1.5
         visual sphere
         color yellow
-endgroup
 `,
   'Rain on a tin roof': `group rain
 volume 0.9
