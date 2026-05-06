@@ -1285,10 +1285,12 @@ export class SatieEngine {
     const trajectory = trajectoryName ? getTrajectory(trajectoryName) : undefined;
     if (!trajectory) return;
 
-    // Trajectories use the same time scaling as fly/walk's slowest sine cycle
-    // (see `_wanderSpeed = wanderHz * 0.01 * 2π`), so `speed N` means roughly
-    // the same perceived motion across all wander types.
-    const speed = track.wanderHz * 0.01;
+    // Trajectories visit far more spatial ground per parametric cycle than
+    // fly's smooth sines (lorenz alone covers many lobes per pass), so
+    // matching fly's cycle frequency makes them *look* much faster. Scale
+    // ~3× slower than fly's `* 0.01 * 2π` so `speed N` feels comparable
+    // across all wander types. Reference: `lorenz speed 1` cycles in ~150s.
+    const speed = track.wanderHz * 0.003;
     const t = (elapsed * speed + track._trajectoryPhase) % 1;
     const pt = trajectory.evaluate(t);
 

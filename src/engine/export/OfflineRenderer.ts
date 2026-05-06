@@ -598,9 +598,9 @@ function computeTrajectoryPosition(
   if (!trajectory) return computeStaticPosition(stmt);
 
   const trajectoryPhase = (seed / 1000) % 1;
-  // Match the realtime engine: trajectory speed uses the same 0.01 factor
-  // that fly/walk applies, so `speed N` is consistent across wander types.
-  const t = (elapsed * wanderHz * 0.01 + trajectoryPhase) % 1;
+  // Match the realtime engine: trajectory speed scales by 0.003 so chaotic
+  // trajectories don't look ~3× busier than fly at the same input value.
+  const t = (elapsed * wanderHz * 0.003 + trajectoryPhase) % 1;
   const pt = trajectory.evaluate(t);
 
   const px1 = seed * 1.0, px2 = seed * 2.3;

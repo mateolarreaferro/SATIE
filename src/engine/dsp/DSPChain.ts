@@ -67,9 +67,10 @@ export function mapEQGain(n: number): number {
 /**
  * Map 0-1 speed to a perceptually useful range.
  * 0 = nearly still, 0.5 = gentle drift, 1 = fast movement.
- * Maps exponentially to 0.005-2.0 Hz. Both wander (sine) and trajectory
- * (LUT) modes scale the result by 0.01 in the engine, so `speed N` means
- * the same perceived motion regardless of wander type.
+ * Maps exponentially to 0.005-2.0 Hz. The engine then scales by 0.01 (fly,
+ * walk) or 0.003 (trajectories like lorenz/spiral/orbit/gen) — chaotic
+ * trajectories visit more space per cycle so they need a smaller factor
+ * to *look* as gentle as fly at the same `speed N`.
  */
 export function mapSpeed(n: number): number {
   const clamped = Math.max(0, Math.min(1, n));
