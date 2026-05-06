@@ -819,7 +819,8 @@ export function Chat() {
           </>
         )}
 
-        {/* Controls hint — visible when 3D viewport is active */}
+        {/* Controls hint — visible when 3D viewport is active. Glass pill so it
+           reads cleanly on any sketch background. */}
         {hasActiveTracks && (
           <div style={{
             position: 'absolute',
@@ -828,23 +829,31 @@ export function Chat() {
             pointerEvents: 'none',
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
-            opacity: 0.3,
+            gap: 10,
+            padding: '8px 14px',
+            background: theme.overlayBg,
+            border: `1px solid ${theme.overlayBorder}`,
+            borderRadius: 999,
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            color: theme.overlayText,
             fontFamily: "'Inter', system-ui, sans-serif",
-            fontSize: '11px',
-            color: theme.text,
+            fontSize: '12px',
+            fontWeight: 500,
+            letterSpacing: '0.01em',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
           }}>
             {/* Click to toggle look — lock/unlock icon */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               {mouseLookActive ? (
                 /* Locked — eye icon */
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
               ) : (
                 /* Unlocked — eye-off icon */
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
                   <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
                   <line x1="1" y1="1" x2="23" y2="23" />
@@ -852,23 +861,41 @@ export function Chat() {
               )}
               <span>click to {mouseLookActive ? 'unlock' : 'look'}</span>
             </div>
-            <span style={{ opacity: 0.4 }}>·</span>
+            <span style={{ opacity: 0.45 }}>·</span>
             {/* WASD */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="5 15 12 8 19 15" />
               </svg>
-              <span style={{ fontFamily: "'SF Mono', monospace", fontSize: '10px', fontWeight: 600, letterSpacing: '0.05em' }}>WASD</span>
+              <kbd style={{
+                fontFamily: "'SF Mono', monospace",
+                fontSize: '10px',
+                fontWeight: 600,
+                letterSpacing: '0.05em',
+                padding: '2px 6px',
+                background: 'rgba(255,255,255,0.14)',
+                borderRadius: 4,
+                border: `1px solid ${theme.overlayBorder}`,
+              }}>WASD</kbd>
               <span>move</span>
             </div>
-            <span style={{ opacity: 0.4 }}>·</span>
+            <span style={{ opacity: 0.45 }}>·</span>
             {/* Q/E fly */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="19" x2="12" y2="5" />
                 <polyline points="5 12 12 5 19 12" />
               </svg>
-              <span style={{ fontFamily: "'SF Mono', monospace", fontSize: '10px', fontWeight: 600, letterSpacing: '0.05em' }}>QE</span>
+              <kbd style={{
+                fontFamily: "'SF Mono', monospace",
+                fontSize: '10px',
+                fontWeight: 600,
+                letterSpacing: '0.05em',
+                padding: '2px 6px',
+                background: 'rgba(255,255,255,0.14)',
+                borderRadius: 4,
+                border: `1px solid ${theme.overlayBorder}`,
+              }}>QE</kbd>
               <span>fly</span>
             </div>
           </div>
