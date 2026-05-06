@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { SatieEngine, type EngineUIState, type TrackState } from '../../engine';
-import { getMusicEnabled, subscribeMusicEnabled } from './useBackgroundMusic';
+import { getMusicEnabled, subscribeMusicEnabled, setEnginePlaying } from './useBackgroundMusic';
 
 /**
  * Main hook for the Satie engine.
@@ -17,6 +17,9 @@ export function useSatieEngine() {
   // state. The engine receives `userMasterVol * (muted ? 0 : 1)` so unmuting
   // restores whatever the user dialed in on the Sidebar slider.
   const userMasterVolRef = useRef(1);
+  // Stable per-instance token so the BG music subsystem knows which engine is
+  // playing. Used to gate background music while scene audio is producing sound.
+  const enginePlayingTokenRef = useRef<symbol>(Symbol('satie-engine'));
 
   const applyMasterVolume = useCallback(() => {
     const muted = !getMusicEnabled();
@@ -55,8 +58,17 @@ export function useSatieEngine() {
       unsub();
       unsubMute();
       engine.destroy();
+      // Engine is gone — release this instance's playing token so BG music
+      // can resume if no other engine is producing sound.
+      setEnginePlaying(enginePlayingTokenRef.current, false);
     };
   }, [applyMasterVolume]);
+
+  // Keep the global "scene is playing" set in sync with this engine's
+  // isPlaying state so background music can pause / resume accordingly.
+  useEffect(() => {
+    setEnginePlaying(enginePlayingTokenRef.current, uiState.isPlaying);
+  }, [uiState.isPlaying]);
 
   const loadScript = useCallback((script: string) => {
     engineRef.current?.loadScript(script);

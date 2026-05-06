@@ -16,15 +16,29 @@ let fetchingFor: string | null = null;
 let lastSrc: string | null = null;
 let lastVolume = 0.08;
 let softStopped = false; // true after stopBackgroundMusic() — cleared on next hook mount
-let musicEnabled = localStorage.getItem('satie-music-enabled') !== 'false'; // default true
+// Audio always starts ON for each fresh session. The toggle still works
+// in-session but does not persist — users shouldn't land on a muted page
+// because they tapped the speaker icon last visit.
+let musicEnabled = true;
 const enabledListeners = new Set<(enabled: boolean) => void>();
+
+// Tokens for engines currently producing scene audio. Background music stays
+// silent as long as any token is registered — even if multiple engines coexist
+// on the same page (e.g. a future preview-on-Gallery scenario), one engine
+// stopping doesn't accidentally un-pause music while another is still playing.
+const playingTokens = new Set<symbol>();
+function isAnyEnginePlaying() {
+  return playingTokens.size > 0;
+}
 
 function notifyListeners() {
   enabledListeners.forEach(fn => fn(musicEnabled));
 }
 
 function tryStart(volume: number) {
-  if (started || !audioData || !musicEnabled) return;
+  // Hard rule: never start background music while a sketch is playing in any
+  // engine. The user expects scene audio to be the only thing they hear.
+  if (started || !audioData || !musicEnabled || isAnyEnginePlaying()) return;
 
   const c = new AudioContext();
   if (c.state === 'suspended') {
@@ -104,10 +118,49 @@ export function subscribeMusicEnabled(fn: (enabled: boolean) => void): () => voi
   return () => { enabledListeners.delete(fn); };
 }
 
-/** Toggle music on/off globally (persisted to localStorage) */
+/**
+ * Notify the music subsystem that a specific engine instance has started or
+ * stopped producing scene audio.
+ *
+ * - `token` is a stable per-instance symbol; pass the same one for both
+ *   `playing=true` and the corresponding `playing=false`. This lets multiple
+ *   engines coexist safely: BG music only resumes when ALL of them are silent.
+ * - When the last token is removed: BG music resumes IFF the user hasn't muted
+ *   it AND a page is currently using the hook.
+ *
+ * Idempotent — set+set with same playing value is a no-op so noisy throttled
+ * isPlaying flips from the engine's UI subscription don't restart playback.
+ */
+export function setEnginePlaying(token: symbol, playing: boolean) {
+  const wasAnyPlaying = isAnyEnginePlaying();
+  if (playing) playingTokens.add(token);
+  else playingTokens.delete(token);
+  const nowAnyPlaying = isAnyEnginePlaying();
+  if (wasAnyPlaying === nowAnyPlaying) return; // no transition
+
+  if (nowAnyPlaying) {
+    // Scene audio took over — silence BG music immediately.
+    if (started) stopPlayback();
+    return;
+  }
+
+  // All engines silent. Resume only when the page tree still wants music.
+  if (musicEnabled && activeCount > 0 && !started && !softStopped) {
+    if (audioData) {
+      tryStart(lastVolume);
+    } else if (lastSrc && fetchingFor !== lastSrc) {
+      fetchingFor = lastSrc;
+      fetch(lastSrc)
+        .then(res => res.arrayBuffer())
+        .then(buf => { audioData = buf; tryStart(lastVolume); })
+        .catch(() => {});
+    }
+  }
+}
+
+/** Toggle music on/off globally (session-only, not persisted) */
 export function setMusicEnabled(enabled: boolean) {
   musicEnabled = enabled;
-  localStorage.setItem('satie-music-enabled', String(enabled));
   if (!enabled) {
     stopPlayback();
   } else if (activeCount > 0 && !started) {
