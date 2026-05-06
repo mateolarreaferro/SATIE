@@ -1285,7 +1285,10 @@ export class SatieEngine {
     const trajectory = trajectoryName ? getTrajectory(trajectoryName) : undefined;
     if (!trajectory) return;
 
-    const speed = track.wanderHz; // wanderHz holds speed for trajectories
+    // Trajectories use the same time scaling as fly/walk's slowest sine cycle
+    // (see `_wanderSpeed = wanderHz * 0.01 * 2π`), so `speed N` means roughly
+    // the same perceived motion across all wander types.
+    const speed = track.wanderHz * 0.01;
     const t = (elapsed * speed + track._trajectoryPhase) % 1;
     const pt = trajectory.evaluate(t);
 
