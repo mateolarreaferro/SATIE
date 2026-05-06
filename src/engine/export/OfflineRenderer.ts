@@ -17,7 +17,7 @@
 import { parse, pathFor } from '../core/SatieParser';
 import { Statement, WanderType, isTrajectoryWanderType } from '../core/Statement';
 import { InterpolationData, ModulationType, LoopMode } from '../core/InterpolationData';
-import { buildDSPChain, destroyDSPChain, makeDistortionCurve, mapCutoff, mapResonance, mapDrive, mapEQGain, mapSpeed } from '../dsp/DSPChain';
+import { buildDSPChain, destroyDSPChain, makeDistortionCurve, mapCutoff, mapResonance, mapDrive, mapEQGain, mapSpeed, mapTrajectorySpeed } from '../dsp/DSPChain';
 import { getTrajectory } from '../spatial/Trajectories';
 import { computeFOAGains, distanceAttenuation } from './AmbisonicEncoder';
 import { SatieEngine } from '../core/SatieEngine';
@@ -190,7 +190,9 @@ function renderStereoOrBinaural(
       if (t >= duration) break;
 
       const seed = Math.random() * 1000;
-      const wanderHz = mapSpeed(stmt.wanderHz.sample());
+      const wanderHz = isTrajectoryWanderType(stmt.wanderType)
+        ? mapTrajectorySpeed(stmt.wanderHz.sample())
+        : mapSpeed(stmt.wanderHz.sample());
 
       // Source
       const source = ctx.createBufferSource();
@@ -300,7 +302,9 @@ function renderAmbisonicFOA(
       if (t >= duration) break;
 
       const seed = Math.random() * 1000;
-      const wanderHz = mapSpeed(stmt.wanderHz.sample());
+      const wanderHz = isTrajectoryWanderType(stmt.wanderType)
+        ? mapTrajectorySpeed(stmt.wanderHz.sample())
+        : mapSpeed(stmt.wanderHz.sample());
 
       // Source
       const source = ctx.createBufferSource();
@@ -598,9 +602,8 @@ function computeTrajectoryPosition(
   if (!trajectory) return computeStaticPosition(stmt);
 
   const trajectoryPhase = (seed / 1000) % 1;
-  // Match the realtime engine: trajectory speed scales by 0.003 so chaotic
-  // trajectories don't look ~3× busier than fly at the same input value.
-  const t = (elapsed * wanderHz * 0.003 + trajectoryPhase) % 1;
+  // wanderHz is already cycles-per-second from mapTrajectorySpeed.
+  const t = (elapsed * wanderHz + trajectoryPhase) % 1;
   const pt = trajectory.evaluate(t);
 
   const px1 = seed * 1.0, px2 = seed * 2.3;

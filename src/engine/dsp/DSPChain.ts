@@ -65,17 +65,28 @@ export function mapEQGain(n: number): number {
 }
 
 /**
- * Map 0-1 speed to a perceptually useful range.
- * 0 = nearly still, 0.5 = gentle drift, 1 = fast movement.
- * Maps exponentially to 0.005-2.0 Hz. The engine then scales by 0.01 (fly,
- * walk) or 0.003 (trajectories like lorenz/spiral/orbit/gen) — chaotic
- * trajectories visit more space per cycle so they need a smaller factor
- * to *look* as gentle as fly at the same `speed N`.
+ * Map 0-1 speed for fly/walk (sine wander) — exponential curve that
+ * stays useful for high inputs because the engine scales by 0.01·2π
+ * before driving the sines.
+ * 0 = nearly still (0.005 Hz), 0.5 ≈ 0.1 Hz, 1.0 = 2.0 Hz.
  */
 export function mapSpeed(n: number): number {
   const clamped = Math.max(0, Math.min(1, n));
-  // 0 → 0.005, 0.5 → ~0.1, 1.0 → 2.0
   return 0.005 * Math.pow(400, clamped);
+}
+
+/**
+ * Map 0-1 speed for trajectory wander (spiral, orbit, lorenz, custom LUT).
+ * Trajectories visit far more spatial ground per parametric cycle than
+ * fly's smooth sines, so they need a flatter curve — Math.pow(400, n)
+ * blows up at high inputs and produces unusable sub-second LUT cycles.
+ * This curve keeps `speed 0.05–0.1` near the historical "feels right"
+ * range (~150 s cycle) while capping `speed 1` at a usable 17 s cycle.
+ * 0 → 0.005 Hz (200 s), 0.5 → 0.017 Hz (58 s), 1.0 → 0.06 Hz (17 s).
+ */
+export function mapTrajectorySpeed(n: number): number {
+  const clamped = Math.max(0, Math.min(1, n));
+  return 0.005 * Math.pow(12, clamped);
 }
 
 // ─── Filter ───────────────────────────────────────────

@@ -67,8 +67,8 @@ const SUGGESTIONS = [
   { title: 'Rain on a tin roof', desc: 'rhythmic drops, distant thunder, night ambience', icon: (c: string) => (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25" /><line x1="8" y1="16" x2="8.01" y2="16" /><line x1="8" y1="20" x2="8.01" y2="20" /><line x1="12" y1="18" x2="12.01" y2="18" /><line x1="12" y1="22" x2="12.01" y2="22" /><line x1="16" y1="16" x2="16.01" y2="16" /><line x1="16" y1="20" x2="16.01" y2="20" /></svg>
   )},
-  { title: 'Celestial choir', desc: 'voices orbiting slowly through deep space', icon: (c: string) => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+  { title: 'Thinking music', desc: 'spacious drones layered over a slow pulse for deep focus', icon: (c: string) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h3l3-9 4 18 3-9h5" /></svg>
   )},
 ];
 
@@ -112,50 +112,90 @@ reverb wet 0.5 size 0.8 damping 0.6
         visual sphere
         color yellow
 `,
-  'Rain on a tin roof': `group rain
-volume 0.9
+  'Rain on a tin roof': `- rain on a tin roof — mixes community samples with AI-generated voices
+- group properties (volume, reverb) cascade to every voice inside
+group rain
+volume fade 0 1 every 20
 reverb wet 0.4 size 0.7 damping 0.7
 
+    - voice 1 — a community sample with a per-voice lowpass filter
+    - DSP effects (\`filter\`, \`distortion\`, \`eq\`) are properties of the voice
+    loop rain and volume 0.1
+        filter lowpass 700
+        move walk speed 0.1to0.4
+
+    - voice 2 — \`oneshot\` plays a clip once instead of looping
+    oneshot cicada and volume 0.5
+        move walk speed 1to2
+
+    - voice 3 — \`N * loop\` makes N independent copies for layered ambience
     4 * loop gen rhythmic rain drops on tin roof
         volume 0.3to0.5
         pitch 0.9to1.3
-        move fly speed 1to3
+        move fly speed 0.5to1
         visual trail
         color blue
 
-    loop gen distant rolling thunder
+    - voice 4 — \`oneshot\` works with \`*\` too, great for sparse events
+    4 * oneshot gen distant rolling thunder
         volume 0.2to0.4
-        pitch 0.3to0.6
-        move fly speed 0.3to0.8
+        pitch 0.3to1
+        move fly speed 1to4
         visual trail sphere
-        color purple
+        color white
 
+    - voice 5 — edit any prompt or number to hear it change live
     2 * loop gen quiet night crickets ambience
         volume 0.1to0.2
         pitch 1.0to1.4
         move fly speed 0.5to1.5
         visual sphere
         color green
-endgroup
 `,
-  'Celestial choir': `group cosmos
-volume 0.9
-reverb wet 0.7 size 1.0 damping 0.2
+  'Thinking music': `- thinking music — drones layered with delayed beats for focus
+- \`let\` declares a list of values you can reference by name later
+let colors white yellow green blue black
 
-    3 * loop gen ethereal celestial choir voices
-        volume 0.3to0.5
-        pitch 0.8to1.2
-        move orbit speed 0.1to0.3
-        visual trail sphere
-        color white
+- group 1 — three drones at different pitches sharing a slow volume rise
+group drones
+volume fade 0 1 every 20
 
-    loop gen deep space drone ambience
-        volume 0.2to0.3
-        pitch 0.4to0.6
-        move fly speed 0.2to0.5
+    - voice 1 — \`fade A B every N\` interpolates a parameter over N seconds
+    - the same syntax works on volume, pitch, filter cutoff, and color
+    loop drone and pitch 0.5
+        volume 0.5
+        filter lowpass fade 100 2000 every 20
+        move spiral speed 0.1
         visual trail
-        color purple
-endgroup
+        - cycle through the \`colors\` list every 2-4s, ping-ponging
+        color fade colors every 2to4 loop bounce
+
+    - voice 2 — \`loop bounce\` ping-pongs the fade instead of restarting
+    loop drone and pitch 1
+        volume fade 0 0.5 every 20 loop bounce
+        filter lowpass fade 100 2000 every 20
+        move spiral speed 0.2
+        visual trail
+        color fade colors every 2to4 loop bounce
+
+    loop drone and pitch 2
+        volume fade 0 0.2 every 30 loop bounce
+        move spiral speed 0.3
+        visual trail
+        color fade colors every 2to4 loop bounce
+
+- group 2 — a percussive layer that enters 15s after the drones
+group beats
+
+    - \`start 15\` delays the voice's first hit by 15 seconds
+    - \`every 10to20\` randomizes the fade period each cycle
+    4 * loop beat
+        pitch fade 0.5 2 every 10to20 loop bounce
+        start 15
+        volume fade 0 1 every 10
+        move lorenz speed 0.05
+        visual trail
+        color white
 `,
 };
 

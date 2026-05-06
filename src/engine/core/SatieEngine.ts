@@ -14,7 +14,7 @@ import { Statement, WanderType, Vec3, isTrajectoryWanderType } from './Statement
 import { getTrajectory } from '../spatial/Trajectories';
 import { parse, pathFor } from './SatieParser';
 import { InterpolationData, ModulationType, LoopMode } from './InterpolationData';
-import { buildDSPChain, destroyDSPChain, makeDistortionCurve, mapCutoff, mapResonance, mapDrive, mapEQGain, mapSpeed, type DSPNodes } from '../dsp/DSPChain';
+import { buildDSPChain, destroyDSPChain, makeDistortionCurve, mapCutoff, mapResonance, mapDrive, mapEQGain, mapSpeed, mapTrajectorySpeed, type DSPNodes } from '../dsp/DSPChain';
 import { generateAudio, type GenOptions } from '../audio/AudioGen';
 
 // Pre-computed hex lookup table (0-255 → "00"-"ff")
@@ -539,7 +539,11 @@ export class SatieEngine {
     const scB = parseInt(sc.substring(5, 7), 16);
 
     const seed = Math.random() * 1000;
-    const wanderHz = mapSpeed(stmt.wanderHz.sample());
+    // Fly/walk and trajectories use different speed curves — mapSpeed's
+    // aggressive exponential is unusable for LUT trajectories at high inputs.
+    const wanderHz = isTrajectoryWanderType(stmt.wanderType)
+      ? mapTrajectorySpeed(stmt.wanderHz.sample())
+      : mapSpeed(stmt.wanderHz.sample());
 
     const track: TrackState = {
       key,
@@ -1285,12 +1289,8 @@ export class SatieEngine {
     const trajectory = trajectoryName ? getTrajectory(trajectoryName) : undefined;
     if (!trajectory) return;
 
-    // Trajectories visit far more spatial ground per parametric cycle than
-    // fly's smooth sines (lorenz alone covers many lobes per pass), so
-    // matching fly's cycle frequency makes them *look* much faster. Scale
-    // ~3× slower than fly's `* 0.01 * 2π` so `speed N` feels comparable
-    // across all wander types. Reference: `lorenz speed 1` cycles in ~150s.
-    const speed = track.wanderHz * 0.003;
+    // wanderHz is already in cycles-per-second from mapTrajectorySpeed.
+    const speed = track.wanderHz;
     const t = (elapsed * speed + track._trajectoryPhase) % 1;
     const pt = trajectory.evaluate(t);
 
