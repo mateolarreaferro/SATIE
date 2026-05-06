@@ -34,7 +34,7 @@ function loadStoredMode(): ThemeMode {
   } catch {
     /* SSR or storage disabled */
   }
-  return 'fade';
+  return 'dark';
 }
 
 function getSystemMode(): 'light' | 'dark' {

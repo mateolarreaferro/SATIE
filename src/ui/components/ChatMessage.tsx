@@ -59,7 +59,9 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
   const [editedScript, setEditedScript] = useState(script);
   const [dirty, setDirty] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  // Default to collapsed so the chat shows just a one-line "▶ script" hint;
+  // users can click to peek at the source on demand.
+  const [collapsed, setCollapsed] = useState(true);
   const handleRunRef = useRef<() => void>(() => {});
   const expandedRef = useRef(false);
   expandedRef.current = expanded;

@@ -103,12 +103,13 @@ const STORAGE_KEY = 'satie-theme-mode';
 function loadMode(): ThemeMode {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'light' || stored === 'dark' || stored === 'fade') return stored;
-  return 'fade';
+  return 'dark';
 }
 
 export function useDayNightCycle(): { theme: Theme; mode: ThemeMode; setMode: (m: ThemeMode) => void } {
   const [mode, setModeState] = useState<ThemeMode>(loadMode);
-  const [theme, setTheme] = useState<Theme>(LIGHT);
+  // Match the initial theme to the persisted mode so first paint doesn't flash light.
+  const [theme, setTheme] = useState<Theme>(() => mode === 'dark' ? DARK : LIGHT);
   const startTime = useRef(Date.now());
   const lastPaletteIdx = useRef(-1);
   const raf = useRef(0);
