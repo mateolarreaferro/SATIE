@@ -731,17 +731,17 @@ function HearingCone({ color }: { color: string }) {
   );
 }
 
-// Overlay fly controls — WASD + right-click when no text input is focused
-/** FPS controls for overlay: click anywhere to toggle mouse-look, WASD to move.
- *  Camera IS the listener — spatial audio follows your perspective.
- *  Dispatches 'satie-mouselook' CustomEvent so the Chat UI can show the lock state. */
+/** Drag-to-look fly controls used in the chat overlay. Camera IS the listener.
+ *  Drag (left or right) anywhere except chat UI to look around; WASD to move,
+ *  Q/E to fly, scroll to dolly, double-click empty space to teleport,
+ *  R to reset, F to fit. ESC blurs any active drag. */
 function OverlayFlyControls() {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const listenerSync = useContext(ListenerSyncContext);
   const listenerSyncRef = useRef(listenerSync);
   listenerSyncRef.current = listenerSync;
   const keysDown = useRef(new Set<string>());
-  const mouseLocked = useRef(false);
+  const dragging = useRef(false);
   const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
   const flySpeed = 6;
   const lookSensitivity = 0.003;
@@ -750,12 +750,27 @@ function OverlayFlyControls() {
     const el = document.activeElement;
     return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ||
            el?.closest('.monaco-editor') != null ||
-           el?.closest('header') != null || el?.closest('nav') != null;
+           el?.closest('header') != null || el?.closest('nav') != null ||
+           el?.closest('[contenteditable="true"]') != null;
   }, []);
 
-  const setLocked = useCallback((v: boolean) => {
-    mouseLocked.current = v;
-    window.dispatchEvent(new CustomEvent('satie-mouselook', { detail: v }));
+  // Targets that should NOT engage drag-to-look (chat UI, header, buttons, links).
+  const isOverlayUITarget = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return !!(
+      target.closest('header') ||
+      target.closest('button') ||
+      target.closest('a') ||
+      target.closest('input') ||
+      target.closest('textarea') ||
+      target.closest('details') ||
+      target.closest('[contenteditable="true"]') ||
+      target.closest('[data-no-drag]')
+    );
+  }, []);
+
+  const setBodyCursor = useCallback((c: string) => {
+    document.body.style.cursor = c;
   }, []);
 
   // Initialize euler from camera
@@ -766,49 +781,90 @@ function OverlayFlyControls() {
   const onKeyDown = useCallback((e: KeyboardEvent) => {
     if (isInputFocused()) return;
     const key = e.key.toLowerCase();
-    // ESC unlocks mouse look
-    if (key === 'escape' && mouseLocked.current) {
-      setLocked(false);
+    if (key === 'escape' && dragging.current) {
+      dragging.current = false;
+      setBodyCursor('');
       return;
     }
     keysDown.current.add(key);
-    if (['w', 'a', 's', 'd', 'q', 'e', ' '].includes(key)) {
+    if (['w', 'a', 's', 'd', 'q', 'e', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
       e.preventDefault();
     }
-  }, [isInputFocused, setLocked]);
+  }, [isInputFocused, setBodyCursor]);
 
   const onKeyUp = useCallback((e: KeyboardEvent) => {
     keysDown.current.delete(e.key.toLowerCase());
   }, []);
 
-  const onClick = useCallback((e: MouseEvent) => {
-    // Don't toggle if clicking on interactive UI elements
-    const target = e.target as HTMLElement;
-    if (target.closest('header') || target.closest('button') || target.closest('a') || target.closest('input') || target.closest('details')) return;
-    setLocked(!mouseLocked.current);
-  }, [setLocked]);
+  const onMouseDown = useCallback((e: MouseEvent) => {
+    if (e.button !== 0 && e.button !== 2) return;
+    if (isOverlayUITarget(e.target)) return;
+    dragging.current = true;
+    setBodyCursor('grabbing');
+  }, [isOverlayUITarget, setBodyCursor]);
+
+  const onMouseUp = useCallback((e: MouseEvent) => {
+    if (e.button !== 0 && e.button !== 2) return;
+    if (dragging.current) {
+      dragging.current = false;
+      setBodyCursor('');
+    }
+  }, [setBodyCursor]);
 
   const onMouseMove = useCallback((e: MouseEvent) => {
-    if (!mouseLocked.current) return;
+    if (!dragging.current) return;
     euler.current.y -= e.movementX * lookSensitivity;
     euler.current.x -= e.movementY * lookSensitivity;
     euler.current.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.current.x));
     camera.quaternion.setFromEuler(euler.current);
   }, [camera]);
 
+  // Scroll wheel = dolly along view direction (only when not over chat UI)
+  const onWheel = useCallback((e: WheelEvent) => {
+    if (isOverlayUITarget(e.target)) return;
+    e.preventDefault();
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    const step = Math.max(-1.5, Math.min(1.5, -e.deltaY * 0.01));
+    camera.position.addScaledVector(fwd, step);
+  }, [camera, isOverlayUITarget]);
+
+  // Double-click empty space = teleport listener (xz only, preserve height)
+  const onDblClick = useCallback((e: MouseEvent) => {
+    if (isOverlayUITarget(e.target)) return;
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    if (ray.ray.intersectPlane(plane, hit)) {
+      camera.position.set(hit.x, camera.position.y, hit.z);
+    }
+  }, [camera, gl, isOverlayUITarget]);
+
   useEffect(() => {
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('click', onClick);
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('dblclick', onDblClick);
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('click', onClick);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mousemove', onMouseMove);
-      setLocked(false);
+      window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('dblclick', onDblClick);
+      setBodyCursor('');
     };
-  }, [onKeyDown, onKeyUp, onClick, onMouseMove, setLocked]);
+  }, [onKeyDown, onKeyUp, onMouseDown, onMouseUp, onMouseMove, onWheel, onDblClick, setBodyCursor]);
 
   const _forward = useMemo(() => new THREE.Vector3(), []);
   const _right = useMemo(() => new THREE.Vector3(), []);
@@ -858,7 +914,9 @@ function OverlayFlyControls() {
 }
 
 // FPS-style fly controls for the editor — camera IS the listener.
-// Right-click drag to mouselook, WASD to move, Q/E for up/down.
+// Drag (left or right mouse) to look around, WASD to move, Q/E for up/down,
+// scroll wheel to dolly, double-click empty space to teleport, F to fit,
+// R to reset.
 function FlyControls() {
   const { camera, gl } = useThree();
   const { focused } = useContext(ViewportFocusContext);
@@ -866,7 +924,7 @@ function FlyControls() {
   const listenerSyncRef = useRef(listenerSync);
   listenerSyncRef.current = listenerSync;
   const keysDown = useRef(new Set<string>());
-  const rightMouseDown = useRef(false);
+  const dragging = useRef(false);
   const focusedRef = useRef(focused);
   focusedRef.current = focused;
   const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
@@ -949,43 +1007,86 @@ function FlyControls() {
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ||
         el?.closest('.monaco-editor') != null) return;
     const key = e.key.toLowerCase();
+    // F = fit to scene, R = reset to origin (only when viewport is engaged)
+    if (focusedRef.current || dragging.current) {
+      if (key === 'f') { fitRef.current?.(); e.preventDefault(); return; }
+      if (key === 'r') { resetRef.current?.(); e.preventDefault(); return; }
+    }
     keysDown.current.add(key);
     if (focusedRef.current && MOVE_KEYS.has(key)) {
       e.preventDefault();
       e.stopPropagation();
     }
-  }, [MOVE_KEYS]);
+  }, [MOVE_KEYS, fitRef, resetRef]);
 
   const onKeyUp = useCallback((e: KeyboardEvent) => {
     keysDown.current.delete(e.key.toLowerCase());
   }, []);
 
   const onMouseDown = useCallback((e: MouseEvent) => {
-    if (e.button === 2) rightMouseDown.current = true;
-  }, []);
+    // Left or right drag both rotate the camera. Right kept as muscle-memory alias.
+    if (e.button !== 0 && e.button !== 2) return;
+    dragging.current = true;
+    gl.domElement.style.cursor = 'grabbing';
+  }, [gl]);
 
   const onMouseUp = useCallback((e: MouseEvent) => {
-    if (e.button === 2) rightMouseDown.current = false;
-  }, []);
+    if (e.button !== 0 && e.button !== 2) return;
+    dragging.current = false;
+    gl.domElement.style.cursor = 'grab';
+  }, [gl]);
 
   const onMouseMove = useCallback((e: MouseEvent) => {
-    if (!rightMouseDown.current) return;
+    if (!dragging.current) return;
     euler.current.y -= e.movementX * lookSensitivity;
     euler.current.x -= e.movementY * lookSensitivity;
     euler.current.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.current.x));
     camera.quaternion.setFromEuler(euler.current);
   }, [camera]);
 
-  // Release right-click if mouse leaves canvas (mouseup fires on window)
+  // Release drag if mouseup fires off-canvas
   const onWindowMouseUp = useCallback((e: MouseEvent) => {
-    if (e.button === 2) rightMouseDown.current = false;
-  }, []);
+    if (e.button !== 0 && e.button !== 2) return;
+    if (dragging.current) {
+      dragging.current = false;
+      gl.domElement.style.cursor = 'grab';
+    }
+  }, [gl]);
+
+  // Scroll wheel = dolly along view direction
+  const onWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    // Trackpad pinch and mouse wheel both come through deltaY; cap step size
+    const step = Math.max(-1.5, Math.min(1.5, -e.deltaY * 0.01));
+    camera.position.addScaledVector(fwd, step);
+  }, [camera]);
+
+  // Double-click empty space = teleport listener (xz only, preserve height)
+  const onDblClick = useCallback((e: MouseEvent) => {
+    const rect = gl.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const hit = new THREE.Vector3();
+    if (ray.ray.intersectPlane(plane, hit)) {
+      camera.position.set(hit.x, camera.position.y, hit.z);
+    }
+  }, [camera, gl]);
 
   useEffect(() => {
     const el = gl.domElement;
+    el.style.cursor = 'grab';
     el.addEventListener('mousedown', onMouseDown);
     el.addEventListener('mouseup', onMouseUp);
     el.addEventListener('mousemove', onMouseMove);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('dblclick', onDblClick);
     window.addEventListener('mouseup', onWindowMouseUp);
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('keyup', onKeyUp);
@@ -993,19 +1094,21 @@ function FlyControls() {
       el.removeEventListener('mousedown', onMouseDown);
       el.removeEventListener('mouseup', onMouseUp);
       el.removeEventListener('mousemove', onMouseMove);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('dblclick', onDblClick);
       window.removeEventListener('mouseup', onWindowMouseUp);
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [gl, onKeyDown, onKeyUp, onMouseDown, onMouseUp, onMouseMove, onWindowMouseUp]);
+  }, [gl, onKeyDown, onKeyUp, onMouseDown, onMouseUp, onMouseMove, onWindowMouseUp, onWheel, onDblClick]);
 
   useEffect(() => {
     if (!focused) keysDown.current.clear();
   }, [focused]);
 
   useFrame((_, delta) => {
-    // WASD movement when focused or right-mouse held
-    const active = focused || rightMouseDown.current;
+    // WASD movement when focused or actively dragging the viewport
+    const active = focused || dragging.current;
     if (active) {
       const keys = keysDown.current;
       if (keys.size > 0) {

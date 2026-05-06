@@ -4,6 +4,7 @@ import { useSatieEngine } from '../hooks/useSatieEngine';
 import { useFaceTracking } from '../hooks/useFaceTracking';
 import { SatieEditor } from '../components/SatieEditor';
 import { SpatialViewport } from '../components/SpatialViewport';
+import { ControlsHint } from '../components/ControlsHint';
 import { AssetPanel } from '../components/AssetPanel';
 import { type SampleEntry } from '../components/SamplesTab';
 import { AIPanel, type AITarget } from '../components/AIPanel';
@@ -301,8 +302,6 @@ export function Editor() {
   const [activePopover, setActivePopover] = useState<PopoverType>(null);
   const [aiTarget, setAiTarget] = useState<AITarget>('script');
   const [workspaceZoom, setWorkspaceZoom] = useState(0.9);
-  const [showViewportHint, setShowViewportHint] = useState(false);
-  const hasShownViewportHint = useRef(false);
 
   const autosaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   /** Raw ArrayBuffers for samples loaded this session — used for uploading on save. */
@@ -438,12 +437,6 @@ export function Editor() {
   const handleRun = useCallback(() => {
     loadScript(script);
     if (!uiState.isPlaying) play();
-    // Show viewport hint on first play
-    if (!hasShownViewportHint.current) {
-      hasShownViewportHint.current = true;
-      setShowViewportHint(true);
-      setTimeout(() => setShowViewportHint(false), 5000);
-    }
   }, [script, loadScript, uiState.isPlaying, play]);
 
   const handleLoadBuffer = useCallback(async (name: string, data: ArrayBuffer, category: SampleEntry['category'] = 'imported') => {
@@ -993,37 +986,6 @@ export function Editor() {
                 error: faceTracking.error,
               }}
             />
-            {showViewportHint && (
-              <div
-                onClick={() => setShowViewportHint(false)}
-                style={{
-                  position: 'absolute',
-                  bottom: 16,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  background: theme.overlayBg,
-                  color: theme.overlayText,
-                  padding: '8px 16px',
-                  borderRadius: RADIUS.md,
-                  fontSize: '12px',
-                  fontFamily: "'Inter', system-ui, sans-serif",
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  animation: 'satie-fade-in 0.4s ease',
-                  zIndex: 10,
-                }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
-                  headphones recommended
-                </span>
-                <span style={{ opacity: 0.4 }}>·</span>
-                <span style={{ opacity: 0.7 }}>right-click drag to look · WASD to move</span>
-              </div>
-            )}
           </ErrorBoundary>
         </Panel>
 
@@ -1214,6 +1176,12 @@ export function Editor() {
               </ErrorBoundary>
             </div>
           </div>
+        )}
+
+        {/* Unified controls hint — rendered at the workspace level (outside
+            any panel) so it's always visible alongside the editor chrome. */}
+        {uiState.trackCount > 0 && (
+          <ControlsHint position={{ bottom: 16, left: '50%', transform: 'translateX(-50%)' }} />
         )}
       </div>
     </div>

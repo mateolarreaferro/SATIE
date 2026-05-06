@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { getPublicSketch } from '../../lib/sketches';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { SpatialViewport } from '../components/SpatialViewport';
+import { ControlsHint } from '../components/ControlsHint';
 import { useTheme } from '../theme/ThemeContext';
 import { Spinner } from '../components/primitives';
 import { RADIUS, FONT } from '../theme/tokens';
@@ -162,6 +163,11 @@ export function Embed() {
             <rect x="1" y="1" width="8" height="8" />
           </svg>
         </button>
+      )}
+
+      {/* Unified controls hint */}
+      {started && uiState.trackCount > 0 && (
+        <ControlsHint position={{ bottom: 12, left: '50%', transform: 'translateX(-50%)' }} />
       )}
 
       {/* Watermark */}

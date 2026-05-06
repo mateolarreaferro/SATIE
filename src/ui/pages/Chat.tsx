@@ -14,6 +14,7 @@ import { useSatieEngine } from '../hooks/useSatieEngine';
 import { useBackgroundMusic, stopBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { RiverCanvas } from '../components/RiverCanvas';
 import { SpatialViewport } from '../components/SpatialViewport';
+import { ControlsHint } from '../components/ControlsHint';
 import { ChatMessage, type ChatMessageData } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { Header } from '../components/Header';
@@ -165,9 +166,6 @@ export function Chat() {
   const [sketchAuthors, setSketchAuthors] = useState<Record<string, Profile>>({});
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
   const [savingSketchId, setSavingSketchId] = useState<string | null>(null);
-  const [mouseLookActive, setMouseLookActive] = useState(false);
-  const [showControlsToast, setShowControlsToast] = useState(false);
-  const hasShownToast = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const messageIdCounter = useRef(0);
@@ -191,12 +189,6 @@ export function Chat() {
     const interval = setInterval(() => {
       const count = tracksRef.current?.length ?? 0;
       setHasActiveTracks(count > 0);
-      // Show controls toast on first generation
-      if (count > 0 && !hasShownToast.current) {
-        hasShownToast.current = true;
-        setShowControlsToast(true);
-        setTimeout(() => setShowControlsToast(false), 6000);
-      }
     }, 500);
     return () => clearInterval(interval);
   }, [tracksRef]);
@@ -220,34 +212,6 @@ export function Chat() {
       })
       .catch(console.error);
   }, []);
-
-  // Listen for mouse-look toggle from FPS controls
-  const cursorStyleRef = useRef<HTMLStyleElement | null>(null);
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const locked = (e as CustomEvent).detail;
-      setMouseLookActive(locked);
-      sfx.toggle();
-      // Hide/show cursor via injected style (overrides all elements)
-      if (locked) {
-        if (!cursorStyleRef.current) {
-          const style = document.createElement('style');
-          style.textContent = '* { cursor: none !important; }';
-          document.head.appendChild(style);
-          cursorStyleRef.current = style;
-        }
-      } else {
-        cursorStyleRef.current?.remove();
-        cursorStyleRef.current = null;
-      }
-    };
-    window.addEventListener('satie-mouselook', handler);
-    return () => {
-      window.removeEventListener('satie-mouselook', handler);
-      cursorStyleRef.current?.remove();
-      cursorStyleRef.current = null;
-    };
-  }, [sfx]);
 
   // Auto-scroll on new messages — useLayoutEffect so we read scrollHeight
   // after the new message has been committed to the DOM.
@@ -490,38 +454,6 @@ export function Chat() {
       {hasActiveTracks && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
           <SpatialViewport tracksRef={tracksRef} overlayMode onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
-        </div>
-      )}
-
-      {/* Controls toast — appears after first generation */}
-      {showControlsToast && (
-        <div style={{
-          position: 'absolute',
-          bottom: 100,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 10,
-          background: `${theme.invertedBg}e6`,
-          color: theme.invertedText,
-          padding: '10px 20px',
-          borderRadius: 10,
-          fontSize: '13px',
-          fontFamily: "'Inter', system-ui, sans-serif",
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          backdropFilter: 'blur(8px)',
-          animation: 'satie-fade-in 0.4s ease',
-          pointerEvents: 'auto',
-          cursor: 'pointer',
-          whiteSpace: 'nowrap',
-        }}
-        onClick={() => setShowControlsToast(false)}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>
-          <span>put on headphones</span>
-          <span style={{ opacity: 0.4 }}>·</span>
-          <span style={{ opacity: 0.7 }}>click + drag to look around · WASD to move</span>
         </div>
       )}
 
@@ -819,87 +751,9 @@ export function Chat() {
           </>
         )}
 
-        {/* Controls hint — visible when 3D viewport is active. Glass pill so it
-           reads cleanly on any sketch background. */}
-        {hasActiveTracks && (
-          <div style={{
-            position: 'absolute',
-            bottom: 16,
-            left: 20,
-            pointerEvents: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '8px 14px',
-            background: theme.overlayBg,
-            border: `1px solid ${theme.overlayBorder}`,
-            borderRadius: 999,
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            color: theme.overlayText,
-            fontFamily: "'Inter', system-ui, sans-serif",
-            fontSize: '12px',
-            fontWeight: 500,
-            letterSpacing: '0.01em',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
-          }}>
-            {/* Click to toggle look — lock/unlock icon */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {mouseLookActive ? (
-                /* Locked — eye icon */
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              ) : (
-                /* Unlocked — eye-off icon */
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </svg>
-              )}
-              <span>click to {mouseLookActive ? 'unlock' : 'look'}</span>
-            </div>
-            <span style={{ opacity: 0.45 }}>·</span>
-            {/* WASD */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="5 15 12 8 19 15" />
-              </svg>
-              <kbd style={{
-                fontFamily: "'SF Mono', monospace",
-                fontSize: '10px',
-                fontWeight: 600,
-                letterSpacing: '0.05em',
-                padding: '2px 6px',
-                background: 'rgba(255,255,255,0.14)',
-                borderRadius: 4,
-                border: `1px solid ${theme.overlayBorder}`,
-              }}>WASD</kbd>
-              <span>move</span>
-            </div>
-            <span style={{ opacity: 0.45 }}>·</span>
-            {/* Q/E fly */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-              <kbd style={{
-                fontFamily: "'SF Mono', monospace",
-                fontSize: '10px',
-                fontWeight: 600,
-                letterSpacing: '0.05em',
-                padding: '2px 6px',
-                background: 'rgba(255,255,255,0.14)',
-                borderRadius: 4,
-                border: `1px solid ${theme.overlayBorder}`,
-              }}>QE</kbd>
-              <span>fly</span>
-            </div>
-          </div>
-        )}
+        {/* Unified controls hint — same pill rendered inside SpatialViewport
+            for the editor's Space panel, so the gesture set is identical. */}
+        {hasActiveTracks && <ControlsHint />}
       </div>
     </div>
   );

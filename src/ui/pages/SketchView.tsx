@@ -8,6 +8,7 @@ import { loadSketchSamples } from '../../lib/sampleStorage';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { useFaceTracking } from '../hooks/useFaceTracking';
 import { SpatialViewport } from '../components/SpatialViewport';
+import { ControlsHint } from '../components/ControlsHint';
 import { SatieEditor } from '../components/SatieEditor';
 import { Header } from '../components/Header';
 import { Button, IconButton, Card, Pill, SectionLabel, Spinner, EmptyState } from '../components/primitives';
@@ -552,6 +553,11 @@ export function SketchView() {
               </span>
             </Pill>
           </div>
+
+          {/* Unified controls hint — appears once tracks are loaded */}
+          {uiState.trackCount > 0 && (
+            <ControlsHint position={{ bottom: 12, left: '50%', transform: 'translateX(-50%)' }} />
+          )}
         </div>
 
         {/* ACTION CLUSTER — first-class, replaces the kebab menu */}
