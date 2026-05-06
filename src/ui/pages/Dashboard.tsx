@@ -328,17 +328,24 @@ export function Dashboard() {
             </div>
           )}
 
-          {/* Sketch grid */}
+          {/* Sketch count label */}
           {user && sketches.length > 0 && (
             <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 16,
+              fontSize: '12px',
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+              opacity: 0.35,
+              fontWeight: 600,
+              marginBottom: 12,
+              textAlign: 'center',
             }}>
-              <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.35, fontWeight: 600 }}>
-                {sketches.length} sketch{sketches.length !== 1 ? 'es' : ''}
-              </div>
+              {sketches.length} sketch{sketches.length !== 1 ? 'es' : ''}
+            </div>
+          )}
+
+          {/* New Sketch — centered */}
+          {user && sketches.length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
               <button
                 className="new-btn"
                 onClick={() => { sfx.click(); handleNew(); }}

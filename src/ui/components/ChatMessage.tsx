@@ -59,6 +59,7 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
   const [editedScript, setEditedScript] = useState(script);
   const [dirty, setDirty] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const handleRunRef = useRef<() => void>(() => {});
   const expandedRef = useRef(false);
   expandedRef.current = expanded;
@@ -128,67 +129,106 @@ function EditableScript({ script, messageId, theme, onScriptEdit }: {
 
   return (
     <>
-      {/* Inline preview — click to expand */}
-      <div
-        onClick={() => setExpanded(true)}
-        style={{
-          marginTop: 4,
-          cursor: 'pointer',
-          position: 'relative',
-        }}
-      >
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5,
-          fontSize: '13px',
-          opacity: 0.5,
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
-          userSelect: 'none',
-          marginBottom: 4,
-        }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <div style={{ marginTop: 4, position: 'relative' }}>
+        {/* Header — click to collapse/expand the inline code */}
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? 'Expand script preview' : 'Collapse script preview'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            fontSize: '13px',
+            opacity: 0.5,
+            fontFamily: "'SF Mono', 'Fira Code', monospace",
+            userSelect: 'none',
+            marginBottom: 4,
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            color: theme.text,
+            width: '100%',
+            textAlign: 'left',
+          }}
+        >
+          {/* Chevron — rotates 90° when expanded */}
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+              transition: 'transform 0.15s ease',
+              flexShrink: 0,
+            }}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="16 18 22 12 16 6" />
             <polyline points="8 6 2 12 8 18" />
           </svg>
           script
           {dirty && <span style={{ fontSize: '11px', opacity: 0.7 }}>(edited)</span>}
-          {/* Expand icon */}
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={theme.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 'auto', opacity: 0.4 }}>
-            <polyline points="15 3 21 3 21 9" />
-            <polyline points="9 21 3 21 3 15" />
-            <line x1="21" y1="3" x2="14" y2="10" />
-            <line x1="3" y1="21" x2="10" y2="14" />
-          </svg>
-        </div>
+          {!collapsed && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setExpanded(true); } }}
+              aria-label="Expand to fullscreen editor"
+              style={{ marginLeft: 'auto', opacity: 0.7, display: 'inline-flex', cursor: 'pointer' }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 3 21 3 21 9" />
+                <polyline points="9 21 3 21 3 15" />
+                <line x1="21" y1="3" x2="14" y2="10" />
+                <line x1="3" y1="21" x2="10" y2="14" />
+              </svg>
+            </span>
+          )}
+        </button>
 
-        {/* Read-only inline preview */}
-        <pre style={{
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
-          fontSize: '12px',
-          lineHeight: 1.5,
-          padding: '8px 12px',
-          background: `${theme.bg}80`,
-          borderRadius: 8,
-          overflow: 'hidden',
-          maxHeight: inlineHeight,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          margin: 0,
-          position: 'relative',
-        }}>
-          {editedScript}
-          {/* Fade-out at bottom if content overflows */}
-          <div style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: 32,
-            background: `linear-gradient(transparent, ${theme.cardBg})`,
-            pointerEvents: 'none',
-          }} />
-        </pre>
+        {/* Read-only inline preview — hidden when collapsed */}
+        {!collapsed && (
+          <pre
+            onClick={() => setExpanded(true)}
+            style={{
+              fontFamily: "'SF Mono', 'Fira Code', monospace",
+              fontSize: '12px',
+              lineHeight: 1.5,
+              padding: '8px 12px',
+              background: `${theme.bg}80`,
+              borderRadius: 8,
+              overflow: 'hidden',
+              maxHeight: inlineHeight,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              margin: 0,
+              position: 'relative',
+              cursor: 'pointer',
+            }}
+          >
+            {editedScript}
+            {/* Fade-out at bottom if content overflows */}
+            <div style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              height: 32,
+              background: `linear-gradient(transparent, ${theme.cardBg})`,
+              pointerEvents: 'none',
+            }} />
+          </pre>
+        )}
       </div>
 
       {/* Expanded modal overlay */}

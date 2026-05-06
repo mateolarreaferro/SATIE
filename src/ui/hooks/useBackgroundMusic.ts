@@ -95,6 +95,15 @@ export function getMusicEnabled() {
   return musicEnabled;
 }
 
+/**
+ * Subscribe to musicEnabled changes — used by the engine to dim master volume
+ * when the user mutes audio globally from the header. Returns an unsubscribe fn.
+ */
+export function subscribeMusicEnabled(fn: (enabled: boolean) => void): () => void {
+  enabledListeners.add(fn);
+  return () => { enabledListeners.delete(fn); };
+}
+
 /** Toggle music on/off globally (persisted to localStorage) */
 export function setMusicEnabled(enabled: boolean) {
   musicEnabled = enabled;

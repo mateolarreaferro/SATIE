@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { SatieEngine, type EngineUIState, type TrackState } from '../../engine';
+import { getMusicEnabled, subscribeMusicEnabled } from './useBackgroundMusic';
 
 /**
  * Main hook for the Satie engine.
@@ -12,6 +13,15 @@ import { SatieEngine, type EngineUIState, type TrackState } from '../../engine';
 export function useSatieEngine() {
   const engineRef = useRef<SatieEngine | null>(null);
   const tracksRef = useRef<TrackState[]>([]);
+  // Track the user's intended master volume separately from the global app-mute
+  // state. The engine receives `userMasterVol * (muted ? 0 : 1)` so unmuting
+  // restores whatever the user dialed in on the Sidebar slider.
+  const userMasterVolRef = useRef(1);
+
+  const applyMasterVolume = useCallback(() => {
+    const muted = !getMusicEnabled();
+    engineRef.current?.setMasterVolume(muted ? 0 : userMasterVolRef.current);
+  }, []);
 
   const emptySet = useRef<ReadonlySet<number>>(new Set()).current;
   const [uiState, setUIState] = useState<EngineUIState>({
@@ -28,6 +38,8 @@ export function useSatieEngine() {
   useEffect(() => {
     const engine = new SatieEngine();
     engineRef.current = engine;
+    // Sync engine to the current global mute state on mount.
+    applyMasterVolume();
 
     // Subscribe to throttled UI updates only
     const unsub = engine.subscribeUI((state) => {
@@ -36,11 +48,15 @@ export function useSatieEngine() {
       setUIState(state);
     });
 
+    // Subscribe to the global mute state — header toggle dims engine output too.
+    const unsubMute = subscribeMusicEnabled(() => applyMasterVolume());
+
     return () => {
       unsub();
+      unsubMute();
       engine.destroy();
     };
-  }, []);
+  }, [applyMasterVolume]);
 
   const loadScript = useCallback((script: string) => {
     engineRef.current?.loadScript(script);
@@ -69,8 +85,9 @@ export function useSatieEngine() {
   }, []);
 
   const setMasterVolume = useCallback((vol: number) => {
-    engineRef.current?.setMasterVolume(vol);
-  }, []);
+    userMasterVolRef.current = vol;
+    applyMasterVolume();
+  }, [applyMasterVolume]);
 
   const toggleMute = useCallback((index: number) => {
     engineRef.current?.toggleMute(index);
