@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { getProfileByUsername, upsertProfile } from '../../lib/profiles';
-import { getUserPublicSketches } from '../../lib/profiles';
+import { getUserPublicSketchesList } from '../../lib/sketches';
 import { useTheme } from '../theme/ThemeContext';
 import { Header } from '../components/Header';
 import { Button, Card, SectionLabel, Spinner, EmptyState } from '../components/primitives';
 import { RADIUS, FONT } from '../theme/tokens';
-import type { Profile, Sketch } from '../../lib/supabase';
+import type { Profile, SketchListItem } from '../../lib/supabase';
 
 /** Deterministic gradient avatar from a username. */
 function avatarGradient(username: string): string {
@@ -24,7 +24,7 @@ export function UserProfile() {
   const navigate = useNavigate();
   const { theme, mode, setMode } = useTheme();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [sketches, setSketches] = useState<Sketch[]>([]);
+  const [sketches, setSketches] = useState<SketchListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -41,7 +41,7 @@ export function UserProfile() {
         if (p) {
           setProfile(p);
           document.title = `${p.display_name || p.username} — Satie`;
-          const s = await getUserPublicSketches(p.id);
+          const s = await getUserPublicSketchesList(p.id);
           setSketches(s);
         } else {
           setNotFound(true);
@@ -242,7 +242,7 @@ export function UserProfile() {
                     margin: '0 0 10px',
                     color: theme.text,
                   }}>
-                    {sketch.script.slice(0, 80)}{sketch.script.length > 80 ? '…' : ''}
+                    {(sketch.script_preview ?? '').slice(0, 80)}{(sketch.script_preview ?? '').length > 80 ? '…' : ''}
                   </pre>
                   <div style={{
                     display: 'flex',

@@ -20,6 +20,26 @@ export interface Sketch {
   user_id: string;
   title: string;
   script: string;
+  /** Server-truncated first 200 chars of `script`. Generated column — auto-populated. */
+  script_preview?: string;
+  is_public: boolean;
+  forked_from: string | null;
+  like_count: number;
+  fork_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * List-view shape: omits `script` to avoid transferring multi-KB bodies
+ * for grid views. Use `getSketch` / `getPublicSketch` when the full script
+ * is actually needed (Editor, SketchView).
+ */
+export interface SketchListItem {
+  id: string;
+  user_id: string;
+  title: string;
+  script_preview: string;
   is_public: boolean;
   forked_from: string | null;
   like_count: number;

@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getPublicSketches } from '../../lib/sketches';
+import { getPublicSketchesList } from '../../lib/sketches';
 import { useSFX } from '../hooks/useSFX';
 import { useTheme } from '../theme/ThemeContext';
 import type { Theme } from '../theme/tokens';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { RiverCanvas } from '../components/RiverCanvas';
 import { Header } from '../components/Header';
-import type { Sketch } from '../../lib/supabase';
+import type { SketchListItem } from '../../lib/supabase';
 
 // ── Physics (shared logic with Dashboard) ──
 
@@ -208,7 +208,7 @@ function usePhysics(
 // ── Gallery card with drag support ──
 
 function GalleryCard({ sketch, body, index, draggingRef, onClick, sfx, formatDate, theme }: {
-  sketch: Sketch;
+  sketch: SketchListItem;
   body: PhysicsBody;
   index: number;
   draggingRef: React.MutableRefObject<number>;
@@ -298,8 +298,8 @@ function GalleryCard({ sketch, body, index, draggingRef, onClick, sfx, formatDat
         margin: '0 0 12px',
         color: theme.text,
       }}>
-        {sketch.script.slice(0, 100)}
-        {sketch.script.length > 100 ? '...' : ''}
+        {(sketch.script_preview ?? '').slice(0, 100)}
+        {(sketch.script_preview ?? '').length > 100 ? '...' : ''}
       </pre>
       <div style={{
         display: 'flex',
@@ -327,7 +327,7 @@ export function Gallery() {
   const sfx = useSFX();
   useBackgroundMusic('/Satie-Theme.wav', 0.08);
   const { theme, mode, setMode } = useTheme();
-  const [allSketches, setAllSketches] = useState<Sketch[]>([]);
+  const [allSketches, setAllSketches] = useState<SketchListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<TabKey>('all');
@@ -335,7 +335,7 @@ export function Gallery() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getPublicSketches()
+    getPublicSketchesList()
       .then(setAllSketches)
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -347,7 +347,7 @@ export function Gallery() {
     const q = search.toLowerCase().trim();
     return allSketches.filter(s =>
       (s.title ?? '').toLowerCase().includes(q) ||
-      (s.script ?? '').toLowerCase().includes(q)
+      (s.script_preview ?? '').toLowerCase().includes(q)
     );
   })();
 
@@ -574,7 +574,7 @@ export function Gallery() {
                   {sketch.title}
                 </div>
                 <pre style={{ fontSize: '15px', fontFamily: "'SF Mono', 'Consolas', monospace", opacity: 0.35, whiteSpace: 'pre-wrap', overflow: 'hidden', maxHeight: 48, margin: '0 0 12px', color: theme.text }}>
-                  {sketch.script.slice(0, 100)}{sketch.script.length > 100 ? '...' : ''}
+                  {(sketch.script_preview ?? '').slice(0, 100)}{(sketch.script_preview ?? '').length > 100 ? '...' : ''}
                 </pre>
                 <div style={{ display: 'flex', gap: 8, fontSize: '15px', opacity: 0.3, color: theme.text }}>
                   <span>{formatDate(sketch.updated_at)}</span>

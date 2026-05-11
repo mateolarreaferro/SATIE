@@ -5,10 +5,19 @@
  */
 import { supabase } from './supabase';
 import { getCachedSample, cacheSample } from './sampleCache';
+import { cachedQuery } from './queryCache';
 
 const BUCKET = 'community-samples';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 const COMMUNITY_PREFIX = 'community/';
+
+/**
+ * Columns to select for list views. Explicitly excludes the 1536-dim
+ * `embedding` vector (~6KB/row) — that's only needed during semantic search,
+ * which happens server-side via RPC.
+ */
+const COMMUNITY_LIST_COLS =
+  'id, uploader_id, name, description, tags, storage_path, content_hash, size_bytes, duration_ms, waveform_peaks, download_count, created_at';
 
 export interface CommunitySample {
   id: string;
@@ -216,7 +225,7 @@ export async function searchByTags(
   // Search for samples that contain ANY of the provided tags
   const { data, error } = await supabase
     .from('community_samples')
-    .select('*')
+    .select(COMMUNITY_LIST_COLS)
     .overlaps('tags', tags)
     .order('download_count', { ascending: false })
     .limit(limit);
@@ -259,23 +268,42 @@ export async function searchByEmbedding(
   return (data ?? []) as CommunitySample[];
 }
 
-/** Get popular community samples. */
+/** Get popular community samples. Cached in sessionStorage for 5 min. */
 export async function getPopularSamples(limit = 50): Promise<CommunitySample[]> {
-  const { data, error } = await supabase
-    .from('community_samples')
-    .select('*')
-    .order('download_count', { ascending: false })
-    .limit(limit);
+  return cachedQuery(`community:popular:${limit}`, 5 * 60_000, async () => {
+    const { data, error } = await supabase
+      .from('community_samples')
+      .select(COMMUNITY_LIST_COLS)
+      .order('download_count', { ascending: false })
+      .limit(limit);
 
-  if (error) throw error;
-  return (data ?? []) as CommunitySample[];
+    if (error) throw error;
+    return (data ?? []) as CommunitySample[];
+  });
+}
+
+/**
+ * Lightweight: just the names of popular samples, for editor autocomplete.
+ * Cached for 10 min — names rarely change.
+ */
+export async function getPopularSampleNames(limit = 100): Promise<string[]> {
+  return cachedQuery(`community:popular-names:${limit}`, 10 * 60_000, async () => {
+    const { data, error } = await supabase
+      .from('community_samples')
+      .select('name')
+      .order('download_count', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return (data ?? []).map((r: { name: string }) => r.name);
+  });
 }
 
 /** Get recent community samples. */
 export async function getRecentSamples(limit = 50): Promise<CommunitySample[]> {
   const { data, error } = await supabase
     .from('community_samples')
-    .select('*')
+    .select(COMMUNITY_LIST_COLS)
     .order('created_at', { ascending: false })
     .limit(limit);
 
@@ -287,7 +315,7 @@ export async function getRecentSamples(limit = 50): Promise<CommunitySample[]> {
 export async function getUserCommunitySamples(userId: string): Promise<CommunitySample[]> {
   const { data, error } = await supabase
     .from('community_samples')
-    .select('*')
+    .select(COMMUNITY_LIST_COLS)
     .eq('uploader_id', userId)
     .order('created_at', { ascending: false });
 

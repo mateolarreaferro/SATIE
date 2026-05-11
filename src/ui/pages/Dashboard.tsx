@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
-import { getUserSketches, createSketch, deleteSketch, updateSketch } from '../../lib/sketches';
+import { getUserSketchesList, createSketch, deleteSketch, updateSketch } from '../../lib/sketches';
 import { TEMPLATES } from '../../lib/templates';
-import type { Sketch } from '../../lib/supabase';
+import type { SketchListItem } from '../../lib/supabase';
 import { Header } from '../components/Header';
 import { useSFX } from '../hooks/useSFX';
 import { useTheme } from '../theme/ThemeContext';
@@ -23,7 +23,7 @@ function SketchCard({
   sfx,
   theme,
 }: {
-  sketch: Sketch;
+  sketch: SketchListItem;
   onOpen: () => void;
   onDelete: () => void;
   onRename: (title: string) => void;
@@ -124,8 +124,8 @@ function SketchCard({
         color: theme.text,
         lineHeight: 1.4,
       }}>
-        {sketch.script.slice(0, 120)}
-        {sketch.script.length > 120 ? '...' : ''}
+        {(sketch.script_preview ?? '').slice(0, 120)}
+        {(sketch.script_preview ?? '').length > 120 ? '...' : ''}
       </pre>
 
       {/* Meta */}
@@ -176,14 +176,14 @@ export function Dashboard() {
   const sfx = useSFX();
   useBackgroundMusic('/Satie-Theme.wav', 0.08);
   const { theme, mode, setMode } = useTheme();
-  const [sketches, setSketches] = useState<Sketch[]>([]);
+  const [sketches, setSketches] = useState<SketchListItem[]>([]);
   const [loadingSketches, setLoadingSketches] = useState(false);
 
   const fetchSketches = useCallback(async () => {
     if (!user) return;
     setLoadingSketches(true);
     try {
-      const data = await getUserSketches(user.id);
+      const data = await getUserSketchesList(user.id);
       setSketches(data);
     } catch (err) {
       console.error('Failed to load sketches:', err);

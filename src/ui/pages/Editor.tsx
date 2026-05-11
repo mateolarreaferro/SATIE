@@ -20,7 +20,7 @@ import type { Statement } from '../../engine/core/Statement';
 import { WanderType } from '../../engine/core/Statement';
 import { registerTrajectoryFromLUT, getTrajectory } from '../../engine/spatial/Trajectories';
 import { cacheTrajectory } from '../../lib/trajectoryCache';
-import { downloadCommunitySampleByName, getPopularSamples, type CommunitySample } from '../../lib/communitySamples';
+import { downloadCommunitySampleByName, getPopularSampleNames, type CommunitySample } from '../../lib/communitySamples';
 import { findCommunityMatch } from '../../lib/communitySearch';
 import { getPreferCommunitySamples } from '../../lib/userSettings';
 import { generateTrajectoryFromPrompt, executeTrajectoryCode, postProcessTrajectory, type TrajectoryGenParams } from '../../engine/spatial/TrajectoryGen';
@@ -334,10 +334,10 @@ export function Editor() {
     return () => window.removeEventListener('keydown', onKey);
   }, [activePopover]);
 
-  // Fetch community sample names for editor autocomplete
+  // Fetch community sample names for editor autocomplete (cached, name-only)
   useEffect(() => {
-    getPopularSamples(100)
-      .then(samples => setCommunitySampleNames(samples.map(s => s.name)))
+    getPopularSampleNames(100)
+      .then(setCommunitySampleNames)
       .catch(() => {});
   }, []);
 
@@ -355,46 +355,48 @@ export function Editor() {
     };
   }, [setOnMissingBuffer, setOnSearchCommunity, setPreferCommunity]);
 
-  // Load sketch from DB if we have an ID, then load its samples
+  // Load sketch + samples in parallel — both keyed on sketchId, no need to wait
+  // for the script body before kicking off the sample fetch.
   useEffect(() => {
     if (!sketchId) return;
-    getSketch(sketchId).then(async (sketch) => {
-      if (sketch) {
-        setScript(sketch.script);
-        setSketchTitle(sketch.title);
-        setCurrentSketchId(sketch.id);
-        setIsPublic(sketch.is_public);
-        // Loaded from DB → mark as clean.
-        setLastSavedScript(sketch.script);
-        setLastSavedTitle(sketch.title);
 
-        // Restore viewport background color: first try @bg comment in script, then localStorage
-        const bgMatch = sketch.script.match(/^- @bg (#[0-9a-fA-F]{6})/m);
-        if (bgMatch) {
-          setSpaceBgColor(bgMatch[1]);
-        } else {
-          const savedBg = localStorage.getItem(`satie-bg-${sketch.id}`);
-          if (savedBg) setSpaceBgColor(savedBg);
-        }
+    const samplesPromise = loadSketchSamples(sketchId, async (name, data) => {
+      await loadAudioBuffer(name, data);
+      sampleBuffers.current.set(name, data);
+    });
 
-        // Load samples from Supabase Storage (with IndexedDB cache)
-        try {
-          const loaded = await loadSketchSamples(sketch.id, async (name, data) => {
-            await loadAudioBuffer(name, data);
-            sampleBuffers.current.set(name, data);
-          });
-          if (loaded.length > 0) {
-            setSampleEntries(prev => {
-              const existing = new Set(prev.map(s => s.name));
-              const newEntries = loaded.filter(n => !existing.has(n)).map(n => ({ name: n, category: 'imported' as const }));
-              return [...prev, ...newEntries];
-            });
-          }
-        } catch (e) {
-          console.error('[Editor] Failed to load sketch samples:', e);
-        }
+    getSketch(sketchId).then((sketch) => {
+      if (!sketch) return;
+      setScript(sketch.script);
+      setSketchTitle(sketch.title);
+      setCurrentSketchId(sketch.id);
+      setIsPublic(sketch.is_public);
+      // Loaded from DB → mark as clean.
+      setLastSavedScript(sketch.script);
+      setLastSavedTitle(sketch.title);
+
+      // Restore viewport background color: first try @bg comment in script, then localStorage
+      const bgMatch = sketch.script.match(/^- @bg (#[0-9a-fA-F]{6})/m);
+      if (bgMatch) {
+        setSpaceBgColor(bgMatch[1]);
+      } else {
+        const savedBg = localStorage.getItem(`satie-bg-${sketch.id}`);
+        if (savedBg) setSpaceBgColor(savedBg);
       }
     }).catch(console.error);
+
+    samplesPromise
+      .then((loaded) => {
+        if (loaded.length === 0) return;
+        setSampleEntries(prev => {
+          const existing = new Set(prev.map(s => s.name));
+          const newEntries = loaded
+            .filter(n => !existing.has(n))
+            .map(n => ({ name: n, category: 'imported' as const }));
+          return [...prev, ...newEntries];
+        });
+      })
+      .catch((e) => console.error('[Editor] Failed to load sketch samples:', e));
   }, [sketchId, loadAudioBuffer]);
 
   // Autosave

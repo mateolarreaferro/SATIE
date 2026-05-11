@@ -1,10 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
-import { createSketch, getPublicSketches } from '../../lib/sketches';
+import { createSketch, getPublicSketchesList } from '../../lib/sketches';
 import { uploadSketchSamples } from '../../lib/sampleStorage';
 import { encodeWAV } from '../../engine/export/WAVEncoder';
-import { getProfile } from '../../lib/profiles';
+import { getProfilesByIds } from '../../lib/profiles';
 import { generateCode } from '../../lib/aiGenerate';
 import { createFeedbackEntry, saveFeedback, updateFeedback } from '../../lib/feedbackStore';
 import { createProvider, checkBudget } from '../../lib/aiProvider';
@@ -18,7 +18,7 @@ import { ControlsHint } from '../components/ControlsHint';
 import { ChatMessage, type ChatMessageData } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
 import { Header } from '../components/Header';
-import type { Sketch, Profile } from '../../lib/supabase';
+import type { SketchListItem, Profile } from '../../lib/supabase';
 import { downloadCommunitySampleByName } from '../../lib/communitySamples';
 import { findCommunityMatch } from '../../lib/communitySearch';
 import { getPreferCommunitySamples } from '../../lib/userSettings';
@@ -213,7 +213,7 @@ export function Chat() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentScript, setCurrentScript] = useState<string | null>(null);
   const [hasActiveTracks, setHasActiveTracks] = useState(false);
-  const [featuredSketches, setFeaturedSketches] = useState<Sketch[]>([]);
+  const [featuredSketches, setFeaturedSketches] = useState<SketchListItem[]>([]);
   const [sketchAuthors, setSketchAuthors] = useState<Record<string, Profile>>({});
   const [showSignInPrompt, setShowSignInPrompt] = useState(false);
   const [savingSketchId, setSavingSketchId] = useState<string | null>(null);
@@ -244,21 +244,14 @@ export function Chat() {
     return () => clearInterval(interval);
   }, [tracksRef]);
 
-  // Load featured public sketches + their author profiles
+  // Load featured public sketches + their author profiles (single batched call)
   useEffect(() => {
-    getPublicSketches()
+    getPublicSketchesList()
       .then(async (sketches) => {
         const featured = sketches.slice(0, 20);
         setFeaturedSketches(featured);
-        // Fetch author profiles
         const uniqueUserIds = [...new Set(featured.map(s => s.user_id))];
-        const profiles: Record<string, Profile> = {};
-        await Promise.all(uniqueUserIds.map(async (uid) => {
-          try {
-            const p = await getProfile(uid);
-            if (p) profiles[uid] = p;
-          } catch { /* ok */ }
-        }));
+        const profiles = await getProfilesByIds(uniqueUserIds);
         setSketchAuthors(profiles);
       })
       .catch(console.error);

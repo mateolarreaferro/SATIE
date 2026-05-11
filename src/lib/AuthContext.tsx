@@ -36,10 +36,33 @@ const devSession = {
   user: devUser,
 } as unknown as Session;
 
+/**
+ * Synchronously peek at localStorage for a stored Supabase session.
+ * Returns true if any `sb-*-auth-token` key is present, so we can skip the
+ * initial loading screen for unauthenticated visitors without waiting on
+ * a network RTT to confirm "no session".
+ */
+function hasStoredSession(): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('sb-') && key.endsWith('-auth-token') && localStorage.getItem(key)) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(isLocalDev ? devUser : null);
   const [session, setSession] = useState<Session | null>(isLocalDev ? devSession : null);
-  const [loading, setLoading] = useState(isLocalDev ? false : true);
+  // Only block rendering when we actually have a stored session to restore.
+  // Unauthenticated visitors (no token in localStorage) render immediately.
+  const [loading, setLoading] = useState(isLocalDev ? false : hasStoredSession());
 
   useEffect(() => {
     if (isLocalDev) return;
@@ -48,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {

@@ -18,6 +18,31 @@ export async function getProfile(userId: string): Promise<Profile | null> {
   }
 }
 
+/**
+ * Batched profile fetch — one round-trip for N ids.
+ * Returns a record keyed by user id (missing ids simply absent from the map).
+ */
+export async function getProfilesByIds(ids: string[]): Promise<Record<string, Profile>> {
+  if (ids.length === 0) return {};
+  const unique = [...new Set(ids)];
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .in('id', unique);
+
+    if (error) {
+      console.warn('[profiles] getProfilesByIds error:', error.code, error.message);
+      return {};
+    }
+    const out: Record<string, Profile> = {};
+    for (const p of data ?? []) out[p.id] = p;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 export async function getProfileByUsername(username: string): Promise<Profile | null> {
   try {
     const { data, error } = await supabase
@@ -51,16 +76,4 @@ export async function upsertProfile(
     return null;
   }
   return data;
-}
-
-export async function getUserPublicSketches(userId: string): Promise<import('./supabase').Sketch[]> {
-  const { data, error } = await supabase
-    .from('sketches')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('is_public', true)
-    .order('updated_at', { ascending: false });
-
-  if (error) throw error;
-  return data ?? [];
 }
