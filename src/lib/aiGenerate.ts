@@ -156,6 +156,64 @@ Before generating code, reason about the user's MUSICAL INTENT, not just their w
 - "make it organic/natural" → add noise to trajectories, use ranges for randomization
 - "multiply/duplicate voices" → use count prefix (3 * loop), NOT copy-paste statements
 
+═══ ITERATIVE REFINEMENT ═══
+
+When the user message contains "CURRENT SCRIPT:", that script is the canonical state of the piece. Your job is to EXTEND it, not replace it. Treat every existing voice, gen prompt, group, and effect chain as fixed material — copy each line through verbatim and append new layers below.
+
+Worked example. The user sends:
+
+  CURRENT SCRIPT:
+  group drone
+  volume 0.5
+  reverb wet 0.4 size 0.8 damping 0.5
+
+      loop gen low warm cello drone
+          volume 0.4
+          pitch 0.5
+          visual sphere
+
+      2 * loop gen soft pulsing sub bass
+          volume 0.3to0.5
+          move fly speed 1to2
+          visual trail
+
+  REQUEST: make it evolve over time, new elements come in and fade
+
+The correct response preserves the original 'drone' group byte-for-byte and appends new groups with staggered 'start' values so the piece blooms in waves:
+
+  group drone
+  volume 0.5
+  reverb wet 0.4 size 0.8 damping 0.5
+
+      loop gen low warm cello drone
+          volume 0.4
+          pitch 0.5
+          visual sphere
+
+      2 * loop gen soft pulsing sub bass
+          volume 0.3to0.5
+          move fly speed 1to2
+          visual trail
+
+  group shimmer
+  start 35
+  volume fade 0 0.5 every 18 loop bounce
+
+      3 * loop gen crystalline shimmer texture
+          volume 0.2to0.4
+          pitch 1.8to2.4
+          move orbit speed 1to2
+          visual trail
+
+  group deep_pulse
+  start 70
+  volume fade 0 0.4 every 20
+
+      loop gen low frequency meditation pulse
+          pitch fade 0.2 0.5 every 18to28 loop bounce
+          move lorenz speed 1
+          visual trail
+
 ═══ COMPOSITIONAL PATTERNS ═══
 
 VARIATION THROUGH MULTIPLICATION (the idiomatic way):
@@ -182,12 +240,32 @@ LAYERING (building texture):
           pitch 2.0
           move fly speed 1to2
           visual trail
-  endgroup
 
 EVOLVING PARAMETERS (temporal change):
   loop gen ocean waves
       volume fade 0.1 0.5 every 8 loop bounce
       filter lowpass cutoff fade 400 3000 every 12 loop bounce
+
+STAGGERED ENTRY (a piece that unfolds in waves):
+  group bed                                      # foundation, enters at t=0
+  volume 0.5
+
+      loop gen warm analog pad
+          volume 0.4
+          visual sphere
+
+  group rhythm                                   # second layer, enters at t=12
+  start 12
+  volume fade 0 0.5 every 10
+
+      4 * oneshot gen wooden percussion tick every 0.4to1.2
+          volume 0.2to0.5
+          pitch 0.8to1.4
+          move walk speed 1to2
+          visual trail
+  → Group-level 'start <N>' defers every child voice by N seconds.
+  → Group-level 'volume fade 0 X every Y' inherits as a graceful fade-in envelope.
+  → Each subsequent layer pushes 'start' further out (e.g. 35, 70, 95).
 
 RHYTHMIC PATTERNS (generative timing):
   3 * oneshot gen wooden percussion tap every 0.3to0.8
@@ -240,21 +318,42 @@ MOVEMENT (only valid types: walk, fly, spiral, orbit, lorenz, gen):
   move gen flying bird speed 1                     # AI-generated trajectory
   Speed range is 1 to 10. DO NOT specify x/y/z bounds on walk or fly — defaults are musical.
 
-GROUPS (always name the group; group-level properties go at the SAME indent as 'group', not indented under it):
+GROUPS (indentation defines scope; groups close by dedent — omit 'endgroup'):
+  Shape:
+    group <name>            ← column 0
+    <macro property>        ← column 0  (same indent as 'group')
+    <macro property>        ← column 0
+
+        <child statement>   ← column 4  (one level in)
+            <voice prop>    ← column 8  (one level deeper)
+
+  A group closes automatically when the next non-empty line returns to column 0
+  (another 'group <name>' or a top-level statement). 'endgroup' is not required
+  and should be omitted — a single trailing dedent ends every open group.
+
+  Example (two consecutive groups, no endgroup):
   group ambience
   volume 0.5
   reverb wet 0.3 size 0.7 damping 0.5
 
-      loop sound1
+      loop gen warm pad drone
           volume 0.3
           move fly speed 1to2
           visual trail
 
-      loop sound2
+      loop gen distant wind
           volume 0.4
           move fly speed 1to3
-          visual trail sphere
-  endgroup
+          visual trail
+
+  group beats
+  start 15
+  volume fade 0 0.5 every 10
+
+      4 * oneshot gen wooden percussion tick every 0.4to1.2
+          volume 0.2to0.5
+          move walk speed 1to2
+          visual trail
 
 EFFECTS (use only when requested or musically relevant):
   reverb wet 0.4 size 0.7 damping 0.5              # named params required
@@ -298,7 +397,9 @@ TRAJECTORY GEN BLOCKS:
 - Properties use SPACES, never = or : (volume 0.5, NOT volume=0.5)
 - Ranges use 'to' without spaces (0.5to1.0)
 - Keep it MINIMAL — only add what the user asks for
-- When modifying existing code, PRESERVE everything unless asked to change it
+- When a CURRENT SCRIPT is provided, copy every existing line through verbatim and APPEND new groups/voices for the requested addition (see ITERATIVE REFINEMENT)
+- Groups close by dedent — write groups with no trailing 'endgroup' lines (a stack like 'endgroup endgroup endgroup' at the end of a file is never correct)
+- Group-level macro properties ('start', 'volume', 'volume fade', 'reverb', ...) sit at the SAME column as 'group <name>' — child statements indent one level deeper
 - NEVER change gen prompts when modifying an existing script (e.g. keep "gen gentle rain" exactly as-is). Changing gen text triggers expensive audio re-generation. Only add NEW gen voices if the user asks for new sounds.
 - Prefer ranges and count multipliers over copy-pasting statements
 - Think about musical relationships: bass is low pitch, high voices are high pitch
@@ -635,7 +736,7 @@ export function scoreScript(code: string): ScriptScore {
     s.areaMin.x !== s.areaMax.x,
   );
 
-  const hasGroups = code.includes('group') && code.includes('endgroup');
+  const hasGroups = /^\s*group\b/m.test(code);
 
   const interpolationUse = (hasInterpolation ? 0.5 : 0) + (hasRanges ? 0.3 : 0) + (hasGroups ? 0.2 : 0);
 
