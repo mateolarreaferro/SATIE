@@ -38,6 +38,12 @@ export interface TrackState {
   statement: Statement;
   sourceNode: AudioBufferSourceNode | null;
   gainNode: GainNode;
+  /**
+   * Static attenuator between gainNode and the DSP/panner chain.
+   * When N voices share an AudioBuffer (count-multiplied statements), we scale
+   * each by 1/sqrt(N) so coherent summing doesn't blow the limiter into pumping.
+   */
+  scaleGain: GainNode;
   pannerNode: PannerNode;
   position: Vec3;
   isPlaying: boolean;
@@ -131,6 +137,32 @@ export class SatieEngine {
   /** Runtime mixer state (independent of parsed mute/solo) */
   private _mutedIndices: Set<number> = new Set();
   private _soloedIndices: Set<number> = new Set();
+
+  /**
+   * Voices whose buffers weren't loaded when their start event fired.
+   * Drained when `loadAudioBuffer`/`loadAudioFile` registers a matching buffer.
+   * Keyed by both `pathFor(clip)` and the raw clip name — buffers can be
+   * stored under either form depending on the caller.
+   */
+  private _pendingVoices: Map<string, Array<{ key: string; stmt: Statement }>> = new Map();
+
+  /**
+   * Hard inventory of every BufferSource we've started.
+   * `track.sourceNode` is the *intended* reference, but the engine has enough
+   * async paths (drainPendingVoices, generateAndRetrigger, resolveAndRetrigger,
+   * communityThenGenerate) that a source can survive a missed cleanup if a
+   * track-keyed reference goes stale. teardownAll iterates this set as a
+   * second pass so no source escapes stop().
+   */
+  private _activeSources: Set<AudioBufferSourceNode> = new Set();
+
+  /**
+   * Whether masterGain is currently wired to the limiter. stop() severs this
+   * connection as a final hard-kill: even if a stray source slips past the
+   * per-track teardown, no audio reaches the destination once masterGain is
+   * disconnected. play() reconnects.
+   */
+  private _masterConnected: boolean = true;
 
   /** Callback for resolving missing audio buffers (e.g. community samples). */
   onMissingBuffer: ((clipName: string) => Promise<ArrayBuffer | null>) | null = null;
@@ -270,6 +302,7 @@ export class SatieEngine {
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await this.ctx.decodeAudioData(arrayBuffer);
       this.audioBuffers.set(name, audioBuffer);
+      this.drainPendingVoices(name);
     } catch (e: any) {
       this.addRuntimeWarning(`Failed to load audio: ${name} (${e.message ?? 'unknown error'})`);
     }
@@ -282,6 +315,28 @@ export class SatieEngine {
     }
     const audioBuffer = await this.ctx.decodeAudioData(data.slice(0));
     this.audioBuffers.set(name, audioBuffer);
+    this.drainPendingVoices(name);
+  }
+
+  /**
+   * Retrigger any voices that were waiting for this clip's buffer to arrive.
+   * Called from loadAudioBuffer/loadAudioFile so that voices scheduled before
+   * decode finished don't silently miss their cue.
+   */
+  private drainPendingVoices(bufferName: string): void {
+    const candidates = new Set<string>([bufferName, pathFor(bufferName)]);
+    for (const key of candidates) {
+      const queue = this._pendingVoices.get(key);
+      if (!queue || queue.length === 0) continue;
+      this._pendingVoices.delete(key);
+      for (const { key: voiceKey, stmt } of queue) {
+        // Only retrigger if the voice still exists and we're still playing.
+        // Otherwise the user has stopped or the track was torn down.
+        if (this._isPlaying && this.tracks.has(voiceKey)) {
+          this.retriggerAudio(voiceKey, stmt);
+        }
+      }
+    }
   }
 
   getLoadedAudioNames(): string[] {
@@ -348,6 +403,12 @@ export class SatieEngine {
     if (this._isPlaying) return;
     if (this.ctx.state === 'suspended') await this.ctx.resume();
 
+    // Re-wire masterGain → limiter if a previous stop() severed it.
+    if (!this._masterConnected) {
+      this.masterGain.connect(this.limiter);
+      this._masterConnected = true;
+    }
+
     this.clearRuntimeWarnings();
     this._generationDisabled = false;
     this._isPlaying = true;
@@ -371,6 +432,22 @@ export class SatieEngine {
     }
 
     this.teardownAll();
+
+    // Hard kill: sever masterGain from the limiter. Any source that somehow
+    // dodged teardownAll (orphaned reference, async retrigger that fired after
+    // tracks were cleared, etc.) still routes through masterGain — disconnecting
+    // here cuts the only path to the destination. play() re-establishes it.
+    if (this._masterConnected) {
+      try { this.masterGain.disconnect(); } catch { /* already disconnected */ }
+      this._masterConnected = false;
+    }
+
+    // Belt-and-suspenders: suspend the audio context so no audio can leak through
+    // a stale automation event. play() resumes.
+    if (this.ctx.state === 'running') {
+      this.ctx.suspend().catch(() => { /* ok — already suspended or closing */ });
+    }
+
     this.notify();
   }
 
@@ -452,6 +529,7 @@ export class SatieEngine {
 
   private teardownAll(): void {
     this.scheduler.reset();
+    this._pendingVoices.clear();
 
     for (const track of this.tracks.values()) {
       if (track.sourceNode) {
@@ -460,11 +538,22 @@ export class SatieEngine {
         track.sourceNode = null;
       }
       if (track.dspChain) destroyDSPChain(track.dspChain);
-      track.gainNode.disconnect();
-      track.pannerNode.disconnect();
+      try { track.gainNode.disconnect(); } catch { /* ok */ }
+      try { track.scaleGain.disconnect(); } catch { /* ok */ }
+      try { track.pannerNode.disconnect(); } catch { /* ok */ }
     }
     this.tracks.clear();
     this._tracksArrayDirty = true;
+
+    // Second pass: force-stop any source that wasn't reachable through a track
+    // (e.g. an async retrigger created a source then the track was cleared, or
+    // an orphan was never assigned to track.sourceNode for some reason). This is
+    // a safety net — the per-track loop above should normally cover everything.
+    for (const src of this._activeSources) {
+      try { src.stop(); } catch { /* ok — already stopped or never started */ }
+      try { src.disconnect(); } catch { /* ok */ }
+    }
+    this._activeSources.clear();
   }
 
   // ── Tick loop ──
@@ -499,6 +588,13 @@ export class SatieEngine {
 
     const gainNode = this.ctx.createGain();
 
+    // Static attenuator: when N voices share an AudioBuffer (count-multiplied
+    // statements), coherent summing produces N× amplitude. The master limiter
+    // then pumps the entire signal. Scaling each voice by 1/sqrt(N) keeps
+    // perceived loudness similar while letting the limiter only catch transients.
+    const scaleGain = this.ctx.createGain();
+    scaleGain.gain.value = stmt.count > 1 ? 1 / Math.sqrt(stmt.count) : 1;
+
     const pannerNode = this.ctx.createPanner();
     pannerNode.panningModel = 'HRTF';
     pannerNode.distanceModel = 'inverse';
@@ -523,12 +619,13 @@ export class SatieEngine {
       eq: stmt.eqParams,
     });
 
-    // Audio routing: source → gain → [DSP chain] → panner → master
+    // Audio routing: source → gain → scaleGain → [DSP chain] → panner → master
+    gainNode.connect(scaleGain);
     if (dspChain) {
-      gainNode.connect(dspChain.input);
+      scaleGain.connect(dspChain.input);
       dspChain.output.connect(pannerNode);
     } else {
-      gainNode.connect(pannerNode);
+      scaleGain.connect(pannerNode);
     }
     pannerNode.connect(this.masterGain);
 
@@ -550,6 +647,7 @@ export class SatieEngine {
       statement: stmt,
       sourceNode: null,
       gainNode,
+      scaleGain,
       pannerNode,
       position: { x: 0, y: 0, z: 0 },
       isPlaying: true,
@@ -680,13 +778,22 @@ export class SatieEngine {
         this.resolveAndRetrigger(key, stmt, clipPath);
         return;
       }
-      this.addRuntimeWarning(`Audio not loaded: ${stmt.clip}`);
+      // Buffer is from a plain user-uploaded sample that hasn't finished
+      // decoding yet (common when the user hits Run immediately after opening
+      // a sketch with a long MP3). Queue this voice to retry when the buffer
+      // arrives via loadAudioBuffer/loadAudioFile.
+      const queue = this._pendingVoices.get(clipPath) ?? [];
+      if (!queue.some(p => p.key === key)) {
+        queue.push({ key, stmt });
+        this._pendingVoices.set(clipPath, queue);
+      }
       return;
     }
 
     if (track.sourceNode) {
       try { track.sourceNode.stop(); } catch { /* ok */ }
       try { track.sourceNode.disconnect(); } catch { /* ok */ }
+      this._activeSources.delete(track.sourceNode);
       track.sourceNode = null;
     }
 
@@ -694,6 +801,22 @@ export class SatieEngine {
     sourceNode.buffer = buffer;
     sourceNode.loop = stmt.kind === 'loop';
     sourceNode.connect(track.gainNode);
+    this._activeSources.add(sourceNode);
+
+    // Phase stagger for count-multiplied voices sharing this buffer.
+    // Without it, N coherent copies sum 1:1 in phase → comb filtering and limiter
+    // pumping. We offset each voice by a tiny fraction of the buffer (≤ 30ms, ≤
+    // 5% of duration, only for buffers > 1s so percussive hits stay tight).
+    // User-set `randomstart` overrides this — their intent wins.
+    let startOffsetSeconds = 0;
+    if (!stmt.randomStart && stmt.count > 1 && buffer.duration > 1) {
+      const parts = key.split('_');
+      const voiceIdx = parseInt(parts[parts.length - 1], 10);
+      if (!Number.isNaN(voiceIdx) && voiceIdx > 0) {
+        const maxStagger = Math.min(buffer.duration * 0.05, 0.03);
+        startOffsetSeconds = (voiceIdx / stmt.count) * maxStagger;
+      }
+    }
 
     const volume = stmt.volume.sample();
     const pitch = stmt.pitch.sample();
@@ -708,6 +831,8 @@ export class SatieEngine {
 
     if (stmt.randomStart) {
       sourceNode.start(0, Math.random() * buffer.duration);
+    } else if (startOffsetSeconds > 0) {
+      sourceNode.start(0, startOffsetSeconds);
     } else {
       sourceNode.start();
     }
@@ -736,13 +861,15 @@ export class SatieEngine {
     if (stmt.kind === 'oneshot' && stmt.every.isNull) {
       sourceNode.onended = () => {
         track.isPlaying = false;
+        this._activeSources.delete(sourceNode);
         if (track.sourceNode) {
           try { track.sourceNode.disconnect(); } catch { /* ok */ }
           track.sourceNode = null;
         }
         if (track.dspChain) destroyDSPChain(track.dspChain);
-        track.gainNode.disconnect();
-        track.pannerNode.disconnect();
+        try { track.gainNode.disconnect(); } catch { /* ok */ }
+        try { track.scaleGain.disconnect(); } catch { /* ok */ }
+        try { track.pannerNode.disconnect(); } catch { /* ok */ }
         this.tracks.delete(key);
         this._tracksArrayDirty = true;
       };
@@ -986,11 +1113,13 @@ export class SatieEngine {
       if (track.sourceNode) {
         try { track.sourceNode.stop(); } catch { /* ok */ }
         try { track.sourceNode.disconnect(); } catch { /* ok */ }
+        this._activeSources.delete(track.sourceNode);
         track.sourceNode = null;
       }
       if (track.dspChain) destroyDSPChain(track.dspChain);
-      track.gainNode.disconnect();
-      track.pannerNode.disconnect();
+      try { track.gainNode.disconnect(); } catch { /* ok */ }
+      try { track.scaleGain.disconnect(); } catch { /* ok */ }
+      try { track.pannerNode.disconnect(); } catch { /* ok */ }
       this.tracks.delete(key);
       this._tracksArrayDirty = true;
     };
