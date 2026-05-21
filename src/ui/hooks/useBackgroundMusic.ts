@@ -201,6 +201,12 @@ export function useMusicEnabled(): [boolean, (enabled: boolean) => void] {
  * Hook: call from any page that should have background music.
  * Music continues seamlessly when navigating between pages that both call this hook.
  * Music fades out only when ALL pages using it have unmounted (e.g. navigating to Editor).
+ *
+ * Fetch is DEFERRED until the first user gesture — AudioContext can't start
+ * without one anyway, so eagerly downloading the asset on mount only burns
+ * bandwidth (the Satie theme is ~33MB unconverted) and starves the rest of
+ * the page on slow networks. The singleton `audioData` is reused across pages
+ * so we only fetch once per session.
  */
 export function useBackgroundMusic(src: string, volume = 0.08) {
   useEffect(() => {
@@ -209,24 +215,25 @@ export function useBackgroundMusic(src: string, volume = 0.08) {
     lastVolume = volume;
     softStopped = false;
 
-    // Fetch audio data if not already loaded
-    if (!audioData && fetchingFor !== src) {
-      fetchingFor = src;
-      fetch(src)
-        .then(res => res.arrayBuffer())
-        .then(buf => {
-          audioData = buf;
-          tryStart(volume);
-        })
-        .catch(() => { /* not available */ });
-    } else if (!started && audioData) {
-      tryStart(volume);
-    }
+    // If audio is already in memory from a previous mount, just try to start.
+    if (audioData && !started) tryStart(volume);
 
     function onGesture() {
       if (!musicEnabled || softStopped) return;
       if (started) {
         if (ctx?.state === 'suspended') ctx.resume();
+        return;
+      }
+      // Lazy fetch on first gesture — keeps the asset off the critical path.
+      if (!audioData && fetchingFor !== src) {
+        fetchingFor = src;
+        fetch(src)
+          .then(res => res.arrayBuffer())
+          .then(buf => {
+            audioData = buf;
+            tryStart(volume);
+          })
+          .catch(() => { /* not available */ });
         return;
       }
       tryStart(volume);

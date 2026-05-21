@@ -1,64 +1,107 @@
-# Handoff — Frontend Audit (2026-04-22)
+# Handoff — Cross-region Latency Pass (2026-05-11)
 
-Read this first. Previous session audited the frontend and shipped fixes; Playwright MCP is configured but not yet activated. Your job is to activate it and smoke-test the fixes in-browser.
+Previous session diagnosed and fixed massive tab-load latency reported from Peru against a US-region Supabase. User confirmed "improved a lot" after the fixes shipped. Next session should pick up where this left off if more latency work is needed.
 
-## 1. Activate Playwright MCP (first thing)
+## 1. What was wrong and what shipped
 
-`.mcp.json` at the repo root is configured for `@playwright/mcp@latest` with `vision,devtools` caps. It needs one-time approval.
+The original "10s tab navigation" was **not** a Supabase round-trip problem despite the cross-region setup. The biggest culprit was a 33 MB `Satie-Theme.wav` being fetched on every page that uses `useBackgroundMusic` (Chat, Dashboard, Gallery, Library), saturating Peru→US bandwidth and starving every other request behind it. Underneath that, several list queries were also pulling full script bodies they didn't need.
 
-- Run `/mcp` — if `playwright` is not connected, Claude Code should have prompted you to approve the project-scope MCP on session start. Approve it.
-- Confirm you see `mcp__playwright__browser_navigate`, `_click`, `_type`, `_screenshot`, `_console_messages` in your tool list.
-- First invocation downloads ~150MB Chromium; expect a delay.
+Fixes shipped in this session:
 
-If the user wants headless mode, add `"--headless"` to `.mcp.json`'s `args` array.
+| Fix | Files |
+|-----|-------|
+| **Background music: deferred fetch + 33 MB → 2.8 MB MP3** | `src/ui/hooks/useBackgroundMusic.ts`, `public/Satie-Theme.mp3` (WAV deleted), 4 page callers |
+| **`script_preview` generated column** — `substring(script, 1, 200) STORED` | `supabase/migrations/009_script_preview.sql` (applied via `npx supabase db query --linked`, verified live) |
+| **`SketchListItem` type** + list-query variants that omit `script` | `src/lib/supabase.ts`, `src/lib/sketches.ts` (`getUserSketchesList`, `getPublicSketchesList`, `getUserPublicSketchesList`) |
+| **Batched profile fetch** — single `.in('id', ids)` instead of N round-trips | `src/lib/profiles.ts` (`getProfilesByIds`), `src/ui/pages/Chat.tsx` |
+| **Drop 1536-dim embedding from community sample list queries** | `src/lib/communitySamples.ts` (new `COMMUNITY_LIST_COLS`, `getPopularSampleNames` for editor autocomplete) |
+| **SessionStorage cache for list queries** with TTL + invalidation on mutation | `src/lib/queryCache.ts`; sketches.ts invalidates on create/update/delete/fork |
+| **Editor: parallelize script + samples load** | `src/ui/pages/Editor.tsx` (loadSketchSamples fires concurrently with getSketch) |
+| **Non-blocking auth bootstrap** — only block render when localStorage has a `sb-*-auth-token` | `src/lib/AuthContext.tsx` (`hasStoredSession()`) |
+| **Cache-Control: immutable** for `/assets/*` and any audio file in `vercel.json` | `vercel.json` |
 
-## 2. Smoke-test the four fixes from last session
+`npm run build` clean, `npm run test` 258/258 passing on the final commit.
 
-Start dev server (`npm run dev`), then drive the browser via MCP:
+## 2. Things still on the table if latency complaints return
 
-| Fix | How to verify |
-|-----|---------------|
-| **Chat save-as-sketch await** (`src/ui/pages/Chat.tsx:362`) | Sign in → generate a soundscape on `/` → click "Save as sketch". The nav to `/editor/:id` should only happen after samples are uploaded; check console has no "sample not found" warnings and audio plays on editor load. |
-| **ExportPanel AudioContext leak** (`src/ui/components/ExportPanel.tsx`) | Open a sketch in editor → open Export panel → render + preview an audio file → close the panel (toggle it off in sidebar). Inspect `window.__satieAudioCtx` is untouched and no "AudioContext closed" errors surface. Repeat 6+ times without refresh; previously would hit browser context cap. |
-| **SketchView fork try/finally** (`src/ui/pages/SketchView.tsx:162, 182`) | Open a public sketch at `/s/:id` as a non-owner → rapid-click Fork twice. Should create exactly one forked sketch. Check DB via Supabase or just that `/editor/:id` loaded with a single new ID. |
-| **Chat scroll-to-bottom race** (`src/ui/pages/Chat.tsx:215`) | Send several prompts in quick succession on `/`. After each send, the viewport should scroll to the newest message (not stop short at the prior one). |
+Confirmed-suspect, **not yet fixed**:
 
-Take screenshots on any step that visually matters — especially viewport trail rendering — so there's a record.
+- **Monaco's `ts.worker` is 7 MB** in the build output (`dist/assets/ts.worker-*.js`). Satie uses a custom Monarch tokenizer and registers no built-in language, so the TS/HTML/CSS/JSON workers should never fire — but `@monaco-editor/react` bundles them anyway. If `/editor` specifically becomes the slow tab, strip unused languages via `@monaco-editor/loader` config or switch to a leaner Monaco distribution.
+- **Main bundle `index-*.js` is 197 KB gzipped, vendor-three is 325 KB gzipped.** Both are cached after first load but contribute to first-paint over slow links. Three.js is only needed on Chat (overlay viewport) and Editor — Dashboard/Gallery/UserProfile pull it in too via the main bundle. Splitting the main bundle by route would help.
+- **Vercel project region.** Hasn't been confirmed but Supabase is US. If the Vercel project is also us-east-1 and most users are LATAM, consider adding sa-east-1 to Functions / setting a closer primary region. Don't do this without checking user location distribution first.
 
-## 3. False alarms already ruled out — don't re-propose
+## 3. How to verify if user reports slowness again
 
-Three Explore agents surfaced these; I verified each is *not* a bug. If you see them flagged again, they've already been investigated:
+Don't speculate. Ask user to:
+1. Open DevTools → Network in Brave on production.
+2. Hard refresh (Cmd+Shift+R), then navigate between two tabs.
+3. Screenshot the network panel + paste back.
 
-- **"Monaco providers duplicate on remount"** — `SatieEditor.tsx:81` has a `languageRegistered` module-level flag. Guarded.
-- **"Editor.tsx stale sketch ID after save-as-new"** — `setCurrentSketchId(sketch.id)` at line 589 updates state; subsequent saves reference current state correctly.
-- **"OverlayFlyControls stale `isInputFocused`"** — `isInputFocused` IS in `onKeyDown`'s deps (line 778), reads `document.activeElement` live.
-- **"useHeadTracking iOS permission not re-requested"** — Effect is keyed to `[enabled]`; toggling re-runs and re-requests.
-- **"ChatMessage autofocus steals input"** — Intentional; focus only fires when the user clicks to expand.
-- **"StrictMode double-AudioContext leak"** — Cleanup calls `engine.destroy()` before re-init; production-safe.
+Look for: any request >500 KB, any request >2s, any obvious waterfall. The 33 MB WAV would have jumped out instantly — the next bottleneck will too.
 
-## 4. Known-suspect areas worth a deeper look later
+`sessionStorage` cache keys to know:
+- `sketches:user:<userId>` (30s TTL)
+- `sketches:public` (60s TTL)
+- `sketches:user-public:<userId>` (30s TTL)
+- `community:popular:<limit>` (5 min)
+- `community:popular-names:<limit>` (10 min)
 
-These came up in the audit but weren't prioritized by the user. If you get asked for another pass, start here:
+Invalidation happens automatically inside `createSketch` / `updateSketch` / `deleteSketch` / `forkSketch`.
 
-- **`useSFX.ts`** — module-level shared `AudioContext` never closed. Deliberate singleton pattern; only fix if a concrete issue appears.
-- **RecordWidget drag handlers** (`src/ui/components/RecordWidget.tsx:236-247`) — canvas mousemove handlers capture `trimStart`/`trimEnd` from closure. Could introduce ref-based reads.
-- **Fork doesn't copy samples** (`src/lib/sketches.ts:90-108`) — forked sketch references original author's storage path. If they delete, fork breaks. Product decision, not a bug per se.
-- **Editor autosave timer cleanup on unmount** (`src/ui/pages/Editor.tsx:356-363`) — theoretical `setState`-after-unmount; unverified impact.
+## 4. False alarms — don't re-investigate
 
-## 5. Environment snapshot
+These were considered and ruled out during the latency pass:
 
-- Branch: `main`, clean except `docs/` (untracked).
+- **AuthContext `getSession()` blocking** — fixed; only blocks when a stored token exists.
+- **Sequential SketchView loads** — exists (`SketchView.tsx:136-157` runs `getProfile` then `hasUserLiked` after `getPublicSketch`) but small impact compared to the WAV. Skipped this round.
+- **Splash screen blocking each route** — checked, only fires once per session via component state. Not the issue.
+- **Supabase RLS full-table scans** — checked migration 008 (foreign key indexes); not the issue.
+
+## 5. Prior session's frontend audit fixes (still valid, don't regress)
+
+From the 2026-04-22 audit (now archived):
+
+- **Chat save-as-sketch await** at `src/ui/pages/Chat.tsx` — must await sample upload before navigating to editor.
+- **ExportPanel AudioContext leak** in `src/ui/components/ExportPanel.tsx` — closed on panel teardown.
+- **SketchView fork try/finally** at `src/ui/pages/SketchView.tsx` — guards against double-fork.
+- **Chat scroll-to-bottom** uses `useLayoutEffect` to read post-commit scrollHeight.
+
+Re-audited "false alarms" from that pass (still false):
+
+- `SatieEditor.tsx` module-level `languageRegistered` flag prevents duplicate Monaco registration.
+- `Editor.tsx` save-as-new updates `currentSketchId` correctly.
+- `OverlayFlyControls` keeps `isInputFocused` in deps and reads `document.activeElement` live.
+- `useHeadTracking` re-runs on `[enabled]` toggle.
+- `ChatMessage` autofocus is intentional.
+- StrictMode double-AudioContext is guarded by `engine.destroy()` before re-init.
+
+## 6. Known-suspect, low-priority
+
+- `useSFX.ts` — module-level shared AudioContext never closed. Deliberate singleton.
+- `RecordWidget` drag handlers capture `trimStart` / `trimEnd` from closure.
+- Fork doesn't copy samples — references original author's storage path.
+- Editor autosave timer cleanup on unmount — theoretical `setState`-after-unmount.
+
+## 7. Environment snapshot
+
+- Branch: `main`.
+- Supabase migrations live: 001–009. **009_script_preview** is applied via `npx -y supabase@latest db query --linked` (verified — column exists as `text, ALWAYS`).
+- `supabase` CLI is not on PATH; brew install failed due to outdated Xcode CLT. Use `npx supabase@latest <cmd>`.
+- ffmpeg is installed at `/opt/homebrew/bin/ffmpeg`.
 - `npm run build`: clean.
 - `npm run test`: 258/258 passing.
 - Dev server: `npm run dev` — picks next free port starting at 5173.
 - Git user: Mateo Larrea. Do not commit unless asked.
 
-## 6. Recent commits not to regress
+## 8. Recent commits not to regress
 
-- `e0aa99e editable script`
-- `0c8e49b Sketch view Fixes`
-- `9a4b8ea fix audio buffer campture + sketch view improvements`
+Push from this session contained:
+- Defer + compress background music; add asset cache headers.
+- Add `SketchListItem` + list-query variants; cache list queries in sessionStorage.
+- Batch profile fetches in Chat; parallelize Editor script/sample load.
+- Non-blocking auth bootstrap.
+- Migration 009: `sketches.script_preview` generated column.
 
 ## Tone reminder
 
-User's memory covers this, but in case it didn't load: terse, no emojis, fix root causes, don't add cleanup/abstractions beyond the task. Group script statements are unindented — don't reformat existing `.satie` scripts.
+User memory covers this, but in case it didn't load: terse, no emojis, fix root causes, don't add cleanup/abstractions beyond the task. Group script statements are unindented — don't reformat existing `.satie` scripts. Use `npx supabase db query --linked` for DB work (network blocks direct Postgres).

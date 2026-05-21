@@ -207,7 +207,7 @@ export function Chat() {
   const sfx = useSFX();
 
   // Background music — plays until first prompt is sent
-  useBackgroundMusic('/Satie-Theme.wav', 0.08);
+  useBackgroundMusic('/Satie-Theme.mp3', 0.08);
 
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);

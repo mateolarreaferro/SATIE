@@ -37,7 +37,7 @@ const ACCEPTED_AUDIO = /\.(wav|mp3|ogg|flac|m4a|webm)$/i;
 
 export function Library() {
   const { theme, mode, setMode } = useTheme();
-  useBackgroundMusic('/Satie-Theme.wav', 0.08);
+  useBackgroundMusic('/Satie-Theme.mp3', 0.08);
   const sfx = useSFX();
   const preview = useSamplePreview();
   const { user } = useAuth();

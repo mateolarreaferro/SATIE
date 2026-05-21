@@ -174,7 +174,7 @@ export function Dashboard() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const sfx = useSFX();
-  useBackgroundMusic('/Satie-Theme.wav', 0.08);
+  useBackgroundMusic('/Satie-Theme.mp3', 0.08);
   const { theme, mode, setMode } = useTheme();
   const [sketches, setSketches] = useState<SketchListItem[]>([]);
   const [loadingSketches, setLoadingSketches] = useState(false);
