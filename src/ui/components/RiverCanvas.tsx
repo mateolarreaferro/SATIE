@@ -117,15 +117,16 @@ function drawDark(c: CanvasRenderingContext2D, particles: Particle[], cw: number
     }
 
     const sz = p.size * dpr;
-    const glow = c.createRadialGradient(p.x, p.y, 0, p.x, p.y, sz * 3);
-    glow.addColorStop(0, `hsla(${p.hue}, 55%, 78%, ${p.opacity * 0.2})`);
-    glow.addColorStop(0.4, `hsla(${p.hue}, 45%, 65%, ${p.opacity * 0.06})`);
-    glow.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
-    c.beginPath();
-    c.arc(p.x, p.y, sz * 3, 0, Math.PI * 2);
-    c.fillStyle = glow;
-    c.fill();
 
+    // Glow: cached sprite scaled to the particle; baked alpha modulated by
+    // the particle's opacity via globalAlpha (sprite spans radius sz*3).
+    const sprite = glowSprite(p.hue);
+    const d = sz * 6;
+    c.globalAlpha = p.opacity;
+    c.drawImage(sprite, p.x - d / 2, p.y - d / 2, d, d);
+    c.globalAlpha = 1;
+
+    // Core dot — cheap single fill.
     c.beginPath();
     c.arc(p.x, p.y, sz * 0.4, 0, Math.PI * 2);
     c.fillStyle = `hsla(${p.hue}, 45%, 88%, ${p.opacity * 0.45})`;
@@ -167,6 +168,39 @@ function drawFade(c: CanvasRenderingContext2D, _particles: Particle[], cw: numbe
   }
 }
 
+// ── Precomputed glow sprites (dark mode) ──
+// Allocating a radial gradient per particle per frame is the dominant cost.
+// Instead we render the glow once per hue bucket onto an offscreen canvas and
+// drawImage it (scaled + alpha-modulated) for each particle.
+
+const GLOW_SPRITE_RADIUS = 48;
+const glowSpriteCache = new Map<number, HTMLCanvasElement>();
+
+function glowSprite(hue: number): HTMLCanvasElement {
+  const bucket = Math.round(hue / 10) * 10; // ~6 sprites across the 195–245 range
+  const cached = glowSpriteCache.get(bucket);
+  if (cached) return cached;
+
+  const size = GLOW_SPRITE_RADIUS * 2;
+  const cv = document.createElement('canvas');
+  cv.width = size;
+  cv.height = size;
+  const g = cv.getContext('2d')!;
+  const grad = g.createRadialGradient(
+    GLOW_SPRITE_RADIUS, GLOW_SPRITE_RADIUS, 0,
+    GLOW_SPRITE_RADIUS, GLOW_SPRITE_RADIUS, GLOW_SPRITE_RADIUS,
+  );
+  // Baked at full opacity — per-particle opacity is applied via globalAlpha.
+  grad.addColorStop(0, `hsla(${bucket}, 55%, 78%, 0.2)`);
+  grad.addColorStop(0.4, `hsla(${bucket}, 45%, 65%, 0.06)`);
+  grad.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+
+  glowSpriteCache.set(bucket, cv);
+  return cv;
+}
+
 // ── Component ──
 
 const PARTICLE_COUNT = 140;
@@ -199,8 +233,12 @@ export function RiverCanvas({ mode = 'light' }: { mode?: ThemeMode }) {
     let cw = 0;
     let ch = 0;
 
+    // Cap the device pixel ratio: a retina canvas is 4× the pixels to clear and
+    // paint each frame, and the ambient effect doesn't need that fidelity.
+    const getDpr = () => Math.min(window.devicePixelRatio || 1, 1.5);
+
     const resize = () => {
-      const dpr = window.devicePixelRatio;
+      const dpr = getDpr();
       cw = window.innerWidth * dpr;
       ch = window.innerHeight * dpr;
       canvas.width = cw;
@@ -212,13 +250,23 @@ export function RiverCanvas({ mode = 'light' }: { mode?: ThemeMode }) {
     const { create, draw } = MODE_CONFIG[mode];
     particlesRef.current = Array.from({ length: PARTICLE_COUNT }, () => create(cw, ch));
 
-    const animate = () => {
+    // Throttle to ~30fps — the motion is slow enough that this is visually
+    // identical to 60fps while roughly halving the per-second work.
+    const FRAME_MS = 1000 / 30;
+    let lastDraw = 0;
+
+    const animate = (now: number) => {
       if (!running) return;
-      const dpr = window.devicePixelRatio;
-      timeRef.current += 1;
+      frameRef.current = requestAnimationFrame(animate);
+      // Do no work while the tab is hidden (RAF is usually paused then anyway).
+      if (document.hidden) return;
+      if (now - lastDraw < FRAME_MS) return;
+      lastDraw = now;
+
+      const dpr = getDpr();
+      timeRef.current += 2; // +2/frame at 30fps ≈ the prior +1/frame at 60fps
       ctx.clearRect(0, 0, cw, ch);
       draw(ctx, particlesRef.current, cw, ch, timeRef.current, dpr);
-      frameRef.current = requestAnimationFrame(animate);
     };
 
     frameRef.current = requestAnimationFrame(animate);

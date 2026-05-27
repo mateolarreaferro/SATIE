@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useLayoutEffect, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { createSketch, getPublicSketchesList } from '../../lib/sketches';
@@ -13,7 +13,7 @@ import { useSFX } from '../hooks/useSFX';
 import { useSatieEngine } from '../hooks/useSatieEngine';
 import { useBackgroundMusic, stopBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { RiverCanvas } from '../components/RiverCanvas';
-import { SpatialViewport } from '../components/SpatialViewport';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { ControlsHint } from '../components/ControlsHint';
 import { ChatMessage, type ChatMessageData } from '../components/ChatMessage';
 import { ChatInput } from '../components/ChatInput';
@@ -22,6 +22,13 @@ import type { SketchListItem, Profile } from '../../lib/supabase';
 import { downloadCommunitySampleByName } from '../../lib/communitySamples';
 import { findCommunityMatch } from '../../lib/communitySearch';
 import { getPreferCommunitySamples } from '../../lib/userSettings';
+
+// Code-split the 3D viewport (pulls in Three.js, ~1.1MB). The landing page shows
+// no 3D until the user generates a soundscape, so keeping this lazy removes
+// Three.js from the first-open critical path.
+const SpatialViewport = lazy(() =>
+  import('../components/SpatialViewport').then(m => ({ default: m.SpatialViewport })),
+);
 
 /** Stop-words to strip from the trailing edge of an auto-generated title. */
 const TITLE_TRAILING_STOPWORDS = new Set([
@@ -494,10 +501,16 @@ export function Chat() {
       {/* Layer 1: Background animation */}
       <RiverCanvas mode={mode} />
 
-      {/* Layer 2: 3D viewport overlay */}
+      {/* Layer 2: 3D viewport overlay (lazy — Three.js loads on demand).
+          Wrapped so a chunk-load failure degrades to audio-only instead of
+          taking down the page. */}
       {hasActiveTracks && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
-          <SpatialViewport tracksRef={tracksRef} overlayMode onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
+          <ErrorBoundary name="Viewport" fallback={null}>
+            <Suspense fallback={null}>
+              <SpatialViewport tracksRef={tracksRef} overlayMode onListenerMove={setListenerPosition} onListenerRotate={setListenerOrientation} />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       )}
 

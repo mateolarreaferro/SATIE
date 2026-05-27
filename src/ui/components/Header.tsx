@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../lib/AuthContext';
 import { loadSettings, saveKey as saveSettingsKey, getPreferCommunitySamples, setPreferCommunitySamples } from '../../lib/userSettings';
+import { preloadRoute } from '../../lib/routePreload';
 import { useSFX } from '../hooks/useSFX';
 import { useMusicEnabled } from '../hooks/useBackgroundMusic';
 import { FeedbackDashboard } from './FeedbackDashboard';
@@ -248,7 +249,8 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
                 key={tab.key}
                 to={tab.to}
                 className="header-link"
-                onMouseEnter={sfx.hover}
+                onMouseEnter={() => { sfx.hover(); preloadRoute(tab.to); }}
+                onFocus={() => preloadRoute(tab.to)}
                 onClick={sfx.click}
                 style={{
                   textDecoration: 'none',
@@ -277,7 +279,8 @@ export function Header({ theme, mode, setMode, rightExtra }: HeaderProps) {
             <Link
               to="/sketches"
               className="header-link"
-              onMouseEnter={sfx.hover}
+              onMouseEnter={() => { sfx.hover(); preloadRoute('/sketches'); }}
+              onFocus={() => preloadRoute('/sketches')}
               onClick={sfx.click}
               style={{
                 textDecoration: 'none',
