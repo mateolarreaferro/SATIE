@@ -47,7 +47,13 @@ export function preloadRoute(path: string): void {
   importers[key]().catch(() => warmed.delete(key));
 }
 
-/** Warm the routes a user is most likely to hit next. Call when idle. */
+/**
+ * Warm the top-nav route chunks (explore / library / sketches). These are all
+ * small now that the heavy 3D views are themselves code-split, so warming them
+ * during the splash makes the first tab click instant. Editor is intentionally
+ * excluded — it pulls in Three.js (~861KB) and is reached by a deliberate action
+ * (opening a sketch), not a top-nav tab, so we let it load on demand.
+ */
 export function preloadCommonRoutes(): void {
-  ['/explore', '/library', '/sketches', '/editor'].forEach(preloadRoute);
+  ['/explore', '/library', '/sketches'].forEach(preloadRoute);
 }

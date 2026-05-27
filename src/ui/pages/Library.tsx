@@ -2,7 +2,7 @@
  * Community Sample Library page — browse, search, preview, and download shared audio samples.
  * Route: /library
  */
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useTheme } from '../theme/ThemeContext';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic';
 import { useSFX } from '../hooks/useSFX';
@@ -11,7 +11,6 @@ import { useAuth } from '../../lib/AuthContext';
 import { RiverCanvas } from '../components/RiverCanvas';
 import { Header } from '../components/Header';
 import { CommunityUploadDialog } from '../components/CommunityUploadDialog';
-import { SampleGraph } from '../components/SampleGraph';
 import { buildGraph, computeLayout } from '../../lib/graphLayout';
 import {
   getPopularSamples,
@@ -22,6 +21,13 @@ import {
   downloadCommunitySample,
   type CommunitySample,
 } from '../../lib/communitySamples';
+
+// The 3D knowledge graph pulls in Three.js (~861KB). It's a secondary view
+// ('grid' is the default), so code-split it: /library renders instantly and
+// Three.js loads only when the user switches to graph view.
+const SampleGraph = lazy(() =>
+  import('../components/SampleGraph').then(m => ({ default: m.SampleGraph })),
+);
 
 type SortMode = 'popular' | 'recent';
 type ViewMode = 'grid' | 'graph';
@@ -219,14 +225,16 @@ export function Library() {
       {/* Graph background — fullscreen behind the UI */}
       {viewMode === 'graph' && graphData && graphData.nodes.length > 0 && (
         <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-          <SampleGraph
-            nodes={graphData.nodes}
-            edges={graphData.edges}
-            onSelect={handleGraphSelect}
-            selectedId={selectedSample?.id ?? null}
-            highlightIds={null}
-            theme={theme}
-          />
+          <Suspense fallback={null}>
+            <SampleGraph
+              nodes={graphData.nodes}
+              edges={graphData.edges}
+              onSelect={handleGraphSelect}
+              selectedId={selectedSample?.id ?? null}
+              highlightIds={null}
+              theme={theme}
+            />
+          </Suspense>
         </div>
       )}
 

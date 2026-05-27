@@ -34,18 +34,19 @@ function App() {
     }
   }, [showTutorial]);
 
-  // Warm the most-likely-next route chunks once the app is interactive, so
-  // clicking a nav tab resolves instantly instead of cold-fetching a chunk.
+  // Warm the top-nav route chunks during the splash, while the network is idle —
+  // so by the time the splash clears and the user can click a tab, the chunk is
+  // already cached and navigation is instant. Runs on mount (not gated on the
+  // splash finishing, which is exactly when the user first interacts).
   useEffect(() => {
-    if (!splashDone) return;
     const ric = window.requestIdleCallback;
     if (ric) {
       const id = ric(() => preloadCommonRoutes());
       return () => window.cancelIdleCallback?.(id);
     }
-    const id = window.setTimeout(preloadCommonRoutes, 1500);
+    const id = window.setTimeout(preloadCommonRoutes, 600);
     return () => clearTimeout(id);
-  }, [splashDone]);
+  }, []);
 
   if (!splashDone) {
     return <SplashScreen onComplete={handleSplashComplete} showTutorial={showTutorial} />;
