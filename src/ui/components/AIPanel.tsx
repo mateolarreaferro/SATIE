@@ -424,9 +424,9 @@ export function AIPanel({
 
   const targetBtnStyle = (active: boolean): React.CSSProperties => ({
     padding: '2px 8px',
-    background: active ? '#1a1a1a' : 'none',
-    color: active ? '#fff' : '#1a1a1a',
-    border: '1px solid #1a1a1a',
+    background: active ? theme.invertedBg : 'none',
+    color: active ? theme.invertedText : theme.text,
+    border: `1px solid ${theme.text}`,
     borderRadius: 6,
     cursor: 'pointer',
     fontSize: '16px',
@@ -482,7 +482,7 @@ export function AIPanel({
             marginLeft: 'auto',
             fontFamily: "'SF Mono', monospace",
             background: 'transparent',
-            border: '1px solid #d0cdc4',
+            border: `1px solid ${theme.border}`,
             borderRadius: 4,
             padding: '1px 4px',
             color: theme.accent,
@@ -508,9 +508,9 @@ export function AIPanel({
               onClick={() => setEnsembleMode(!ensembleMode)}
               style={{
                 padding: '1px 7px',
-                background: ensembleMode ? '#1a3a2a' : 'none',
-                color: ensembleMode ? '#fff' : '#1a3a2a',
-                border: `1px solid ${ensembleMode ? '#1a3a2a' : '#d0cdc4'}`,
+                background: ensembleMode ? theme.accent : 'none',
+                color: ensembleMode ? theme.accentText : theme.accent,
+                border: `1px solid ${ensembleMode ? theme.accent : theme.border}`,
                 borderRadius: 5,
                 cursor: 'pointer',
                 fontSize: '12px',
@@ -529,7 +529,7 @@ export function AIPanel({
                 padding: '1px 7px',
                 background: 'none',
                 color: theme.accent,
-                border: '1px solid #d0cdc4',
+                border: `1px solid ${theme.border}`,
                 borderRadius: 5,
                 cursor: (!currentScript || isRefining || isLoading || refineCooldown || budgetExceeded) ? 'default' : 'pointer',
                 fontSize: '12px',
@@ -570,7 +570,7 @@ export function AIPanel({
         }}
       >
         {prompts.length === 0 && !status && (
-          <div style={{ opacity: 0.2, fontSize: '16px', padding: '4px 0' }}>
+          <div style={{ color: theme.textMuted, fontSize: '16px', padding: '4px 0' }}>
             {target === 'script'
               ? 'describe what you want to hear'
               : 'describe the sample you need'}
@@ -590,7 +590,7 @@ export function AIPanel({
         {status && (
           <div style={{
             padding: '3px 0',
-            color: status.startsWith('error') ? '#8b0000' : '#1a3a2a',
+            color: status.startsWith('error') ? theme.danger : theme.accent,
             opacity: 0.5,
             fontSize: '15px',
             fontFamily: "'SF Mono', monospace",
@@ -605,7 +605,7 @@ export function AIPanel({
           return (
             <div style={{
               padding: '2px 0',
-              color: warn ? '#8b0000' : '#1a3a2a',
+              color: warn ? theme.danger : theme.accent,
               opacity: warn ? 0.6 : 0.35,
               fontSize: '13px',
               fontFamily: "'SF Mono', monospace",
@@ -615,20 +615,20 @@ export function AIPanel({
           );
         })()}
         {asr.recording && (
-          <div style={{ opacity: 0.4, fontSize: '16px', padding: '4px 0', color: '#8b0000' }}>recording...</div>
+          <div style={{ opacity: 0.4, fontSize: '16px', padding: '4px 0', color: theme.danger }}>recording...</div>
         )}
         {asr.transcribing && (
-          <div style={{ opacity: 0.3, fontSize: '16px', padding: '4px 0' }}>transcribing...</div>
+          <div style={{ color: theme.text, opacity: 0.3, fontSize: '16px', padding: '4px 0' }}>transcribing...</div>
         )}
         {isLoading && (
-          <div style={{ opacity: 0.2, fontSize: '16px', padding: '4px 0' }}>...</div>
+          <div style={{ color: theme.text, opacity: 0.2, fontSize: '16px', padding: '4px 0' }}>...</div>
         )}
       </div>
 
       {/* History navigation — shows prompt for the active entry */}
       {history.length > 0 && (
         <div style={{
-          borderTop: '1px solid #e8e0d8',
+          borderTop: `1px solid ${theme.border}`,
           flexShrink: 0,
           padding: '4px 14px 2px',
         }}>
@@ -718,7 +718,7 @@ export function AIPanel({
                       transition: 'opacity 0.15s',
                     }}
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill={currentRating === 1 ? '#1a3a2a' : 'none'} stroke="#1a3a2a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill={currentRating === 1 ? theme.accent : 'none'} stroke={theme.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
                       <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
                     </svg>
@@ -733,11 +733,11 @@ export function AIPanel({
                       fontSize: '16px',
                       padding: '0 2px',
                       opacity: currentRating === -1 ? 1 : 0.25,
-                      color: '#8b0000',
+                      color: theme.danger,
                       transition: 'opacity 0.15s',
                     }}
                   >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill={currentRating === -1 ? '#8b0000' : 'none'} stroke="#8b0000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill={currentRating === -1 ? theme.danger : 'none'} stroke={theme.danger} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
                       <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
                     </svg>
@@ -760,14 +760,14 @@ export function AIPanel({
           style={{
             flex: 1,
             padding: '8px 10px',
-            border: '1px solid #d0cdc4',
+            border: `1px solid ${theme.border}`,
             borderRadius: 12,
             fontSize: '16px',
             fontFamily: "'Inter', system-ui, sans-serif",
-            background: '#faf9f6',
+            background: theme.cardBg,
             outline: 'none',
             resize: 'none',
-            color: theme.accent,
+            color: theme.text,
             lineHeight: 1.4,
           }}
         />
@@ -781,8 +781,8 @@ export function AIPanel({
           style={{
             width: 34,
             height: 34,
-            background: asr.recording ? '#8b0000' : 'none',
-            border: `1.5px solid ${asr.recording ? '#8b0000' : '#d0cdc4'}`,
+            background: asr.recording ? theme.danger : 'none',
+            border: `1.5px solid ${asr.recording ? theme.danger : theme.border}`,
             borderRadius: 10,
             cursor: isLoading || asr.transcribing ? 'default' : 'pointer',
             display: 'flex',
@@ -793,7 +793,7 @@ export function AIPanel({
             transition: 'all 0.15s',
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke={asr.recording ? '#faf9f6' : '#1a3a2a'} strokeWidth="1.3">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke={asr.recording ? theme.overlayText : theme.accent} strokeWidth="1.3">
             <rect x="5" y="1" width="4" height="8" rx="2" strokeLinejoin="round"/>
             <path d="M3 7 C3 9.2 4.8 11 7 11 C9.2 11 11 9.2 11 7" strokeLinecap="round"/>
             <line x1="7" y1="11" x2="7" y2="13" strokeLinecap="round"/>

@@ -6,6 +6,27 @@ cause → takeaway**. For "where we are right now," see `docs/claude-handoff.md`
 
 ---
 
+## Theming / dark mode (2026-05-26)
+
+### 8. Hardcoded hex colors break dark mode — use theme tokens
+**Symptom:** in dark mode, DocsPanel code blocks rendered as bright cream boxes, the
+AI panel input was cream, and several labels/placeholders were invisible (dark-on-dark).
+**Cause:** components hardcoded the light palette (`#faf9f6`, `#f0efe8`, `#d0cdc4`,
+`#1a3a2a`, `#1a1a1a`, …) instead of reading `useTheme()` tokens, so they didn't adapt.
+**Takeaway:** always paint from theme tokens (`theme.bg/text/textMuted/border/cardBg/
+accent/accentText/danger/overlayText`). Two traps that hide hardcoded colors:
+- **Module-level `CSSProperties` style objects can't see `theme`.** Convert them to
+  functions that take `theme` (e.g. `contentStyle(theme)`), or define them inside the
+  component. (DocsPanel's `navStyle`/`navBtnStyle`/`contentStyle` were the culprits.)
+- **An element with only `opacity` and no `color` inherits a non-theme color** and
+  vanishes on the opposite background. Always set an explicit themed `color` — use
+  `theme.textMuted` for subtle placeholder/status text instead of `opacity: 0.2` on an
+  inherited color.
+**Check:** `grep -nE "#faf9f6|#f4f3ee|#f0efe8|#d0cdc4|#e8e0d8|'#1a1a1a'|'#1a3a2a'"
+src/ui/components/*.tsx` to find regressions; verify both modes via screenshot.
+
+---
+
 ## Routing & bundling (2026-05-26)
 
 ### 1. React Router v7 navigations are React transitions

@@ -1,5 +1,6 @@
 import { useState, memo } from 'react';
 import { useTheme } from '../theme/ThemeContext';
+import type { Theme } from '../theme/tokens';
 
 interface Section {
   title: string;
@@ -283,35 +284,35 @@ endcomment
   },
 ];
 
-const navStyle: React.CSSProperties = {
+const navStyle = (theme: Theme): React.CSSProperties => ({
   display: 'flex',
   flexWrap: 'wrap',
   gap: '4px',
   padding: '0 12px 8px',
-  borderBottom: '1px solid #e8e0d8',
-};
+  borderBottom: `1px solid ${theme.border}`,
+});
 
-const navBtnStyle = (active: boolean): React.CSSProperties => ({
+const navBtnStyle = (active: boolean, theme: Theme): React.CSSProperties => ({
   padding: '3px 8px',
   fontSize: '15px',
   fontFamily: "'Inter', system-ui, sans-serif",
-  background: active ? '#1a3a2a' : 'transparent',
-  color: active ? '#faf9f6' : '#1a3a2a',
-  border: active ? 'none' : '1px solid #d0cdc4',
+  background: active ? theme.accent : 'transparent',
+  color: active ? theme.accentText : theme.accent,
+  border: active ? 'none' : `1px solid ${theme.border}`,
   borderRadius: 10,
   cursor: 'pointer',
   fontWeight: active ? 600 : 400,
 });
 
-const contentStyle: React.CSSProperties = {
+const contentStyle = (theme: Theme): React.CSSProperties => ({
   flex: 1,
   overflow: 'auto',
   padding: '12px 16px',
   fontSize: '16px',
   fontFamily: "'Inter', system-ui, sans-serif",
-  color: '#1a1a1a',
+  color: theme.text,
   lineHeight: 1.6,
-};
+});
 
 export const DocsPanel = memo(function DocsPanel() {
   const { theme } = useTheme();
@@ -322,12 +323,12 @@ export const DocsPanel = memo(function DocsPanel() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Navigation */}
-      <div style={navStyle}>
+      <div style={navStyle(theme)}>
         {SECTIONS.map(s => (
           <button
             key={s.id}
             onClick={() => setActiveSection(s.id)}
-            style={navBtnStyle(s.id === activeSection)}
+            style={navBtnStyle(s.id === activeSection, theme)}
           >
             {s.title}
           </button>
@@ -335,7 +336,7 @@ export const DocsPanel = memo(function DocsPanel() {
       </div>
 
       {/* Content */}
-      <div style={contentStyle}>
+      <div style={contentStyle(theme)}>
         <MarkdownRenderer content={section.content} />
       </div>
     </div>
@@ -375,7 +376,8 @@ function MarkdownRenderer({ content }: { content: string }) {
       i++; // skip closing ```
       elements.push(
         <pre key={`code-${i}`} style={{
-          background: '#f0efe8',
+          background: theme.cardBg,
+          color: theme.text,
           borderRadius: 8,
           padding: '10px 12px',
           margin: '8px 0',
@@ -383,7 +385,7 @@ function MarkdownRenderer({ content }: { content: string }) {
           fontFamily: "'SF Mono', 'Fira Code', monospace",
           lineHeight: 1.5,
           overflow: 'auto',
-          border: '1px solid #e0ddd4',
+          border: `1px solid ${theme.border}`,
         }}>
           {codeLines.join('\n')}
         </pre>
@@ -430,6 +432,7 @@ function MarkdownRenderer({ content }: { content: string }) {
 }
 
 function InlineMarkdown({ text }: { text: string }) {
+  const { theme } = useTheme();
   // Handle inline code `code` and bold **text**
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/);
   return (
@@ -438,7 +441,7 @@ function InlineMarkdown({ text }: { text: string }) {
         if (part.startsWith('`') && part.endsWith('`')) {
           return (
             <code key={i} style={{
-              background: '#f0efe8',
+              background: theme.cardBg,
               padding: '1px 5px',
               borderRadius: 3,
               fontSize: '16px',
@@ -482,7 +485,7 @@ function SimpleTable({ lines }: { lines: string[] }) {
             <th key={i} style={{
               textAlign: 'left',
               padding: '4px 8px',
-              borderBottom: '1.5px solid #d0cdc4',
+              borderBottom: `1.5px solid ${theme.border}`,
               fontWeight: 600,
               color: theme.accent,
               fontSize: '15px',
@@ -498,7 +501,7 @@ function SimpleTable({ lines }: { lines: string[] }) {
             {row.map((cell, ci) => (
               <td key={ci} style={{
                 padding: '3px 8px',
-                borderBottom: '1px solid #e8e0d8',
+                borderBottom: `1px solid ${theme.border}`,
                 fontSize: '16px',
               }}>
                 <InlineMarkdown text={cell} />
