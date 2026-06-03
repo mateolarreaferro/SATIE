@@ -38,7 +38,8 @@ const PROPERTY_DOCS: PropDoc[] = [
   { label: 'duration', detail: 'seconds | range', documentation: 'How long the voice plays before stopping.\nExample: `duration 5` or `duration 3to8`' },
   { label: 'fade_in', detail: 'seconds | range', documentation: 'Fade-in time in seconds. Volume ramps from 0 to target.\nExample: `fade_in 1.5`' },
   { label: 'fade_out', detail: 'seconds | range', documentation: 'Fade-out time in seconds when the voice stops.\nExample: `fade_out 2`' },
-  { label: 'move', detail: 'walk|fly|fixed|spiral|orbit|lorenz <area>', documentation: 'Spatial movement type.\n- `walk x1 z1 x2 z2` — ground plane\n- `fly x1 y1 z1 x2 y2 z2` — 3D volume\n- `spiral/orbit/lorenz` — trajectory curves\n- `fixed x y z` — stationary position\nExample: `move fly -5 -3 -5 5 3 5`' },
+  { label: 'place', detail: '<sector> <depth> [height] [extent]', documentation: 'Semantic placement — WHERE a sound sits, relative to the listener.\n- sector: ahead behind left right ahead-left ahead-right behind-left behind-right surround overhead\n- depth: near (~1.5m) mid (~3.5m) far (~6m)\n- height: low (ground) level (ear) high (up)\n- extent: narrow (point) wide (arc) surround (envelop)\nExample: `place ahead far low wide` (the sea); `place overhead near` (gulls). Pairs with `move`.' },
+  { label: 'move', detail: 'static|drift|swell|wander|dart|pass… | walk|fly|spiral|orbit|lorenz', documentation: 'How a voice moves. Prefer the semantic archetypes:\n- `static` — still   · `breathe`/`drift`/`swell` — slow ambient beds\n- `wander` — ground agent · `dart` — fast flyer · `circle` — orbit\n- `pass lr`/`pass rl` — traverse · `approach`/`recede` — depth move\nLow-level (fine control): `walk`, `fly`, `spiral`, `orbit`, `lorenz`, `gen <desc>`, or explicit `fly x -5to5 y 0to3 z -5to5`.\nExample: `place ahead mid low wide` then `move swell`.' },
   { label: 'speed', detail: '0.01–10 | range', documentation: 'Movement speed for trajectories (Hz). Default: 0.3\nExample: `speed 0.5`' },
   { label: 'noise', detail: '0–1', documentation: 'Trajectory noise amplitude. Adds organic jitter to movement paths.\nExample: `noise 0.3`' },
   { label: 'color', detail: '#hex | name | r g b', documentation: 'Voice color in the viewport.\n- Hex: `#ff3300`\n- Named: `red`, `blue`, `cyan`\n- RGB: `0.8 0.2 0.1`\n- Supports interpolation per channel.' },
@@ -73,7 +74,20 @@ const KEYWORD_DOCS: PropDoc[] = [
 
 const LOOP_MODES = ['bounce', 'restart'];
 
-const MOVEMENT_TYPES = ['walk', 'fly', 'fixed', 'spiral', 'orbit', 'lorenz'];
+const MOVEMENT_TYPES = [
+  // semantic archetypes (preferred)
+  'static', 'breathe', 'drift', 'swell', 'wander', 'dart', 'circle', 'pass', 'approach', 'recede',
+  // low-level types
+  'walk', 'fly', 'spiral', 'orbit', 'lorenz', 'gen',
+];
+const PLACE_SECTORS = [
+  'ahead', 'behind', 'left', 'right',
+  'ahead-left', 'ahead-right', 'behind-left', 'behind-right',
+  'surround', 'overhead',
+];
+const PLACE_DEPTHS = ['near', 'mid', 'far'];
+const PLACE_HEIGHTS = ['low', 'level', 'high'];
+const PLACE_EXTENTS = ['narrow', 'wide', 'surround'];
 const VISUAL_TYPES = ['sphere', 'cube', 'trail', 'none'];
 const FILTER_MODES = ['lowpass', 'highpass', 'bandpass', 'notch', 'peak'];
 const DISTORTION_MODES = ['softclip', 'hardclip', 'tanh', 'cubic', 'asymmetric'];
@@ -148,8 +162,9 @@ export function registerSatieLanguage(monaco: any) {
         [/\b(gen)\b/, 'keyword.gen'],
         [/\b(every)\b/, 'keyword.every'],
         [/\b(fade|jump)\b/, 'function'],
-        [/\b(walk|fly|fixed)\b/, 'type.move'],
-        [/\b(volume|pitch|start|end|duration|fade_in|fade_out|move|color|alpha|visual|overlap|persistent|mute|solo|randomstart|random_start|prompt|influence|loopable|background|bg|size)\b/, 'variable'],
+        [/\b(static|breathe|drift|swell|wander|dart|circle|pass|approach|recede|walk|fly|fixed)\b/, 'type.move'],
+        [/\b(ahead-left|ahead-right|behind-left|behind-right|ahead|behind|surround|overhead|near|far|level|narrow|wide)\b/, 'type.mode'],
+        [/\b(volume|pitch|start|end|duration|fade_in|fade_out|move|place|color|alpha|visual|overlap|persistent|mute|solo|randomstart|random_start|prompt|influence|loopable|background|bg|size)\b/, 'variable'],
         [/\b(reverb|delay|filter|distortion|eq)\b/, 'variable.dsp'],
         [/\b(wet|drywet|roomsize|damping|damp|time|feedback|pingpong|cutoff|freq|resonance|drive|low|mid|high|speed)\b/, 'variable.param'],
         [/\b(lowpass|highpass|bandpass|notch|peak|softclip|hardclip|tanh|cubic|asymmetric)\b/, 'type.mode'],
@@ -224,6 +239,14 @@ export function registerSatieLanguage(monaco: any) {
         for (const m of MOVEMENT_TYPES) {
           suggestions.push({ label: m, kind: CK.Enum, detail: 'movement type', insertText: m + ' ', range });
         }
+      }
+
+      // After 'place': sector → depth → height → extent
+      if (/\bplace\s+(?:\S+\s+)*\S*$/.test(textBefore)) {
+        for (const s of PLACE_SECTORS) suggestions.push({ label: s, kind: CK.Enum, detail: 'place · sector', insertText: s + ' ', range });
+        for (const d of PLACE_DEPTHS) suggestions.push({ label: d, kind: CK.Enum, detail: 'place · depth', insertText: d + ' ', range });
+        for (const h of PLACE_HEIGHTS) suggestions.push({ label: h, kind: CK.Enum, detail: 'place · height', insertText: h + ' ', range });
+        for (const x of PLACE_EXTENTS) suggestions.push({ label: x, kind: CK.Enum, detail: 'place · extent', insertText: x + ' ', range });
       }
 
       // After 'visual': visual types

@@ -148,36 +148,53 @@ color fade #ff0000 #0000ff #ffffff every 3
   {
     title: 'Movement',
     id: 'movement',
-    content: `# Spatial Movement
+    content: `# Spatial Placement & Movement
 
-Position voices in 3D space:
+The listener stands at the origin. \`place\` sets WHERE a sound sits; \`move\` sets HOW it moves.
 
-**walk** — ground plane (Y=0):
+## place — semantic position
 \`\`\`
-move walk -5 -5 5 5          - x1 z1 x2 z2
+place <sector> <depth> [height] [extent]
 \`\`\`
+- **sector** — ahead · behind · left · right · ahead-left · ahead-right · behind-left · behind-right · surround · overhead
+- **depth** — near (~1.5m) · mid (~3.5m) · far (~6m)
+- **height** — low (ground) · level (ear) · high (up)
+- **extent** — narrow (point) · wide (arc) · surround (envelop)
 
-**fly** — full 3D volume:
 \`\`\`
-move fly -5 0 -5 5 5 5       - x1 y1 z1 x2 y2 z2
-\`\`\`
-
-**fixed** — stationary position:
-\`\`\`
-move fixed 3 1 -2             - x y z
-\`\`\`
-
-**Trajectories** — predefined curves:
-\`\`\`
-move spiral -5 0 -5 5 5 5
-move orbit -3 0 -3 3 3 3
-move lorenz -5 0 -5 5 5 5
+place ahead far low wide      - a broad sea on the horizon
+place surround near           - wind all around you
+place overhead near           - gulls above
 \`\`\`
 
-**Speed & noise:**
+## move — motion archetypes (preferred)
 \`\`\`
-speed 0.5
-noise 0.3
+move static       - sits still (also the default with place + no move)
+move breathe      - barely-there sway, for near-still beds
+move drift        - slow ambient wander (wind, rain, room tone)
+move swell        - slow surge, for water
+move wander       - a ground agent (person, animal)
+move dart         - fast, erratic flyer (bird, insect)
+move circle       - circles the placed region
+move pass lr      - traverses left → right (rl = right → left)
+move approach     - moves toward the listener
+move recede       - moves away from the listener
+\`\`\`
+Add \`speed N\` or \`noise N\` to any of these.
+
+## Archetypes — match the sound to its motion
+- **Enveloping bed** (wind, rain, crowd): \`place surround …\` + \`move drift\`
+- **Directional bed** (the sea, a waterfall): \`place <sector> <depth> low wide\` + \`move swell\`
+- **Landmark** (campfire, ship's horn): \`place <sector> <depth>\` + \`move static\`
+- **Mobile agent** (person, bird, car): place + \`wander\` / \`dart\` / \`pass\`
+- **Coherence:** linked elements share a bearing — a ship sits FAR but in the SAME sector as the sea.
+
+## Low-level movement (fine control)
+\`\`\`
+move walk | move fly | move spiral | move orbit | move lorenz
+move fly speed 1to3
+move fly x -5to5 y 0to3 z -5to5     - explicit coordinate bounds
+move gen flying bird spiraling down  - AI-generated trajectory
 \`\`\``,
   },
   {

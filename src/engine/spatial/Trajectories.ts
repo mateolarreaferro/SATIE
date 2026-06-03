@@ -166,14 +166,32 @@ function generateLorenzLUT(): { xs: Float32Array; ys: Float32Array; zs: Float32A
 
 const lorenz: Trajectory = new LUTTrajectory(LUT_SIZE, generateLorenzLUT);
 
+// Linear traverses — used by the semantic `move pass/approach/recede` verbs.
+// One-way with wrap: the source crosses the placed region, then re-enters from
+// the start edge (reads as "the next one passing through"). The constant axes
+// sit at 0.5 so the line runs through the centre of the placed region.
+const lineLR: Trajectory = new AnalyticalTrajectory((t) => ({ x: t, y: 0.5, z: 0.5 }));        // left → right
+const lineRL: Trajectory = new AnalyticalTrajectory((t) => ({ x: 1 - t, y: 0.5, z: 0.5 }));    // right → left
+const lineToward: Trajectory = new AnalyticalTrajectory((t) => ({ x: 0.5, y: 0.5, z: 1 - t })); // far → near
+const lineAway: Trajectory = new AnalyticalTrajectory((t) => ({ x: 0.5, y: 0.5, z: t }));        // near → far
+
 // ── Registry ──
 
-const BUILTIN_NAMES = new Set(['spiral', 'orbit', 'lorenz']);
+// `line_*` are produced only by the semantic `move pass/approach/recede` verbs,
+// never referenced by name in scripts — kept builtin so they can't be unregistered.
+const BUILTIN_NAMES = new Set([
+  'spiral', 'orbit', 'lorenz',
+  'line_lr', 'line_rl', 'line_toward', 'line_away',
+]);
 
 const TRAJECTORY_REGISTRY: Map<string, Trajectory> = new Map([
   ['spiral', spiral],
   ['orbit', orbit],
   ['lorenz', lorenz],
+  ['line_lr', lineLR],
+  ['line_rl', lineRL],
+  ['line_toward', lineToward],
+  ['line_away', lineAway],
 ]);
 
 export function getTrajectory(name: string): Trajectory | undefined {

@@ -123,6 +123,10 @@ export class Statement {
   areaMax: Vec3 = { x: 0, y: 0, z: 0 };
   wanderHz: RangeOrValue = RangeOrValue.single(0.5); // 0-1 normalized, 0.5 = gentle drift
 
+  /** True once a region has been set by `place` (or `move` axes). Lets `place`
+   *  own the region and semantic `move` verbs own the motion, order-independently. */
+  hasPlacement: boolean = false;
+
   customTrajectoryName: string | null = null;  // for WanderType.Custom
   isGenTrajectory: boolean = false;  // true if trajectory needs generation
   genTrajectoryPrompt: string | null = null;  // description for trajectory gen

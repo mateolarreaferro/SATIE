@@ -273,12 +273,61 @@ RHYTHMIC PATTERNS (generative timing):
       pitch 0.8to1.5
       move walk x -3to3 z -3to3
 
-SPATIAL DEPTH (keep within 1–8 meters):
-  - Static: no move property needed — voice stays at origin
-  - Moving: move fly speed 2
-  - Walking: move walk speed 1to3
-  - Orbiting: move orbit speed 1to2
-  - Spiraling: move spiral speed 1 noise 0.3
+═══ SPATIAL COMPOSITION (this is what makes a scene believable) ═══
+
+You place sounds around a listener at the origin. Frame:
+  ahead = in front (+Z) · behind = back · left/right = sides · overhead = above
+  depth: near (~1.5m) / mid (~3.5m) / far (~6m)   height: low (ground) / level (ear) / high (up)
+
+Classify EACH element as one archetype, then place it accordingly:
+  - ENVELOPING BED — surrounds, no single direction (wind, rain, room tone, crowd, forest):
+      place surround near|mid   +   move drift  (or breathe for near-still). Often 2–3 voices.
+  - DIRECTIONAL BED — a broad source from one side (the sea ahead, a waterfall, traffic):
+      place <sector> <depth> low wide   +   move swell (water) or drift.
+  - LANDMARK — a fixed point of interest (campfire, fountain, clock, ship's horn, a door):
+      place <sector> <depth> [height]   +   move static.
+  - MOBILE AGENT — moves with intent (person, car, bird, insect, animal):
+      on the ground: place <sector> <depth> low + move wander.  flying: place ... high + move dart.
+      passing by: move pass lr|rl.  coming closer / leaving: move approach | recede.
+  - TRANSIENT ACCENT — occasional point events (distant bell, dog bark, lone bird call):
+      place <sector> <depth>   +   move static   (retrigger with 'every').
+
+PLACEMENT SYNTAX:
+  place <sector> <depth> [height] [extent]
+    sector: ahead behind left right ahead-left ahead-right behind-left behind-right surround overhead
+    depth: near mid far    height: low level high    extent: narrow wide surround
+  move <archetype>: static breathe drift swell wander dart circle pass[ lr|rl] approach recede
+  'place' sets WHERE a sound sits; 'move' sets HOW it moves. Both also accept 'speed N' / 'noise N'.
+
+COHERENCE — compose the whole, not just parts:
+  - Decide the scene's layout ONCE, then place every element into that one shared frame.
+  - Linked elements share a bearing: a ship sits FAR but in the SAME sector as the sea;
+    a campfire's crackle is at the SAME spot as its warmth; footsteps follow their walker.
+  - Beds anchor the space; place landmarks and agents relative to the beds.
+  - NEVER let an ambient bed (ocean, wind, rain) fly around like a bird — beds drift or sit still.
+  - Spread distinct elements across sectors and depths; keep related elements aligned.
+
+Worked layout — "a beach":
+  group sea
+      loop gen rolling ocean waves
+          place ahead mid low wide
+          move swell
+          visual trail
+  group air
+      2 * loop gen soft sea breeze
+          place surround near
+          move drift
+          visual trail
+  group gulls
+      3 * oneshot gen seagull cry every 3to8
+          place overhead near
+          move dart
+          visual trail
+  group vessel
+      oneshot gen distant ship horn every 20to40
+          place ahead far low
+          move static
+          visual sphere
 
 ═══ SYNTAX REFERENCE ═══
 
@@ -307,16 +356,15 @@ INTERPOLATION:
   volume fade 0.2 0.8 every 5 loop bounce         # oscillate
   pitch jump 0.5 1.0 1.5 every 2 loop restart     # step through values
 
-MOVEMENT (only valid types: walk, fly, spiral, orbit, lorenz, gen):
-  move walk                                        # random walk on ground (xz plane)
-  move fly                                         # random walk in 3D
-  move walk speed 2                                # walk with speed
-  move fly speed 1to3                              # fly with speed range
-  move spiral speed 1 noise 0.3                    # spiral trajectory
-  move orbit speed 1to2                            # orbit trajectory
-  move lorenz speed 2                              # lorenz attractor trajectory
-  move gen flying bird speed 1                     # AI-generated trajectory
-  Speed range is 1 to 10. DO NOT specify x/y/z bounds on walk or fly — defaults are musical.
+PLACEMENT & MOTION (prefer the semantic vocabulary above — place + move archetype):
+  place ahead far low wide                         # WHERE a sound sits (see SPATIAL COMPOSITION)
+  move drift                                       # HOW it moves (semantic archetype)
+  move pass lr                                     # a left→right traverse (rl for right→left)
+
+LOW-LEVEL MOVEMENT (still valid for fine control, but place/move archetypes are preferred):
+  move walk | move fly | move spiral | move orbit | move lorenz | move gen <description>
+  move fly speed 1to3                              # speed range 1–10
+  move fly x -5to5 y 0to3 z -5to5                  # explicit coordinate bounds (listener at origin)
 
 GROUPS (indentation defines scope; groups close by dedent — omit 'endgroup'):
   Shape:
@@ -384,10 +432,10 @@ TRAJECTORY GEN BLOCKS:
 
 ═══ COMMON MISTAKES — NEVER DO THESE ═══
 
-- NEVER use "move fixed" — there is NO "fixed" movement type. For a static voice, simply omit the move property
+- NEVER use "move fixed" — for a still sound use "move static" (or just "place ..." with no move)
 - NEVER use "random" as a keyword — it does not exist. Use ranges instead: volume 0.3to0.7, pitch 0.8to1.2
-- NEVER use movement types that don't exist. The ONLY valid types after "move" are: walk, fly, spiral, orbit, lorenz, gen, or a custom trajectory name
-- NEVER use "position" or "pos" as a movement type — for static voices, just omit the move property
+- NEVER use movement types that don't exist. Valid after "move": the archetypes (static, breathe, drift, swell, wander, dart, circle, pass, approach, recede) or the low-level types (walk, fly, spiral, orbit, lorenz, gen)
+- NEVER make an ambient bed (ocean, wind, rain, room tone) a flying mobile agent — beds use drift/swell/breathe or static, never dart/fly
 - NEVER use "goto", "gobetween", or "interpolate" — these do NOT exist. Use "fade" or "jump" for interpolation
 - NEVER use colons, equals signs, or quotes in property values
 - NEVER use parentheses in interpolation syntax — it's "fade 0 1 every 3 loop bounce", NOT "fade(0, 1)"
@@ -403,8 +451,8 @@ TRAJECTORY GEN BLOCKS:
 - NEVER change gen prompts when modifying an existing script (e.g. keep "gen gentle rain" exactly as-is). Changing gen text triggers expensive audio re-generation. Only add NEW gen voices if the user asks for new sounds.
 - Prefer ranges and count multipliers over copy-pasting statements
 - Think about musical relationships: bass is low pitch, high voices are high pitch
-- Think about spatial relationships: spread voices apart, use movement for life
-- ALWAYS add a visual property. Moving voices (walk/fly/spiral/orbit/lorenz/gen): "visual trail". Static voices: "visual sphere".
+- Think about SPATIAL relationships: classify each element's archetype, place it in the shared frame, keep linked elements on the same bearing (see SPATIAL COMPOSITION)
+- ALWAYS add a visual property. Moving voices (drift/swell/wander/dart/circle/pass/approach/recede/walk/fly/spiral/orbit/lorenz/gen): "visual trail". Still voices (move static, or place only): "visual sphere".
   Valid visual tokens: trail, sphere, cube, none. Combine them: "visual trail sphere", "visual trail cube".`;
 
 /**
@@ -488,6 +536,96 @@ export function buildEnrichedPrompt(
   return parts.join('\n');
 }
 
+// ── Scene plan — spatial layout reasoning before code gen ──
+
+/**
+ * Plan the spatial LAYOUT of a scene before writing any DSL. The model reasons
+ * in the semantic vocabulary (archetype + place + move) so every element lands
+ * in one shared, coherent frame — this is what stops "make a beach" from putting
+ * the ocean in the air and the ship on a different bearing than the sea.
+ */
+export const SCENE_PLAN_SYSTEM_PROMPT = `You are a spatial sound designer planning the LAYOUT of a soundscape before any code is written.
+
+Given a scene, list the distinct sound ELEMENTS and place each around a listener at the origin so the whole scene is coherent and believable.
+
+Frame: ahead=front (+Z), behind=back, left/right=sides, overhead=above. depth: near|mid|far. height: low|level|high.
+
+Classify each element as ONE archetype and give it a placement:
+- enveloping bed (wind, rain, room tone, crowd, forest): place "surround near" or "surround mid", move "drift" (or "breathe")
+- directional bed (the sea ahead, a waterfall, traffic from one side): place "<sector> <depth> low wide", move "swell" (water) or "drift"
+- landmark (campfire, fountain, clock, ship horn, a door): place "<sector> <depth> [height]", move "static"
+- mobile agent on the ground (person, animal): place "<sector> <depth> low", move "wander"
+- flying agent (bird, insect): place "<sector> <depth> high", move "dart". passing vehicle: move "pass lr" or "pass rl". coming/going: move "approach"/"recede"
+- transient accent (distant bell, dog bark, lone call): place "<sector> <depth>", move "static"
+
+COHERENCE: decide the layout once. Linked elements share a bearing (a ship is FAR but the SAME sector as the sea; footsteps follow their walker). Beds anchor the space. Spread distinct elements across sectors and depths.
+
+Output ONLY a JSON object — no prose, no markdown:
+{"scene":"one line on the listener's vantage point","elements":[{"name":"ocean waves","archetype":"directional bed","place":"ahead mid low wide","move":"swell"},{"name":"seagulls","archetype":"flying agent","place":"overhead near","move":"dart"},{"name":"distant ship horn","archetype":"landmark","place":"ahead far low","move":"static"}]}
+
+Rules:
+- 3 to 8 elements. Each "place" uses ONLY the sector/depth/height/extent words above. Each "move" is ONE archetype verb.
+- Keep related elements on the SAME bearing. NEVER make a bed (ocean/wind/rain) dart or fly.`;
+
+export interface ScenePlanElement {
+  name: string;
+  archetype: string;
+  place: string;
+  move: string;
+}
+
+export interface ScenePlan {
+  scene: string;
+  elements: ScenePlanElement[];
+}
+
+export async function generateScenePlan(
+  userPrompt: string,
+  provider?: AIProvider,
+): Promise<ScenePlan | null> {
+  try {
+    const p = provider ?? createProvider();
+    const raw = await callAI(
+      p,
+      SCENE_PLAN_SYSTEM_PROMPT,
+      [{ role: 'user', content: userPrompt }],
+      700,
+      0.4,
+    );
+    const cleaned = raw.trim().replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();
+    const parsed = JSON.parse(cleaned);
+    if (!parsed || !Array.isArray(parsed.elements) || parsed.elements.length === 0) return null;
+
+    const elements: ScenePlanElement[] = parsed.elements
+      .map((e: Record<string, unknown>) => ({
+        name: String(e?.name ?? '').trim(),
+        archetype: String(e?.archetype ?? '').trim(),
+        place: String(e?.place ?? '').trim(),
+        move: String(e?.move ?? '').trim(),
+      }))
+      .filter((e: ScenePlanElement) => e.name && e.place);
+
+    if (elements.length === 0) return null;
+    return { scene: String(parsed.scene ?? '').trim(), elements };
+  } catch {
+    // Planning is best-effort — fall back to direct generation on any failure.
+    return null;
+  }
+}
+
+/** Render a scene plan as a prompt block the code-gen step must honour. */
+export function formatScenePlanForPrompt(plan: ScenePlan): string {
+  const lines: string[] = [];
+  lines.push('SOUNDSTAGE PLAN — place each element exactly as laid out so the scene stays coherent:');
+  if (plan.scene) lines.push(`Scene: ${plan.scene}`);
+  for (const e of plan.elements) {
+    const moveStr = e.move ? `   move ${e.move}` : '';
+    lines.push(`- ${e.name} (${e.archetype}):   place ${e.place}${moveStr}`);
+  }
+  lines.push('Use these place/move directives for the matching voices. You may add count multipliers, gen prompts, volume/pitch variation, effects, and visuals — but keep each element on the bearing the plan gives it.');
+  return lines.join('\n');
+}
+
 // ── Compilation verifier (uses parser + fast model repair) ──
 
 const REPAIR_SYSTEM_PROMPT = `You are a Satie code repair specialist.
@@ -503,9 +641,11 @@ CRITICAL SYNTAX RULES (NO COLONS, NO QUOTES, NO EQUALS):
 - Interpolation: volume fade 0 1 every 3 OR volume fade 0.2 0.8 every 5 loop bounce OR pitch jump 0.5 1.0 1.5 every 2 loop restart
 - NEVER use goto, gobetween, or interpolate — they do NOT exist. Only "fade" and "jump"
 - Loop modes on interpolation: "loop bounce" (oscillate) or "loop restart" (cycle)
-- Movement: move walk OR move fly speed 1to3 (do NOT specify x/y/z bounds on walk or fly — use the defaults)
-- Movement types: ONLY walk, fly, spiral, orbit, lorenz, gen — NEVER "fixed", "random", "position", "pos"
-- Static voices: omit the move property entirely — voice stays at origin
+- Placement: place <sector> <depth> [height] [extent] — sector: ahead behind left right ahead-left ahead-right behind-left behind-right surround overhead; depth: near mid far; height: low level high; extent: narrow wide surround
+- Motion archetypes: move static | breathe | drift | swell | wander | dart | circle | pass [lr|rl] | approach | recede
+- Low-level movement (also valid): move walk | move fly | move fly speed 1to3 | move fly x -5to5 y 0to3 z -5to5
+- Movement types: archetypes above, or walk, fly, spiral, orbit, lorenz, gen — NEVER "fixed", "random", "position"
+- A still voice uses "move static" or just "place ..." with no move — these are VALID, do not delete them
 - Trajectories: move spiral OR move orbit OR move lorenz OR move gen flying bird
 - Trajectory gen blocks: gen name + prompt/duration/smoothing/ground/variation (indented)
 - Groups: ALWAYS give the group a name (e.g. "group ambience"). Group-level properties sit at the SAME indent as the "group" keyword, NOT indented under it. Child statements ARE indented.
@@ -571,7 +711,16 @@ export async function generateCode(
   const provider = complex ? createProvider() : createFastProvider();
   const libraryResult = checkLibrary(userPrompt, loadedSamples);
   const systemPrompt = buildSystemPrompt(loadedSamples, libraryResult);
-  const enrichedPrompt = buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
+
+  // Spatial scene plan — only for fresh, complex scene generations. Edits to an
+  // existing script already carry their placement, so we don't re-plan them.
+  let scenePlanBlock = '';
+  if (complex && !hasExistingScript) {
+    const plan = await generateScenePlan(userPrompt, provider);
+    if (plan) scenePlanBlock = formatScenePlanForPrompt(plan) + '\n\n';
+  }
+
+  const enrichedPrompt = scenePlanBlock + buildEnrichedPrompt(userPrompt, currentScript, libraryResult);
 
   const apiMessages = [
     ...conversationHistory,

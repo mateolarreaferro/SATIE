@@ -16,6 +16,11 @@ import {
   EQParams,
 } from './Statement';
 import { isTrajectoryName, isBuiltinTrajectory } from '../spatial/Trajectories';
+import {
+  SECTORS, DEPTHS, HEIGHTS, EXTENTS,
+  SEMANTIC_MOTIONS, isSemanticMotion, resolvePlacement, defaultRegionFor,
+  Sector, Depth, Height, Extent,
+} from '../spatial/Placement';
 
 export class SatieSyntaxError extends Error {
   propertyName: string | null;
@@ -61,7 +66,7 @@ const KNOWN_PROPERTIES = new Set([
   'mute', 'solo', 'randomstart', 'random_start', 'visual', 'move',
   'color', 'background', 'bg', 'alpha', 'reverb', 'delay',
   'filter', 'distortion', 'eq', 'influence', 'loopable',
-  'speed', 'noise', 'prompt', 'size',
+  'speed', 'noise', 'prompt', 'size', 'place',
 ]);
 
 /**
@@ -250,6 +255,7 @@ function parseSingle(block: string): Statement {
       case 'randomstart': s.randomStart = true; break;
       case 'visual': parseVisual(s, v); break;
       case 'move': parseMove(s, v); break;
+      case 'place': parsePlace(s, v); break;
       case 'color': parseColor(s, v); break;
       case 'background': case 'bg': parseBackground(s, v); break;
       case 'alpha': {
@@ -324,6 +330,14 @@ function parseVisual(s: Statement, v: string): void {
 
 function parseMove(s: Statement, v: string): void {
   v = v.trim();
+
+  // Semantic motion verbs (drift, dart, pass, …) — resolve to engine motion via
+  // the shared Placement table. Bounds come from a prior `place`, else defaults.
+  const verb = v.split(/\s+/)[0].toLowerCase();
+  if (isSemanticMotion(verb)) {
+    parseSemanticMove(s, verb, v.substring(verb.length).trim());
+    return;
+  }
 
   // Legacy comma-separated syntax
   if (v.includes(',')) {
@@ -662,6 +676,93 @@ function parseMove(s: Statement, v: string): void {
       'move',
       v,
     );
+  }
+}
+
+/**
+ * `place <sector> <depth> [height] [extent]` — semantic placement.
+ * Tokens are order-independent; each resolves into a coordinate region.
+ * Sets the region (areaMin/areaMax); makes the voice static unless a `move`
+ * gives it motion. `place` always owns the region, so it wins over any bounds
+ * a semantic `move` set, regardless of property order.
+ */
+function parsePlace(s: Statement, v: string): void {
+  const tokens = v.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let sector: string | null = null;
+  let depth: string | null = null;
+  let height: string | null = null;
+  let extent: string | null = null;
+
+  for (const t of tokens) {
+    if (SECTORS.has(t)) sector = t;
+    else if (DEPTHS.has(t)) depth = t;
+    else if (HEIGHTS.has(t)) height = t;
+    else if (EXTENTS.has(t)) extent = t;
+    else addWarning(`Unknown place keyword '${t}'`, -1);
+  }
+
+  const { min, max } = resolvePlacement(
+    (sector ?? 'ahead') as Sector,
+    (depth ?? 'mid') as Depth,
+    (height ?? 'level') as Height,
+    (extent ?? 'narrow') as Extent,
+  );
+  s.areaMin = min;
+  s.areaMax = max;
+  s.hasPlacement = true;
+  if (s.wanderType === WanderType.None) s.wanderType = WanderType.Fixed;
+}
+
+/**
+ * Semantic motion verb (drift/dart/pass/…) → engine motion. Sets wanderType,
+ * speed and noise from the archetype; uses the placed region for bounds, or the
+ * archetype's default region when no `place` is present. Optional `speed`/`noise`
+ * tokens override the archetype defaults; `pass` accepts a direction (lr/rl).
+ */
+function parseSemanticMove(s: Statement, verb: string, rest: string): void {
+  const spec = SEMANTIC_MOTIONS[verb];
+  let r = rest;
+  let customName = spec.customName;
+
+  // Direction for `pass` (default left→right).
+  if (verb === 'pass') {
+    const dirMatch = r.match(/^(lr|rl|left-?to-?right|right-?to-?left|leftward|rightward|left|right)\b/i);
+    if (dirMatch) {
+      const d = dirMatch[1].toLowerCase();
+      customName = (d === 'rl' || d.startsWith('right')) ? 'line_rl' : 'line_lr';
+      r = r.substring(dirMatch[0].length).trim();
+    }
+  }
+
+  // Optional noise override.
+  let noise = spec.noise;
+  const noiseMatch = r.match(/\bnoise\s+([\d.]+)/i);
+  if (noiseMatch) {
+    noise = Math.max(0, Math.min(1, parseFloat(noiseMatch[1]) || 0));
+    r = (r.substring(0, noiseMatch.index!) + r.substring(noiseMatch.index! + noiseMatch[0].length)).trim();
+  }
+
+  // Optional speed override (number or range).
+  let hz: RangeOrValue = RangeOrValue.single(spec.hz);
+  const speedMatch = r.match(/(?:at\s+)?speed\s+([\d.]+(?:to[\d.]+)?)/i);
+  if (speedMatch) {
+    hz = RangeOrValue.parse(speedMatch[1]);
+  }
+
+  s.wanderType = spec.wanderType;
+  s.noise = noise;
+  if (spec.wanderType === WanderType.Custom && customName) {
+    s.customTrajectoryName = customName;
+  }
+  if (spec.wanderType !== WanderType.Fixed) {
+    s.wanderHz = hz;
+  }
+
+  // Bounds: keep the placed region if one exists, else use the archetype default.
+  if (!s.hasPlacement) {
+    const { min, max } = defaultRegionFor(spec);
+    s.areaMin = min;
+    s.areaMax = max;
   }
 }
 
@@ -1029,6 +1130,7 @@ function flushGroup(dst: Statement[], g: GroupCtx): void {
         case 'eq': if (!s.eqParams) parseEQ(s, val); break;
         // Move and visual inheritance
         case 'move': if (s.wanderType === WanderType.None) parseMove(s, val); break;
+        case 'place': if (!s.hasPlacement) parsePlace(s, val); break;
         case 'visual': if (s.visual.length === 0) parseVisual(s, val); break;
         case 'alpha': {
           if (!s.colorAlphaInterpolation && s.staticAlpha === 1) {

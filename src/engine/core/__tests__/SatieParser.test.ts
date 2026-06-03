@@ -234,6 +234,212 @@ describe('SatieParser', () => {
   });
 
   // ──────────────────────────────────────────────
+  // Semantic placement (place + semantic move)
+  // ──────────────────────────────────────────────
+  describe('place', () => {
+    it('place sets a fixed region by sector + depth', () => {
+      const s = parseOne('loop ship\n  place ahead far');
+      expect(s.wanderType).toBe(WanderType.Fixed);
+      expect(s.hasPlacement).toBe(true);
+      // ahead = +Z, centered on x
+      expect(s.areaMin.z).toBeGreaterThan(0);
+      expect(s.areaMin.x).toBeLessThan(0);
+      expect(s.areaMax.x).toBeGreaterThan(0);
+    });
+
+    it('ahead places in front (+Z), behind places back (-Z)', () => {
+      const ahead = parseOne('loop a\n  place ahead mid');
+      const behind = parseOne('loop b\n  place behind mid');
+      expect(ahead.areaMin.z).toBeGreaterThan(0);
+      expect(behind.areaMax.z).toBeLessThan(0);
+    });
+
+    it('left places to -X, right to +X', () => {
+      const left = parseOne('loop a\n  place left mid');
+      const right = parseOne('loop b\n  place right mid');
+      expect(left.areaMax.x).toBeLessThan(0);
+      expect(right.areaMin.x).toBeGreaterThan(0);
+    });
+
+    it('depth controls distance: far is farther than near', () => {
+      const near = parseOne('loop a\n  place ahead near');
+      const far = parseOne('loop b\n  place ahead far');
+      expect(far.areaMin.z).toBeGreaterThan(near.areaMax.z);
+    });
+
+    it('height low sits near the ground, high sits up', () => {
+      const low = parseOne('loop a\n  place ahead mid low');
+      const high = parseOne('loop b\n  place ahead mid high');
+      expect(low.areaMax.y).toBeLessThanOrEqual(0.5);
+      expect(high.areaMin.y).toBeGreaterThanOrEqual(1.5);
+    });
+
+    it('surround envelops the listener on both sides', () => {
+      const s = parseOne('loop wind\n  place surround near');
+      expect(s.areaMin.x).toBeLessThan(0);
+      expect(s.areaMax.x).toBeGreaterThan(0);
+      expect(s.areaMin.z).toBeLessThan(0);
+      expect(s.areaMax.z).toBeGreaterThan(0);
+    });
+
+    it('overhead sits up high and centered', () => {
+      const s = parseOne('loop gulls\n  place overhead near');
+      expect(s.areaMin.y).toBeGreaterThanOrEqual(2);
+      expect(Math.abs(s.areaMin.x)).toBeLessThanOrEqual(1.5);
+    });
+
+    it('wide extent spans a broad arc; narrow is a small box', () => {
+      const wide = parseOne('loop a\n  place ahead far wide');
+      const narrow = parseOne('loop b\n  place ahead far narrow');
+      const wideW = wide.areaMax.x - wide.areaMin.x;
+      const narrowW = narrow.areaMax.x - narrow.areaMin.x;
+      expect(wideW).toBeGreaterThan(narrowW);
+    });
+
+    it('tokens are order-independent', () => {
+      const a = parseOne('loop a\n  place ahead far low wide');
+      const b = parseOne('loop b\n  place wide low far ahead');
+      expect(b.areaMin).toEqual(a.areaMin);
+      expect(b.areaMax).toEqual(a.areaMax);
+    });
+
+    it('coherence: two elements placed ahead share the same bearing', () => {
+      // The beach bug: ocean and ship both seaward should agree on direction.
+      const ocean = parseOne('loop ocean\n  place ahead far low wide');
+      const ship = parseOne('loop ship\n  place ahead far');
+      // Both in front (+Z) and centered on x (sign-symmetric) — same bearing.
+      expect(ocean.areaMin.z).toBeGreaterThan(0);
+      expect(ship.areaMin.z).toBeGreaterThan(0);
+      const oceanCenterX = (ocean.areaMin.x + ocean.areaMax.x) / 2;
+      const shipCenterX = (ship.areaMin.x + ship.areaMax.x) / 2;
+      expect(oceanCenterX).toBeCloseTo(0, 5);
+      expect(shipCenterX).toBeCloseTo(0, 5);
+    });
+  });
+
+  describe('semantic move verbs', () => {
+    it('drift is a slow fly', () => {
+      const s = parseOne('loop bed\n  move drift');
+      expect(s.wanderType).toBe(WanderType.Fly);
+      expect(s.wanderHz.min).toBeCloseTo(0.2, 5);
+    });
+
+    it('dart is a fast, noisy fly', () => {
+      const s = parseOne('loop bird\n  move dart');
+      expect(s.wanderType).toBe(WanderType.Fly);
+      expect(s.wanderHz.min).toBeGreaterThan(1);
+      expect(s.noise).toBeGreaterThan(0.3);
+    });
+
+    it('wander is a ground walk (y pinned to 0)', () => {
+      const s = parseOne('loop steps\n  move wander');
+      expect(s.wanderType).toBe(WanderType.Walk);
+      expect(s.areaMin.y).toBe(0);
+    });
+
+    it('static is fixed', () => {
+      const s = parseOne('loop bell\n  move static');
+      expect(s.wanderType).toBe(WanderType.Fixed);
+    });
+
+    it('circle maps to orbit', () => {
+      const s = parseOne('loop a\n  move circle');
+      expect(s.wanderType).toBe(WanderType.Orbit);
+    });
+
+    it('pass uses a line trajectory; direction picks lr/rl', () => {
+      const lr = parseOne('loop car\n  move pass lr');
+      const rl = parseOne('loop car\n  move pass rl');
+      expect(lr.wanderType).toBe(WanderType.Custom);
+      expect(lr.customTrajectoryName).toBe('line_lr');
+      expect(rl.customTrajectoryName).toBe('line_rl');
+    });
+
+    it('approach and recede use depth-axis lines', () => {
+      const approach = parseOne('loop a\n  move approach');
+      const recede = parseOne('loop b\n  move recede');
+      expect(approach.customTrajectoryName).toBe('line_toward');
+      expect(recede.customTrajectoryName).toBe('line_away');
+    });
+
+    it('speed overrides the archetype default', () => {
+      const s = parseOne('loop a\n  move drift speed 2');
+      expect(s.wanderHz.min).toBeCloseTo(2, 5);
+    });
+  });
+
+  describe('place + move composition', () => {
+    it('place owns the region, move owns the motion (place first)', () => {
+      const s = parseOne('loop ocean\n  place ahead far low wide\n  move swell');
+      expect(s.wanderType).toBe(WanderType.Fly); // swell motion
+      expect(s.areaMin.z).toBeGreaterThan(0);     // ahead-far region from place
+      expect(s.hasPlacement).toBe(true);
+    });
+
+    it('place wins even when written after move', () => {
+      const placeFirst = parseOne('loop ocean\n  place ahead far low wide\n  move swell');
+      const moveFirst = parseOne('loop ocean\n  move swell\n  place ahead far low wide');
+      expect(moveFirst.areaMin).toEqual(placeFirst.areaMin);
+      expect(moveFirst.areaMax).toEqual(placeFirst.areaMax);
+      expect(moveFirst.wanderType).toBe(WanderType.Fly);
+    });
+
+    it('semantic move without place uses an archetype default region', () => {
+      const s = parseOne('loop wind\n  move drift');
+      // drift default is an enveloping region around the listener
+      expect(s.areaMin.x).toBeLessThan(0);
+      expect(s.areaMax.x).toBeGreaterThan(0);
+    });
+
+    it('beach scene: ocean is a low front bed (not flying) and the ship shares its bearing', () => {
+      // The original bug: "make a beach" had the ocean flying like a bird and the
+      // ship on a different heading than the sea. This locks in the fix.
+      const script = [
+        'group sea',
+        '    loop gen rolling ocean waves',
+        '        place ahead mid low wide',
+        '        move swell',
+        'group gulls',
+        '    3 * oneshot gen seagull cry every 3to8',
+        '        place overhead near',
+        '        move dart',
+        'group vessel',
+        '    oneshot gen distant ship horn every 20to40',
+        '        place ahead far low',
+        '        move static',
+      ].join('\n');
+      const stmts = parse(script + '\n');
+      const center = (s: any) => ({
+        x: (s.areaMin.x + s.areaMax.x) / 2,
+        y: (s.areaMin.y + s.areaMax.y) / 2,
+        z: (s.areaMin.z + s.areaMax.z) / 2,
+      });
+      const ocean = stmts.find((s) => s.clip.includes('ocean'))!;
+      const ship = stmts.find((s) => s.clip.includes('ship'))!;
+      const gulls = stmts.find((s) => s.clip.includes('seagull'))!;
+
+      // Ocean is a low bed that swells — NOT an erratic flyer up in the air.
+      expect(ocean.wanderType).toBe(WanderType.Fly); // swell = gentle Fly
+      expect(center(ocean).y).toBeLessThan(0.5);      // sits low, near the ground
+      expect(ocean.wanderHz.min).toBeLessThan(0.3);   // slow, not darting
+
+      // Ocean and ship are both seaward (+Z) on the same bearing (x ≈ 0)...
+      expect(center(ocean).z).toBeGreaterThan(0);
+      expect(center(ship).z).toBeGreaterThan(0);
+      expect(Math.abs(center(ocean).x)).toBeLessThan(0.5);
+      expect(Math.abs(center(ship).x)).toBeLessThan(0.5);
+      // ...with the ship farther out than the surf line.
+      expect(center(ship).z).toBeGreaterThan(center(ocean).z);
+      expect(ship.wanderType).toBe(WanderType.Fixed);
+
+      // Gulls dart overhead.
+      expect(gulls.wanderType).toBe(WanderType.Fly);
+      expect(center(gulls).y).toBeGreaterThan(1.5);
+      expect(gulls.noise).toBeGreaterThan(0.3);
+    });
+  });
+
+  // ──────────────────────────────────────────────
   // Color
   // ──────────────────────────────────────────────
   describe('color', () => {
