@@ -5,7 +5,53 @@ should read first. Durable cross-session lessons live in `docs/lessons.md`.
 
 ---
 
-# Latest — Routing reliability & first-load performance (2026-05-26)
+# Latest — Wiki layer: natural-language mirror of the system (2026-05-30)
+
+Added `docs/wiki/` — a descriptive, plain-English mirror of the codebase + the Satie DSL
+(the "intermediate representation for the human" so understanding survives agent-driven
+change). It's the fourth doc layer: `CLAUDE.md` (map), `.claude/rules/` (prescriptive),
+`docs/lessons.md`+this file (lessons/state), and now `docs/wiki/` (descriptive).
+
+## What shipped
+
+| Piece | Files |
+|-------|-------|
+| 42 wiki pages (1:1-ish with subsystems/heavy files), one per `_index`/module/big file | `docs/wiki/**` (engine, dsl, lib, ui, api, data) |
+| Freshness **gate** — coverage/staged/drift/stamp modes; builds a `source→page` map from each page's `sources:` frontmatter | `scripts/wiki-check.ts` (zero deps, run via `tsx`) |
+| Pre-commit hook (blocks a `src/**`/`api/**` edit unless its covering page is co-staged; auto-stamps `synced_sha`) | `.githooks/pre-commit`, `scripts/install-hooks.mjs` (installed via `prepare` → `core.hooksPath`) |
+| CI gate + scripts + `tsx` dep | `.github/workflows/ci.yml` (`npm run wiki:check`), `package.json` |
+| Page contract + front door + agent rule + CLAUDE.md section | `docs/wiki/_conventions.md`, `docs/wiki/00-overview.md`, `.claude/rules/wiki.md`, `CLAUDE.md` |
+
+The generation was a one-shot multi-agent workflow (`scripts/wiki-generate.workflow.js`,
+40 agents, one per page reading its real sources). Re-runnable to regenerate.
+
+## How it works (one rule)
+
+Change a file under `src/**`/`api/**` → update its covering wiki page **in the same
+commit**. Find the page via `npm run wiki:gate` (it names it) or the page's `sources:`.
+Coverage is a hard CI fail; drift is reporting-only (a secondary page surfaces there,
+since co-staging only requires one covering page). Escapes: `[skip-wiki]` in the commit
+message, or `--no-verify`. Never hand-edit `synced_sha`/`synced` — the hook stamps them.
+
+## Verified
+
+- `npm run wiki:check` green: **all 103 source files covered, no drift, no dangling sources**.
+- Gate proven end-to-end: unpaired edit blocks; co-staged allows + auto-stamps; `[skip-wiki]`
+  escapes; new uncovered file fails coverage. (4/4.)
+- 290 internal wiki links resolve; spot-checked `engine/parser.md` line refs against source.
+- `npm run build` clean, `npm run test` 258/258. No runtime `src/**` changes.
+
+## State / next
+
+- On branch `wiki-layer`, **not committed** (working tree only) — user commits.
+- To keep pages fresh going forward the gate does the work; when a page's content (not its
+  sources) is edited, `synced_sha` is unaffected (hash is of sources).
+- Optional follow-ups (not done): a `/update-wiki` skill to regenerate a page on demand;
+  per-user-sketch summaries.
+
+---
+
+# Prior — Routing reliability & first-load performance (2026-05-26)
 
 User reported: on first open of satie.live, clicking a nav tab changed the URL but
 the page didn't render ("link appears to change, nothing happens"); after the first

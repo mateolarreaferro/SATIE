@@ -1,0 +1,27 @@
+---
+description: Keep docs/wiki (the natural-language mirror of the code + Satie DSL) in sync when source files change
+globs:
+  - "src/**"
+  - "api/**"
+  - "docs/wiki/**"
+alwaysApply: true
+---
+
+# Keep the wiki in sync with the code
+
+`docs/wiki/` is a natural-language mirror of the codebase + the Satie DSL. Each page lists
+the source files it documents in its `sources:` frontmatter.
+
+**When you change any file under `src/**` or `api/**`, update its covering `docs/wiki/`
+page in the SAME commit.**
+
+- Find the page: run `npm run wiki:gate` (it names the page to edit) or search
+  `docs/wiki/**` for the file path inside a `sources:` block.
+- New source file → add it to the best-fit page's `sources:`, or `npm run wiki:check`
+  (and CI) fails with "no wiki page".
+- Follow the page template + frontmatter in `docs/wiki/_conventions.md`.
+- Never hand-edit `synced_sha` / `synced` — a pre-commit hook stamps them.
+- Doc-irrelevant change (pure rename/formatting)? Put `[skip-wiki]` in the commit message.
+
+Enforced by a pre-commit hook (`npm run wiki:gate`) and CI (`npm run wiki:check`). Update
+the page proactively while you edit — don't wait for the hook to block you.

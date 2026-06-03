@@ -1,0 +1,4 @@
+#!/bin/sh
+# Satie wiki freshness gate: a staged source change must update its wiki page.
+# Escapes: [skip-wiki] in the commit message, or `git commit --no-verify`.
+exec npm run --silent wiki:gate

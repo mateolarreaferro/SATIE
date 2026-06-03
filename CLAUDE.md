@@ -11,7 +11,26 @@ npm run dev          # Start dev server
 npm run build        # TypeScript check + production build
 npm run test         # Run all tests once
 npm run test:watch   # Tests in watch mode
+npm run wiki:check   # Verify the wiki mirrors the code (coverage + drift)
 ```
+
+## Wiki layer (`docs/wiki/`)
+
+`docs/wiki/` is a **natural-language mirror of the codebase + the Satie DSL** — the
+intermediate representation for humans, so understanding of the system survives
+agent-driven change. Each page declares the source files it documents in its `sources:`
+frontmatter; a `source → page` map drives a commit gate.
+
+**The one rule:** when you change a file under `src/**` or `api/**`, update its covering
+wiki page in the **same commit**. A pre-commit hook (`npm run wiki:gate`) blocks
+otherwise and names the page to edit; CI runs `npm run wiki:check` (coverage is a hard
+fail). New source files must be added to a page's `sources:`. Escape a genuinely
+doc-irrelevant change with `[skip-wiki]` in the commit message. See
+`docs/wiki/_conventions.md` for the page template and gate details. Start at
+`docs/wiki/00-overview.md`.
+
+This is the **descriptive** layer; keep prescriptive do/don't rules in `.claude/rules/`,
+durable lessons in `docs/lessons.md`, and session state in `docs/claude-handoff.md`.
 
 ## Project Structure
 

@@ -27,5 +27,8 @@ jobs:
       - name: Test
         run: npm run test
 
+      - name: Wiki coverage + drift
+        run: npm run wiki:check
+
       - name: Build
         run: npm run build
